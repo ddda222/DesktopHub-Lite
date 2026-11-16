@@ -27,7 +27,7 @@ export interface HostCommandMap {
 
   list_clipboard_entries: { input: { query?: string; group?: string }; output: ClipItem[] }
   get_clipboard_entry: { input: { id: string }; output: ClipItem }
-  copy_clipboard_entry: { input: { id: string }; output: null }
+  copy_clipboard_entry: { input: { id: string; formattedText?: string }; output: null }
   delete_clipboard_entry: { input: { id: string }; output: null }
   clear_clipboard_entries: { input: Record<string, never>; output: null }
   set_clipboard_paused: { input: { paused: boolean }; output: null }

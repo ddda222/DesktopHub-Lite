@@ -12,6 +12,7 @@ mod clipboard;
 mod clipboard_service;
 mod desktop_support;
 mod desktop_features;
+mod file_shelf;
 mod icons;
 mod launcher;
 mod logging;
@@ -56,6 +57,7 @@ pub struct AppState {
     ui: UiStateHandle,
     windows: WindowsHandle,
     clipboard: Mutex<ClipboardIndex>,
+    file_shelf: Mutex<file_shelf::ShelfIndex>,
     translation: Mutex<TranslationSettings>,
     running: AtomicBool,
     translation_cancel: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
@@ -94,6 +96,9 @@ fn hide_window(app: &AppHandle, label: &str) {
 }
 
 fn show_window(app: &AppHandle, label: &str) {
+    if label == windows::BAR && app.try_state::<AppState>().is_some_and(|state| state.ui.snapshot().fullscreen_suppressed) {
+        return;
+    }
     if let Some(window) = app.get_webview_window(label) {
         if let Err(error) = window.show() {
             log_warn!("显示窗口 {label} 失败：{error}");
@@ -137,6 +142,7 @@ fn ui_state(state: State<'_, AppState>) -> UiState {
 #[tauri::command]
 fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> UiState {
     let state = app.state::<AppState>();
+    if expanded && state.ui.snapshot().fullscreen_suppressed { return state.ui.snapshot(); }
     let next = state.ui.update(|ui| {
         ui.island_expanded = expanded;
         ui.panel = if expanded && ui.island_page != state::PANEL_APPLICATIONS {
@@ -169,6 +175,7 @@ fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Resu
     if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
     let state = app.state::<AppState>();
     let previous = state.ui.snapshot();
+    if previous.fullscreen_suppressed { return Ok(previous); }
     let next = state.ui.update(|ui| {
         ui.island_page = page.clone();
         ui.island_expanded = true;
@@ -202,6 +209,9 @@ fn close_translation_window(app: AppHandle) {
 
 #[tauri::command]
 fn toggle_panel(app: AppHandle, panel: String) -> Result<UiState, String> {
+    if app.state::<AppState>().ui.snapshot().fullscreen_suppressed {
+        return Ok(app.state::<AppState>().ui.snapshot());
+    }
     let allowed = [PANEL_CLIPBOARD, PANEL_TRANSLATION, PANEL_CATEGORY, PANEL_OVERFLOW];
     if !allowed.contains(&panel.as_str()) {
         return Err(format!("未知弹层：{panel}"));
@@ -277,12 +287,20 @@ fn close_settings(app: AppHandle) -> UiState {
 
 /// 界面量出真实尺寸后回调，让图标条窗口始终等于图标条本身。
 #[tauri::command]
-fn set_bar_size(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+fn set_bar_size(app: AppHandle, width: f64, height: f64, regions: Option<Vec<windows::BarRegion>>) -> Result<(), String> {
     if !width.is_finite() || !height.is_finite() || !(140.0..=1600.0).contains(&width) || !(14.0..=1200.0).contains(&height) {
         return Err("灵动岛尺寸无效".into());
     }
+    let regions = regions.unwrap_or_default();
+    if regions.len() > 2 || regions.iter().any(|r| {
+        ![r.x, r.y, r.width, r.height, r.radius].iter().all(|n| n.is_finite()) ||
+        r.x < 0.0 || r.y < 0.0 || r.width <= 0.0 || r.height <= 0.0 ||
+        r.x + r.width > width + 1.0 || r.y + r.height > height + 1.0 ||
+        r.radius < 0.0 || r.radius > r.width.min(r.height) / 2.0
+    }) { return Err("灵动岛可见区域无效".into()); }
     let state = app.state::<AppState>();
     state.windows.set_bar_size(width, height);
+    state.windows.set_bar_regions(regions);
     windows::place_bar(&app, &state.windows);
     Ok(())
 }
@@ -972,6 +990,7 @@ pub fn run() {
                 .read(translation::SETTINGS_FILE)
                 .unwrap_or_default();
             let prefs: state::UiPreferences = store.read(UI_PREFS_FILE).unwrap_or_default();
+            let file_shelf = store.read(file_shelf::INDEX_FILE).unwrap_or_default();
             let paused = clipboard.paused;
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
@@ -999,6 +1018,7 @@ pub fn run() {
                 }),
                 windows: WindowsHandle::new(window_state),
                 clipboard: Mutex::new(clipboard),
+                file_shelf: Mutex::new(file_shelf),
                 translation: Mutex::new(translation),
                 running: AtomicBool::new(true),
                 translation_cancel: Mutex::new(std::collections::HashMap::new()),
@@ -1104,6 +1124,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            file_shelf::list_shelf_files,
+            file_shelf::add_shelf_files,
+            file_shelf::remove_shelf_files,
+            file_shelf::pick_shelf_files,
+            file_shelf::reveal_shelf_file,
+            file_shelf::drag_shelf_files,
             app_info,
             ui_state,
             set_island_expanded,

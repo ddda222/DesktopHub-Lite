@@ -131,6 +131,18 @@ pub fn start(app: AppHandle) {
                     }
                 }
             }
+            // 用户从任务栏、托盘或快捷键自行打开微信，也应视为已经查看。
+            // 只判断微信主窗口进入前台，不推断单条消息的已读或未读数量。
+            if enabled && state.ui.snapshot().wechat_attention {
+                let foreground = unsafe { GetForegroundWindow() };
+                if has_main_window_shape(foreground)
+                    && unsafe { IsWindowVisible(foreground).as_bool() && !IsIconic(foreground).as_bool() }
+                    && is_wechat(process_id(foreground))
+                {
+                    clear_wechat_attention(app.clone(), app.state::<AppState>());
+                    last_flash = None;
+                }
+            }
             std::thread::sleep(Duration::from_millis(85));
         }
         if let Some((hwnd, _)) = hook {

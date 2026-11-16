@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
 import type { ClipItem } from '@/lib/desktop/types'
+import { formatJson } from './format-json'
 import {
   activeClip,
   assignClipGroup,
@@ -27,6 +28,41 @@ const searchEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 
 const detailClip = computed(() => activeClip.value)
+const formattedText = ref<string | null>(null)
+const formattedView = ref(false)
+const formatError = ref('')
+const showLineNumbers = ref(true)
+const wrapLines = ref(true)
+const previewText = computed(() => formattedView.value && formattedText.value !== null
+  ? formattedText.value : detailClip.value?.text ?? '')
+const previewLines = computed(() => previewText.value.split(/\r\n|\r|\n/))
+
+function showOriginal(): void {
+  formattedView.value = false
+  formatError.value = ''
+}
+
+function showFormattedJson(): void {
+  if (detailClip.value?.kind !== 'text') return
+  try {
+    formattedText.value = formatJson(detailClip.value.text ?? '')
+    formattedView.value = true
+    formatError.value = ''
+  } catch {
+    formattedView.value = false
+    formattedText.value = null
+    formatError.value = '这条内容不是有效的 JSON，已保留原文。'
+  }
+}
+
+function onCopyFormatted(): void {
+  if (detailClip.value && formattedText.value !== null) void copyClip(detailClip.value, formattedText.value)
+}
+
+watch([() => detailClip.value?.id, () => detailClip.value?.text], () => {
+  formattedText.value = null
+  showOriginal()
+})
 const noteDraft = ref('')
 const savingNote = ref(false)
 const selecting = ref(false)
@@ -82,7 +118,7 @@ async function saveNote(clip: ClipItem, favorite = clip.favorite ?? false): Prom
   finally { savingNote.value = false }
 }
 
-watch(() => detailClip.value?.id, () => { noteDraft.value = detailClip.value?.note ?? '' })
+watch(() => detailClip.value?.id, () => { noteDraft.value = detailClip.value?.note ?? '' }, { immediate: true })
 
 /** 文件缺失或没有可用地址时都不渲染 <img>，避免出现破图 */
 function isImageBroken(clip: ClipItem | null): boolean {
@@ -190,7 +226,7 @@ watch(
 
 <template>
   <div class="pop" role="dialog" aria-label="剪贴板历史" @keydown="onKeydown">
-    <header class="head">
+    <header v-if="!detailClip" class="head">
       <div class="search">
         <Icon class="search-icon" name="search" :size="14" />
         <input
@@ -221,7 +257,7 @@ watch(
       </button>
     </header>
 
-    <div class="chips" role="group" aria-label="按分组筛选">
+    <div v-if="!detailClip" class="chips" role="group" aria-label="按分组筛选">
       <button
         v-for="group in groupFilters"
         :key="group"
@@ -260,7 +296,18 @@ watch(
         <span class="detail-meta">{{ detailClip.group }} · {{ relativeTime(detailClip.copiedAt) }}</span>
       </div>
 
-      <div class="detail-body scroll-y">
+      <div v-if="detailClip.kind === 'text'" class="preview-controls" aria-label="开发预览选项">
+        <div class="preview-modes" role="group" aria-label="文本预览方式">
+          <button class="chip" type="button" :aria-pressed="!formattedView" :class="{ 'is-on': !formattedView }" @click="showOriginal">原文</button>
+          <button class="chip" type="button" :aria-pressed="formattedView" :class="{ 'is-on': formattedView }" @click="showFormattedJson">JSON 格式化</button>
+        </div>
+        <label><input v-model="showLineNumbers" type="checkbox" />行号</label>
+        <label><input v-model="wrapLines" type="checkbox" />自动换行</label>
+      </div>
+      <p v-if="formatError" class="format-error" role="status">{{ formatError }}</p>
+
+      <div class="detail-body scroll-y" :class="{ 'code-body': detailClip.kind === 'text', 'no-wrap': !wrapLines }"
+        :tabindex="detailClip.kind === 'text' ? 0 : undefined" :aria-label="detailClip.kind === 'text' ? '代码预览' : undefined">
         <template v-if="detailClip.kind === 'image'">
           <div v-if="isImageBroken(detailClip)" class="detail-missing">
             <Icon name="image" :size="22" />
@@ -274,7 +321,12 @@ watch(
             :alt="`剪贴板图片 ${detailClip.width ?? 0} × ${detailClip.height ?? 0}`"
           />
         </template>
-        <pre v-else class="detail-text">{{ detailClip.text || '（空白文本）' }}</pre>
+        <div v-else class="code-lines" :class="{ numbered: showLineNumbers }" :style="{ '--line-number-width': `${String(previewLines.length).length + 1}ch` }">
+          <div v-for="(line, index) in previewLines" :key="index" class="code-line">
+            <span v-if="showLineNumbers" class="line-number" :data-line="index + 1" aria-hidden="true" />
+            <span class="line-text">{{ line }}</span>
+          </div>
+        </div>
       </div>
 
       <div class="management">
@@ -305,12 +357,16 @@ watch(
           翻译这条
         </button>
         <button
+          v-if="detailClip.kind === 'text' && formattedView && formattedText !== null"
+          class="btn btn-ghost" type="button" @click="onCopyFormatted"
+        >复制格式化结果</button>
+        <button
           class="btn btn-primary"
           type="button"
           :disabled="isImageBroken(detailClip)"
           @click="onCopy(detailClip)"
         >
-          复制
+          {{ detailClip.kind === 'text' ? '复制原文' : '复制' }}
         </button>
       </div>
     </section>
@@ -386,7 +442,7 @@ watch(
       </div>
     </template>
 
-    <footer class="foot">方向键选择 · Enter 复制 · Esc 关闭</footer>
+    <footer class="foot">{{ detailClip?.kind === 'text' ? '格式化仅改变预览，原文始终保留' : detailClip ? 'Esc 返回列表' : '方向键选择 · Enter 复制 · Esc 关闭' }}</footer>
   </div>
 </template>
 
@@ -851,16 +907,21 @@ watch(
   border-radius: var(--r-card);
 }
 
-.detail-text {
-  margin: 0;
-  font-family: var(--font-sans);
-  font-size: var(--text-base);
-  line-height: 1.65;
-  color: var(--text);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
-}
+.preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.preview-modes { display: flex; gap: 6px; margin-right: auto; }
+.preview-controls label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.preview-controls input { margin: 0; accent-color: var(--accent); }
+.format-error { margin: 0 0 8px; color: var(--danger); font-size: 12px; }
+.detail-body.code-body { flex: 0 1 auto; min-height: 90px; max-height: 224px; overflow: auto; padding: 10px 8px; }
+.code-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.code-lines { font-family: var(--font-mono); font-size: 12px; line-height: 1.75; tab-size: 4; color: var(--text); }
+.code-line { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 1.75em; }
+.numbered .code-line { grid-template-columns: var(--line-number-width) minmax(0, 1fr); column-gap: 12px; }
+.line-number { text-align: right; color: var(--text-3); user-select: none; }
+.line-number::before { content: attr(data-line); }
+.line-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.no-wrap .code-lines { width: max-content; min-width: 100%; }
+.no-wrap .line-text { white-space: pre; overflow-wrap: normal; }
 
 .detail-img {
   display: block;
@@ -900,6 +961,7 @@ watch(
 }
 
 .detail-actions {
+  flex-wrap: wrap;
   flex: none;
   display: flex;
   align-items: center;
@@ -912,6 +974,7 @@ watch(
 }
 
 .btn {
+  white-space: nowrap;
   height: 28px;
   padding: 0 12px;
   border: 1px solid var(--line);

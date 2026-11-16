@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" fill="none">
+  <defs>
+    <linearGradient id="sky" x2="1600" y2="1000" gradientUnits="userSpaceOnUse"><stop stop-color="#cbdaf5"/><stop offset=".52" stop-color="#c1c7ed"/><stop offset="1" stop-color="#e9dce7"/></linearGradient>
+    <linearGradient id="sheet" x1="650" y1="90" x2="850" y2="850" gradientUnits="userSpaceOnUse"><stop stop-color="#e8eafb"/><stop offset=".45" stop-color="#d2d9f4"/><stop offset="1" stop-color="#a4bbdf"/></linearGradient>
+    <linearGradient id="lower" x1="900" y1="570" x2="1300" y2="1100" gradientUnits="userSpaceOnUse"><stop stop-color="#b7c9ed"/><stop offset=".55" stop-color="#d3c8ed"/><stop offset="1" stop-color="#f5e6df"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-40%" width="140%" height="180%"><feGaussianBlur stdDeviation="24"/></filter>
+  </defs>
+  <path fill="url(#sky)" d="M0 0h1600v1000H0z"/>
+  <path d="M-120 95C170 490 470 790 900 570S1370 130 1720-110" stroke="#737fae" stroke-opacity=".24" stroke-width="36" filter="url(#shadow)"/>
+  <path d="M-120-80H1720V-30C1410 130 1220 440 920 560 520 760 170 480-120 110Z" fill="url(#sheet)"/>
+  <path d="M-120 110C170 480 520 760 920 560S1410 130 1720-30" stroke="#f4f6ff" stroke-opacity=".82" stroke-width="2"/>
+  <path d="M-100 1120C330 590 920 850 1680 430V1120Z" fill="url(#lower)"/>
+  <path d="M-100 1120C330 590 920 850 1680 430" stroke="#fff" stroke-opacity=".6" stroke-width="2"/>
+</svg>

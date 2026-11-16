@@ -50,7 +50,7 @@ import type {
   TranslationSettings
 } from '@/lib/desktop/types'
 
-export type PanelName = 'clipboard' | 'translation' | 'category' | 'overflow' | null
+export type PanelName = 'clipboard' | 'translation' | 'files' | 'category' | 'overflow' | null
 export type SettingsSection = 'apps' | 'clipboard' | 'translation' | 'general'
 
 export const state = reactive({
@@ -673,18 +673,17 @@ export async function importShortcuts(categoryId?: string): Promise<void> {
 
 /* ---------- 剪贴板 ---------- */
 
-export async function copyClip(clip: ClipItem): Promise<void> {
+export async function copyClip(clip: ClipItem, formattedText?: string): Promise<void> {
   if (clip.imageMissing) {
     pushToast('图片文件缺失，无法复制', 'error')
     return
   }
   if (!isDesktop) {
-    pushToast('已写入系统剪贴板（浏览器样稿，不会真的写入）', 'success')
+    pushToast(`样稿：已模拟复制${formattedText !== undefined ? '格式化结果' : clip.kind === 'image' ? '图片' : '原文'}，未写入系统剪贴板`, 'info')
     return
   }
   try {
-    await invokeHost('copy_clipboard_entry', { id: clip.id })
-    pushToast('已复制到剪贴板', 'success')
+    await invokeHost('copy_clipboard_entry', { id: clip.id, formattedText })
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '复制失败，可重试', 'error')
   }
@@ -847,7 +846,6 @@ export async function copyTranslation(): Promise<void> {
   }
   try {
     await invokeHost('copy_translation_result', { text: result.text })
-    pushToast('译文已复制', 'success')
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '复制失败', 'error')
   }

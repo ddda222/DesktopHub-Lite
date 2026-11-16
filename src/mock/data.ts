@@ -60,6 +60,16 @@ const minute = 60_000
 
 export const clips: ClipItem[] = [
   {
+    id: 'clip-dev-json', kind: 'text', group: '代码', note: '接口响应样例', favorite: true,
+    text: '{"requestId":9007199254740993,"code":200,"data":{"name":"示例项目","enabled":true,"roles":["developer","reviewer"],"items":[]},"message":"success"}',
+    copiedAt: now - minute
+  },
+  {
+    id: 'clip-dev-sql', kind: 'text', group: '代码', note: 'SQL 查询样例',
+    text: "SELECT id, project_name, created_at\nFROM demo_project\nWHERE status = 'active'\nORDER BY created_at DESC;",
+    copiedAt: now - minute * 2
+  },
+  {
     id: 'clip-01',
     kind: 'text',
     text: '重构说明确认点：图标条常驻、剪贴板弹层展开、单击记录只复制到系统剪贴板，不再注入 Ctrl+V。',

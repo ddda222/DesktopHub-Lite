@@ -51,7 +51,7 @@ export function defaultIslandAppearance(): IslandAppearance {
 export interface UiState {
   islandExpanded: boolean
   islandAnchor: string
-  islandPage: 'applications' | 'clipboard' | 'translation'
+  islandPage: 'applications' | 'clipboard' | 'translation' | 'files'
   islandHoverMs: number
   islandLeaveMs: number
   islandReducedMotion: boolean
@@ -61,7 +61,7 @@ export interface UiState {
   wechatStatus: string
   wechatAttention: boolean
   wechatEvent: number
-  panel: 'clipboard' | 'translation' | 'category' | 'overflow' | null
+  panel: 'clipboard' | 'translation' | 'files' | 'category' | 'overflow' | null
   settingsOpen: boolean
   paused: boolean
   /** 图标条当前分类；弹层窗口也按这个分类展示 */
@@ -130,9 +130,17 @@ export async function dismissSettings(): Promise<void> {
  * 图标条窗口按内容自适应尺寸：窗口等于图标条本身，透明区域才不会挡住桌面点击。
  * 只在 bar 窗口调用。
  */
-export async function resizeBar(width: number, height: number): Promise<void> {
+export interface BarRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+  radius: number
+}
+
+export async function resizeBar(width: number, height: number, regions?: BarRegion[]): Promise<void> {
   if (!isDesktop) return
-  await invokeHost('set_bar_size', { width: Math.round(width), height: Math.round(height) })
+  await invokeHost('set_bar_size', { width: Math.round(width), height: Math.round(height), regions })
 }
 
 /**

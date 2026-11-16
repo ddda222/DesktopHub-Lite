@@ -118,5 +118,13 @@ pub async fn translate_text(app: AppHandle, window: tauri::WebviewWindow, text: 
         if output.is_empty() { return Err("服务未返回译文，请检查模型配置".into()); }
         Ok(TranslationResult { text: output, provider: settings.provider_id, model: settings.model, direction: if chinese { "en-zh".into() } else { "zh-en".into() }, elapsed_ms: start.elapsed().as_millis() as u64 })
     };
-    tokio::select! { result = request => result, _ = &mut cancelled => Err("翻译已取消".into()) }
+    let result = tokio::select! {
+        biased;
+        _ = &mut cancelled => Err("翻译已取消".into()),
+        result = request => result,
+    };
+    if result.is_ok() {
+        let _ = app.emit_to(crate::windows::BAR, "island-feedback", "translated");
+    }
+    result
 }

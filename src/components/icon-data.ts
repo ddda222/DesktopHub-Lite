@@ -1,4 +1,5 @@
 export type IconName =
+  | 'folder'
   | 'clipboard'
   | 'search'
   | 'close'
@@ -25,6 +26,7 @@ export type IconName =
   | 'external'
 
 export const iconPaths: Record<IconName, string> = {
+  folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 8h18"/>',
   external: '<path d="M13 5h6v6m0-6-8 8M10 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/>',
   translate: '<path d="M3 5h12M9 3v2M5 5c1 6 4 9 9 11M13 5c-1 6-4 9-9 11M14 21l4-10 4 10M15.5 17h5"/>',
   'align-left': '<path d="M4 3v18"/><rect x="7" y="6" width="13" height="12" rx="2"/>',

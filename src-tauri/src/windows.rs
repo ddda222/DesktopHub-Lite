@@ -40,9 +40,21 @@ pub struct WindowState {
     pub bar_y: Option<i32>,
 }
 
+/// 灵动岛主面板和胶囊导航的可见轮廓（逻辑像素）。空列表沿用旧版热区。
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct BarRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub radius: f64,
+}
+
 pub struct WindowsHandle {
     state: Mutex<WindowState>,
     bar_size: Mutex<(f64, f64)>,
+    bar_regions: Mutex<Vec<BarRegion>>,
+    bar_regions_changed: Mutex<bool>,
     pop_size: Mutex<(f64, f64)>,
     /// 弹层相对图标条的水平对齐：center / left / right
     pop_align: Mutex<String>,
@@ -61,6 +73,8 @@ impl WindowsHandle {
         Self {
             state: Mutex::new(state),
             bar_size: Mutex::new((140.0, 14.0)),
+            bar_regions: Mutex::new(Vec::new()),
+            bar_regions_changed: Mutex::new(false),
             pop_size: Mutex::new((384.0, 480.0)),
             pop_align: Mutex::new("center".to_string()),
             toast_size: Mutex::new((360.0, 40.0)),
@@ -120,6 +134,14 @@ impl WindowsHandle {
     pub fn set_bar_size(&self, width: f64, height: f64) {
         let mut size = self.bar_size.lock().unwrap_or_else(|e| e.into_inner());
         *size = (width.max(140.0), height.max(14.0));
+    }
+
+    pub fn set_bar_regions(&self, regions: Vec<BarRegion>) {
+        let mut current = self.bar_regions.lock().unwrap_or_else(|e| e.into_inner());
+        if *current != regions {
+            *current = regions;
+            *self.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        }
     }
 
     pub fn pop_size(&self) -> (f64, f64) {
@@ -213,22 +235,52 @@ pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
     let (x, y) = default_bar_position(app, width, height);
     let scale = window.scale_factor().unwrap_or(1.0);
     let target = PhysicalSize::new((width * scale).round() as u32, (height * scale).round() as u32);
-    if window.inner_size().ok() == Some(target) &&
-        window.outer_position().ok() == Some(PhysicalPosition::new(x, y)) { return; }
+    let regions_changed = std::mem::take(&mut *handle.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()));
+    let bounds_changed = window.inner_size().ok() != Some(target) ||
+        window.outer_position().ok() != Some(PhysicalPosition::new(x, y));
+    if !regions_changed && !bounds_changed { return; }
 
     // 位置和大小一次提交；两次系统调用会先移动旧尺寸，造成边缘跳动。
     #[cfg(windows)]
     if let Ok(native) = window.hwnd() {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
+        use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
         use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
         let hwnd = HWND(native.0);
-        let moved = unsafe { SetWindowPos(hwnd, None, x, y, target.width as i32, target.height as i32,
-            SWP_NOACTIVATE | SWP_NOZORDER) };
+        // CSS 动画期间只改变轮廓，不重复发送 WM_SIZE / WM_WINDOWPOSCHANGED。
+        let moved = if bounds_changed {
+            unsafe { SetWindowPos(hwnd, None, x, y, target.width as i32, target.height as i32,
+                SWP_NOACTIVATE | SWP_NOZORDER) }
+        } else { Ok(()) };
         if moved.is_ok() {
             // 收起仍保留完整热区。展开后让透明圆角外的像素不截获鼠标。
             unsafe {
+                let shapes = handle.bar_regions.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 if height <= 15.0 { SetWindowRgn(hwnd, None, true); }
+                else if !shapes.is_empty() {
+                    let combined = CreateRectRgn(0, 0, 0, 0);
+                    if !combined.0.is_null() {
+                        let mut valid = true;
+                        for shape in shapes {
+                            let px = |value: f64| (value * scale).round() as i32;
+                            // HRGN 是整数像素硬裁剪；留出两物理像素，让 WebView 的
+                            // 半透明圆角边缘完整参与桌面合成，不用 HRGN 描绘可见轮廓。
+                            let fringe = if shape.radius > 0.0 { 2 } else { 0 };
+                            let part = CreateRoundRectRgn(px(shape.x) - fringe, px(shape.y) - fringe,
+                                px(shape.x + shape.width) + 1 + fringe, px(shape.y + shape.height) + 1 + fringe,
+                                px(shape.radius * 2.0) + fringe * 2, px(shape.radius * 2.0) + fringe * 2);
+                            if part.0.is_null() { valid = false; break; }
+                            let result = CombineRgn(Some(combined), Some(combined), Some(part), RGN_OR);
+                            let _ = DeleteObject(part.into());
+                            if result.0 == 0 { valid = false; break; }
+                        }
+                        // SetWindowRgn 成功后由系统接管 region，失败时仍由本程序释放。
+                        if !valid || SetWindowRgn(hwnd, Some(combined), true) == 0 {
+                            let _ = DeleteObject(combined.into());
+                            crate::log_warn!("灵动岛可见区域更新失败");
+                        }
+                    }
+                }
                 else {
                     let curve = ((height * 0.36).clamp(10.0, 28.0) * scale).round() as i32;
                     let region = CreateRoundRectRgn(0, 0, target.width as i32 + 1, target.height as i32 + 1, curve, curve);

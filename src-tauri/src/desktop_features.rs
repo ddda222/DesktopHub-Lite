@@ -6,7 +6,7 @@ use ::windows::Win32::{
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL},
     System::Registry::*,
     UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetShellWindow, GetWindowRect, IsIconic, IsWindowVisible,
+        GetClassNameW, GetForegroundWindow, GetShellWindow, GetWindowRect, IsIconic, IsWindowVisible, IsZoomed,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -84,7 +84,8 @@ pub fn save_island_appearance(
     Ok(())
 }
 
-fn foreground_is_fullscreen() -> bool {
+/// 桌面保持胶囊；普通最大化窗口和覆盖显示器的全屏窗口都让灵动岛退为细线。
+fn foreground_occupies_screen() -> bool {
     unsafe {
         let foreground = GetForegroundWindow();
         if foreground.0.is_null()
@@ -93,6 +94,15 @@ fn foreground_is_fullscreen() -> bool {
             || IsIconic(foreground).as_bool()
         {
             return false;
+        }
+        // 桌面可能由 WorkerW 承载，不能仅凭它覆盖屏幕就按游戏全屏处理。
+        let mut class_name = [0u16; 256];
+        let length = GetClassNameW(foreground, &mut class_name);
+        if length > 0 && matches!(String::from_utf16_lossy(&class_name[..length as usize]).as_str(), "Progman" | "WorkerW") {
+            return false;
+        }
+        if IsZoomed(foreground).as_bool() {
+            return true;
         }
         let mut rect = RECT::default();
         if GetWindowRect(foreground, &mut rect).is_err() {
@@ -127,15 +137,22 @@ pub fn start_fullscreen_watch(app: AppHandle) {
                 .snapshot()
                 .island_appearance
                 .avoid_fullscreen
-                && foreground_is_fullscreen();
+                && foreground_occupies_screen();
             if next != suppressed {
                 suppressed = next;
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || {
                     let state = handle.state::<AppState>();
-                    state.ui.update(|ui| ui.fullscreen_suppressed = next);
+                    state.ui.update(|ui| {
+                        ui.fullscreen_suppressed = next;
+                        // 自动避让后恢复胶囊，不自动打开之前的大面板或抢焦点。
+                        // 保留页签、panel 和进行中的翻译；用户手动关闭仍走原取消流程。
+                        ui.island_expanded = false;
+                    });
                     if let Some(bar) = handle.get_webview_window(windows::BAR) {
-                        let _ = bar.set_ignore_cursor_events(next);
+                        if let Err(error) = bar.set_ignore_cursor_events(next) {
+                            crate::log_warn!("灵动岛鼠标避让更新失败：{error}");
+                        }
                     }
                     broadcast_ui(&handle);
                 });

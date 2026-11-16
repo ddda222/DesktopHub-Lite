@@ -36,6 +36,10 @@ pub struct ClipboardStatus {
 pub fn changed(app: &AppHandle) {
     let _ = app.emit("clipboard-changed", ());
 }
+fn copied(app: &AppHandle) {
+    // 仅传递动作类型，不把剪贴板内容交给提示界面。
+    let _ = app.emit_to(crate::windows::BAR, "island-feedback", "copied");
+}
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -237,23 +241,27 @@ pub fn start(app: AppHandle) {
             }
             match captured {
                 Ok(Some((entry, image))) => {
-                    let result = (|| -> Result<(), String> {
+                    let result = (|| -> Result<bool, String> {
                         let mut index = state.clipboard.lock().unwrap_or_else(|e| e.into_inner());
                         if index.paused || (image.is_some() && !index.capture_images) {
-                            return Ok(());
+                            return Ok(false);
                         }
                         if let Some(bytes) = image {
                             save_image(&state, &entry, bytes)?;
                         }
                         let mut next = index.clone();
                         next.record(entry);
-                        commit_index(&state, &mut index, next)
+                        commit_index(&state, &mut index, next)?;
+                        Ok(true)
                     })();
                     match result {
-                        Ok(()) => {
+                        Ok(recorded) => {
                             sequence = current;
                             failures = 0;
-                            changed(&app);
+                            if recorded {
+                                changed(&app);
+                                copied(&app);
+                            }
                         }
                         Err(_) => {
                             failures = failures.saturating_add(1);
@@ -294,7 +302,7 @@ pub fn clipboard_status(state: State<'_, AppState>) -> ClipboardStatus {
     }
 }
 #[tauri::command]
-pub fn copy_clipboard_entry(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub fn copy_clipboard_entry(app: AppHandle, state: State<'_, AppState>, id: String, formatted_text: Option<String>) -> Result<(), String> {
     let index = state.clipboard.lock().unwrap_or_else(|e| e.into_inner());
     let entry = index
         .entries
@@ -302,8 +310,12 @@ pub fn copy_clipboard_entry(state: State<'_, AppState>, id: String) -> Result<()
         .find(|item| item.id == id)
         .ok_or("记录已不存在")?;
     if entry.kind == "text" {
-        return write_text(entry.text.as_deref().ok_or("文字记录无效")?);
+        let original = entry.text.as_deref().ok_or("文字记录无效")?;
+        write_text(formatted_text.as_deref().unwrap_or(original))?;
+        copied(&app);
+        return Ok(());
     }
+    if formatted_text.is_some() { return Err("图片记录不支持文字格式化".into()); }
     let bytes = std::fs::read(image_path(entry, &state)?).map_err(|_| "图片文件缺失")?;
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -323,11 +335,14 @@ pub fn copy_clipboard_entry(state: State<'_, AppState>, id: String) -> Result<()
         })
         .map_err(|_| "剪贴板被占用，请重试")?;
     SELF_SEQUENCE.store(unsafe { GetClipboardSequenceNumber() }, Ordering::SeqCst);
+    copied(&app);
     Ok(())
 }
 #[tauri::command]
-pub fn copy_translation_result(text: String) -> Result<(), String> {
-    write_text(&text)
+pub fn copy_translation_result(app: AppHandle, text: String) -> Result<(), String> {
+    write_text(&text)?;
+    copied(&app);
+    Ok(())
 }
 #[tauri::command]
 pub fn read_clipboard_thumbnail(
