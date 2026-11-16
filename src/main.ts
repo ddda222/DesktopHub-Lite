@@ -14,14 +14,16 @@ import BarWindow from './windows/BarWindow.vue'
 import PopWindow from './windows/PopWindow.vue'
 import SettingsWindowRoot from './windows/SettingsWindowRoot.vue'
 import TranslationWindow from './windows/TranslationWindow.vue'
+import ImagePreviewWindow from './windows/ImagePreviewWindow.vue'
 import ToastWindow from './windows/ToastWindow.vue'
-import { isDesktop, windowLabel } from '@/lib/desktop/desktop'
+import { isDesktop, windowLabel, resolveWindowLabel } from '@/lib/desktop/desktop'
 import * as store from './store'
 import './styles/tokens.css'
 import './styles/base.css'
 
 function pickRoot(): { root: Component; shell: string } {
   if (!isDesktop) return { root: BrowserPreview, shell: 'browser' }
+  if (windowLabel.startsWith('image-preview-')) return { root: ImagePreviewWindow, shell: 'image-preview' }
   switch (windowLabel) {
     case 'bar':
       return { root: BarWindow, shell: 'bar' }
@@ -38,19 +40,15 @@ function pickRoot(): { root: Component; shell: string } {
   }
 }
 
-const { root, shell } = pickRoot()
-
-// 桌面窗口必须透明：窗口的透明区域要露出真实桌面，而不是一块不透明底色。
-document.documentElement.dataset.shell = shell
-if (isDesktop) {
-  document.documentElement.dataset.theme = 'dark'
+async function mountWindow(): Promise<void> {
+  await resolveWindowLabel()
+  const { root, shell } = pickRoot()
+  document.documentElement.dataset.shell = shell
+  if (isDesktop) document.documentElement.dataset.theme = 'dark'
+  try { if (shell !== 'image-preview') await store.bootstrap() } finally { createApp(root).mount('#app') }
 }
-
-const app = createApp(root)
-
-// 先加载数据再挂载，避免界面先闪一下空态。
-void store.bootstrap().finally(() => {
-  app.mount('#app')
+void mountWindow().catch(error => {
+  document.getElementById('app')!.textContent = `窗口加载失败，请关闭后重新打开：${String(error)}`
 })
 
 // 仅开发环境：把 store 暴露到 window，方便用控制台核对各状态

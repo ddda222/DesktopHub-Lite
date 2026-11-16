@@ -366,6 +366,7 @@ pub fn ensure_settings(app: &AppHandle) -> Result<WebviewWindow, String> {
     }
     let window = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("index.html".into()))
         .title("DesktopHub Lite 设置")
+        .disable_drag_drop_handler()
         .inner_size(SETTINGS_SIZE.0, SETTINGS_SIZE.1)
         .decorations(false)
         .transparent(true)
@@ -386,6 +387,7 @@ pub fn ensure_translation(app: &AppHandle) -> Result<WebviewWindow, String> {
         .inner_size(520.0, 620.0)
         .min_inner_size(360.0, 420.0)
         .visible(false)
+        .focused(false)
         .build().map_err(|error| format!("无法打开翻译窗口：{error}"))
 }
 

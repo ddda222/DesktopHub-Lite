@@ -2,7 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "精简版只开放自绘界面所需的最小权限：窗口拖动、自身显示隐藏与位置/尺寸调整。不开放任意 Shell、任意路径读取或任意本地资源访问。",
-  "windows": ["bar", "pop", "settings", "toast", "translation"],
+  "windows": [
+    "bar",
+    "pop",
+    "settings",
+    "toast",
+    "translation",
+    "image-preview-*"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

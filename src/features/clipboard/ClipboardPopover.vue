@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
+import { pushToast } from '@/store'
 import Icon from '@/components/Icon.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
 import type { ClipItem } from '@/lib/desktop/types'
@@ -53,6 +55,12 @@ function showFormattedJson(): void {
     formattedText.value = null
     formatError.value = '这条内容不是有效的 JSON，已保留原文。'
   }
+}
+
+async function previewImage(id: string): Promise<void> {
+  if (!isDesktop) { pushToast('请在桌面版预览和钉图', 'info'); return }
+  try { await invokeHost('open_image_preview', { source: 'clipboard', id }) }
+  catch (error) { pushToast(String(error), 'error') }
 }
 
 function onCopyFormatted(): void {
@@ -348,6 +356,7 @@ watch(
           删除
         </button>
         <span class="spacer" />
+        <button v-if="detailClip.kind === 'image'" class="btn btn-ghost" type="button" :disabled="isImageBroken(detailClip)" @click="previewImage(detailClip.id)">预览 / 钉图</button>
         <button
           v-if="detailClip.kind === 'text'"
           class="btn btn-ghost"
@@ -409,6 +418,10 @@ watch(
           </div>
 
           <div v-if="!selecting" class="row-actions">
+            <button v-if="clip.kind === 'image'" class="icon-btn" type="button" title="预览 / 钉图"
+              :disabled="isImageBroken(clip)" :aria-label="`预览图片：${clipSummary(clip)}`" @click.stop="previewImage(clip.id)">
+              <Icon name="image" :size="14" />
+            </button>
             <button
               class="icon-btn"
               type="button"

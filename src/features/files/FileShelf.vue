@@ -33,6 +33,11 @@ async function reveal(item: ShelfItem): Promise<void> {
   try { await invokeHost('reveal_shelf_file', { id: item.id }) }
   catch (error) { shelf.error = String(error); await refreshShelf() }
 }
+function isImage(item: ShelfItem): boolean { return !item.isDir && /\.(png|jpe?g|gif|webp|bmp|ico)$/i.test(item.name) }
+async function previewImage(item: ShelfItem): Promise<void> {
+  try { await invokeHost('open_image_preview', { source: 'shelf', id: item.id }) }
+  catch (error) { shelf.error = String(error) }
+}
 function begin(event: PointerEvent, item: ShelfItem): void {
   if (event.button !== 0 || !item.available || shelf.busy) return
   pointer = { id: item.id, x: event.clientX, y: event.clientY }
@@ -92,6 +97,7 @@ onBeforeUnmount(() => {
           <Icon :name="item.isDir ? 'folder' : 'text'" :size="21" />
           <span><strong>{{ item.name }}</strong><small>{{ item.available ? item.path : '原文件已移动或删除，请重新添加' }}</small></span>
         </button>
+        <button v-if="isImage(item)" class="row-action" type="button" :disabled="!item.available || shelf.busy" title="预览 / 钉图" :aria-label="`预览 ${item.name}`" @click="previewImage(item)"><Icon name="image" :size="16" /></button>
         <button class="row-action" type="button" :disabled="!item.available || shelf.busy" title="打开所在位置" :aria-label="`定位 ${item.name}`" @click="reveal(item)"><Icon name="external" :size="16" /></button>
         <button class="row-action" type="button" :disabled="shelf.busy" title="移出中转，保留原文件" :aria-label="`移出 ${item.name}`" @click="remove([item.id])"><Icon name="close" :size="16" /></button>
       </li>

@@ -14,6 +14,7 @@ mod desktop_support;
 mod desktop_features;
 mod file_shelf;
 mod icons;
+mod image_preview;
 mod launcher;
 mod logging;
 mod state;
@@ -192,9 +193,13 @@ fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Resu
 }
 
 #[tauri::command]
-fn open_translation_window(app: AppHandle) -> Result<(), String> {
-    windows::ensure_translation(&app)?;
-    show_window(&app, windows::TRANSLATION);
+fn current_window_label(window: WebviewWindow) -> String { window.label().to_string() }
+
+#[tauri::command]
+async fn open_translation_window(app: AppHandle, focus: Option<bool>) -> Result<(), String> {
+    let window = windows::ensure_translation(&app)?;
+    window.show().map_err(|_| "无法显示翻译窗口")?;
+    if focus.unwrap_or(true) { window.set_focus().map_err(|_| "无法激活翻译窗口")?; }
     Ok(())
 }
 
@@ -994,6 +999,7 @@ pub fn run() {
             let paused = clipboard.paused;
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
+            app.manage(image_preview::Previews::default());
             app.manage(AppState {
                 store,
                 apps: Mutex::new(config),
@@ -1068,11 +1074,13 @@ pub fn run() {
             let app = window.app_handle();
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
+                    if window.label().starts_with("image-preview-") { return; }
                     // 关闭只隐藏，退出走托盘菜单。
                     api.prevent_close();
                     if window.label() == windows::TRANSLATION { close_translation_window(app.clone()); }
                     else { let _ = window.hide(); }
                 }
+                WindowEvent::Destroyed => { image_preview::forget(app, window.label()); }
                 WindowEvent::Moved(position) => {
                     if window.label() == windows::BAR {
                         // 程序布局也会发 Moved；动画过程中不能把每帧写入数据文件。
@@ -1130,6 +1138,10 @@ pub fn run() {
             file_shelf::pick_shelf_files,
             file_shelf::reveal_shelf_file,
             file_shelf::drag_shelf_files,
+            image_preview::open_image_preview,
+            image_preview::image_preview_content,
+            image_preview::pin_image_preview,
+            current_window_label,
             app_info,
             ui_state,
             set_island_expanded,

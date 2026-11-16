@@ -9,7 +9,7 @@
  * - 密钥正文永不读取、永不显示，界面只知道「已保存 / 未保存」。
  */
 import { computed } from 'vue'
-import { invokeHost } from '@/lib/desktop/desktop'
+import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
 import {
   closePanel,
@@ -207,7 +207,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
           </p>
           <p class="notice-sub">
             <i class="state-dot" :class="{ 'is-on': hasSecret }" aria-hidden="true" />
-            密钥{{ hasSecret ? '已保存' : '未保存' }} · 样稿阶段不会发出真实网络请求
+            密钥{{ hasSecret ? '已保存' : '未保存' }}<span v-if="!isDesktop"> · 浏览器样稿不会发出真实网络请求</span>
           </p>
         </div>
       </div>
@@ -217,7 +217,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
         <div class="result-head">
           <span class="label">译文</span>
           <span
-            v-if="status === 'done'"
+            v-if="status === 'done' && !isDesktop"
             class="badge"
             title="译文由 MockHost 生成，只用于检查排版与状态，不是真实翻译"
           >

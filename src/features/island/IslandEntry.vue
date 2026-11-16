@@ -50,7 +50,7 @@ const visibleWidth = computed(() => {
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
 const visibleHeight = computed(() => expanded.value
-  ? Math.min(44 + chromeHeight.value + contentHeight.value, window.screen.availHeight - 60)
+  ? Math.min(44 + chromeHeight.value + (page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value), window.screen.availHeight - 60)
   : (suppressed.value ? 5 : 32) * scale.value)
 const bounds = computed(() => ({
   width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (suppressed.value ? 0 : 4)),
@@ -313,13 +313,43 @@ async function openSeparateTranslation(): Promise<void> {
 async function launch(id: string): Promise<void> {
   const application = state.apps.find(item => item.id === id)
   if (!application) return
-  await launchApp(application)
-  expand(false)
+  if (await launchApp(application)) expand(false)
 }
 
 function keydown(event: KeyboardEvent): void {
   if (event.isComposing || event.keyCode === 229) return
   if (event.key === 'Escape') { event.stopPropagation(); expand(false) }
+}
+
+function scrollWheel(event: WheelEvent): void {
+  const boundary = element.value
+  if (!expanded.value || !boundary || event.defaultPrevented || !event.cancelable || event.ctrlKey || event.metaKey) return
+  // 嵌套面板里不可滚动的内层会截住 WebView 的默认滚动链。
+  // 从命中元素向外找能沿当前方向滚动的容器；只处理岛内，不改变窗口焦点。
+  let target = event.target instanceof Element ? event.target : null
+  if (target?.closest('select, input[type="number"], input[type="range"]')) return
+  const horizontal = event.deltaX || (event.shiftKey ? event.deltaY : 0)
+  const vertical = event.shiftKey ? 0 : event.deltaY
+  while (target && boundary.contains(target)) {
+    if (target instanceof HTMLElement) {
+      const style = getComputedStyle(target)
+      const line = parseFloat(style.lineHeight) || 16
+      const dx = horizontal * (event.deltaMode === 1 ? line : event.deltaMode === 2 ? target.clientWidth : 1)
+      const dy = vertical * (event.deltaMode === 1 ? line : event.deltaMode === 2 ? target.clientHeight : 1)
+      const maxX = target.scrollWidth - target.clientWidth
+      const maxY = target.scrollHeight - target.clientHeight
+      const canX = /^(auto|scroll)$/.test(style.overflowX) && maxX > 1 &&
+        (dx > 0 ? target.scrollLeft < maxX - .5 : dx < 0 && target.scrollLeft > .5)
+      const canY = /^(auto|scroll)$/.test(style.overflowY) && maxY > 1 &&
+        (dy > 0 ? target.scrollTop < maxY - .5 : dy < 0 && target.scrollTop > .5)
+      if (canX || canY) {
+        event.preventDefault()
+        target.scrollBy({ left: canX ? dx : 0, top: canY ? dy : 0, behavior: 'instant' })
+        return
+      }
+    }
+    target = target.parentElement
+  }
 }
 
 function queueGeometry(): void {
@@ -437,7 +467,7 @@ onBeforeUnmount(() => {
   <section ref="element" class="island-hit-area"
     :class="{ expanded, desktop: isDesktop, glass: appearance.preset === 'glass', dark, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: state.ui.fullscreenSuppressed }"
     :style="rootStyle" aria-label="顶部灵动岛" :inert="state.ui.fullscreenSuppressed"
-    @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown"
+    @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
     <div ref="panel" class="island glass-surface" :class="{ expanded, tucked: !revealed }"
@@ -450,7 +480,7 @@ onBeforeUnmount(() => {
         <span v-else class="grip" aria-hidden="true" />
       </button>
       <span class="capsule-announcement" role="status">{{ feedbackText }}</span>
-      <div class="expanded-content scroll-y" :inert="!expanded">
+      <div class="expanded-content" :class="{ 'fixed-search': page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
         <div ref="chrome" class="island-chrome">
           <header class="toolbar">
             <nav class="mode-nav" aria-label="灵动岛功能">
@@ -649,4 +679,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .reduced *, .reduced *::before { transition: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before { transition: none !important; } }
 @media (prefers-reduced-transparency: reduce) { .glass .glass-surface { background: var(--glass-fill); backdrop-filter: none; } }
+</style>
+
+<style scoped>
+.expanded-content.fixed-search { display: flex; flex-direction: column; overflow: hidden; }
+.fixed-search .island-chrome { flex: none; }
+.fixed-search .island-content { min-height: 0; display: flex; flex-direction: column; }
+.fixed-search .feature-pane { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.fixed-search .feature-pane :deep(.pop) { min-height: 0; max-height: 420px; }
 </style>

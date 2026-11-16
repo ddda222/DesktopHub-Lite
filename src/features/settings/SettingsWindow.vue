@@ -20,6 +20,7 @@ import {
   iconFor,
   importShortcuts,
   moveApp,
+  reorderApps,
   pushToast,
   setAppCategory,
   setPaused,
@@ -87,6 +88,25 @@ function pickSection(id: SettingsSection): void {
 }
 
 /* ---------- 应用管理 ---------- */
+const selectedAppId = ref<string | null>(null)
+const draggedAppId = ref<string | null>(null)
+const dropTarget = ref('')
+const selectedApps = computed(() => state.apps.filter(app => app.id === selectedAppId.value))
+function beginAppDrag(event: DragEvent, id: string): void {
+  draggedAppId.value = id
+  event.dataTransfer?.setData('text/plain', id)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+function endAppDrag(): void { draggedAppId.value = null; dropTarget.value = '' }
+function dropApp(id: string): void {
+  if (draggedAppId.value && draggedAppId.value !== id) reorderApps(draggedAppId.value, id)
+  endAppDrag()
+}
+function dropCategory(id: string): void {
+  if (draggedAppId.value) setAppCategory(draggedAppId.value, id)
+  endAppDrag()
+}
+
 
 /** 导入桌面快捷方式：只读用户桌面与公共桌面，结果由 store 明确提示。 */
 function onImport(): void {
@@ -396,13 +416,35 @@ onBeforeUnmount(() => {
               <p class="hint">删除分类保留应用，应用仍可在“全部”中找到。</p>
               <div class="secret-edit"><input v-model="newCategory" class="control" maxlength="40" placeholder="新分类名称" @keydown.enter.prevent="addCategory" /><button class="btn" type="button" @click="addCategory">添加分类</button></div>
             </details>
-            <div class="app-list scroll-y" role="list" aria-label="应用列表">
+            <p class="hint">拖动图标调整顺序，拖到分类改变归属；点击图标编辑。隐藏的应用也在此显示。</p>
+            <div class="category-targets" aria-label="拖放分类">
+              <button v-for="category in categoryOptions" :key="category.id" class="btn" type="button"
+                :class="{ 'drop-target': dropTarget === category.id }"
+                @dragover.prevent="dropTarget = category.id" @dragleave="dropTarget = ''" @drop.prevent="dropCategory(category.id)">
+                {{ category.name }}
+              </button>
+            </div>
+            <div class="app-workspace scroll-y">
+            <div class="manage-grid" role="group" aria-label="全部应用，拖动排序">
+              <button v-for="app in state.apps" :key="app.id" type="button" class="manage-tile" draggable="true"
+                :class="{ selected: selectedAppId === app.id, 'is-hidden': app.hidden, 'drop-target': dropTarget === app.id }"
+                :title="`${app.name} · ${state.categories.find(c => c.id === app.categoryId)?.name ?? '未分类'}`"
+                :aria-pressed="selectedAppId === app.id" @click="selectedAppId = app.id"
+                @dragstart="beginAppDrag($event, app.id)" @dragend="endAppDrag"
+                @dragover.prevent="dropTarget = app.id" @dragleave="dropTarget = ''" @drop.prevent="dropApp(app.id)">
+                <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" draggable="false" />
+                <span v-else class="app-icon" :style="{ background: app.color }">{{ app.initials }}</span>
+                <span class="manage-name">{{ app.name }}</span>
+                <small v-if="app.hidden || app.broken">{{ app.broken ? '失效' : '隐藏' }}</small>
+              </button>
+            </div>
+            <div class="app-list" role="list" aria-label="所选应用设置">
               <div v-if="!state.apps.length" class="app-empty">
                 还没有应用。用「添加文件…」选一个程序，或导入桌面快捷方式。
               </div>
 
               <div
-                v-for="(app, index) in state.apps"
+                v-for="app in selectedApps"
                 :key="app.id"
                 class="app-row"
                 :class="{ 'is-hidden': app.hidden, 'is-editing': editingId === app.id }"
@@ -512,26 +554,27 @@ onBeforeUnmount(() => {
                     <button
                       class="icon-btn sm"
                       type="button"
-                      :disabled="index === 0"
+                      :disabled="state.apps.findIndex(item => item.id === app.id) === 0"
                       :aria-label="`上移 ${app.name}`"
                       title="上移"
-                      @click="moveApp(index, -1)"
+                      @click="moveApp(state.apps.findIndex(item => item.id === app.id), -1)"
                     >
                       <Icon class="flip" name="chevron-down" :size="13" />
                     </button>
                     <button
                       class="icon-btn sm"
                       type="button"
-                      :disabled="index === state.apps.length - 1"
+                      :disabled="state.apps.findIndex(item => item.id === app.id) === state.apps.length - 1"
                       :aria-label="`下移 ${app.name}`"
                       title="下移"
-                      @click="moveApp(index, 1)"
+                      @click="moveApp(state.apps.findIndex(item => item.id === app.id), 1)"
                     >
                       <Icon name="chevron-down" :size="13" />
                     </button>
                   </span>
                 </template>
               </div>
+            </div>
             </div>
           </div>
 
@@ -1667,4 +1710,19 @@ onBeforeUnmount(() => {
   font-size: var(--text-xs);
   color: var(--text-3);
 }
+</style>
+
+<style scoped>
+.category-targets { display: flex; flex-wrap: wrap; gap: 6px; flex: none; margin-bottom: 10px; }
+.app-workspace { flex: 1; min-height: 0; }
+.manage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; padding: 4px; }
+.manage-tile { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px; border-radius: 10px; border: 1px solid transparent; cursor: grab; }
+.manage-tile img { width: 32px; height: 32px; object-fit: contain; }
+.manage-tile.selected { background: var(--accent-weak); border-color: var(--accent); }
+.manage-tile:hover { background: var(--hover); }
+.manage-tile.is-hidden { opacity: .55; }
+.manage-name { max-width: 100%; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.manage-tile small { font-size: 10px; color: var(--text-3); }
+.drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
+.app-workspace .app-list { overflow: visible; margin-top: 12px; }
 </style>

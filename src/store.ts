@@ -412,14 +412,14 @@ export function moveActive(delta: number): void {
 
 /* ---------- 应用 ---------- */
 
-export async function launchApp(app: HubApp): Promise<void> {
+export async function launchApp(app: HubApp): Promise<boolean> {
   if (app.broken) {
     pushToast(`目标失效：${app.name}`, 'error')
-    return
+    return false
   }
   if (!isDesktop) {
     pushToast(`已提交启动请求：${app.name}（浏览器样稿，未真的启动）`, 'success')
-    return
+    return false
   }
   try {
     const result = await invokeHost<{ launched: boolean; reason: string }>('open_application', {
@@ -427,6 +427,7 @@ export async function launchApp(app: HubApp): Promise<void> {
     })
     if (result.launched) {
       pushToast(`已提交打开请求：${app.name}`, 'success')
+      return true
     } else {
       // 阶段 1 明确未启动，不假装成功
       pushToast(result.reason, 'info')
@@ -434,6 +435,7 @@ export async function launchApp(app: HubApp): Promise<void> {
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '启动失败', 'error')
   }
+  return false
 }
 
 export function reorderApps(fromId: string, toId: string): void {

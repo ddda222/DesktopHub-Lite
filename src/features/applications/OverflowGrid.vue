@@ -6,11 +6,10 @@
 import Icon from '@/components/Icon.vue'
 import { categoryName, closePanel, iconFor, launchApp, state, visibleApps } from '@/store'
 
-function launch(id: string): void {
+async function launch(id: string): Promise<void> {
   const app = visibleApps.value.find((item) => item.id === id)
   if (!app) return
-  closePanel()
-  void launchApp(app)
+  if (await launchApp(app)) closePanel()
 }
 </script>
 

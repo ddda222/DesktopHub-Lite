@@ -73,7 +73,7 @@ pub async fn pick_shelf_files(app: AppHandle) -> Result<Option<Vec<String>>, Str
         files.into_iter().filter_map(|f| f.into_path().ok()).map(|p| p.to_string_lossy().into_owned()).collect()))
         .await.map_err(|_| "无法打开文件选择框".into())
 }
-fn selected_paths(state: &AppState, ids: &[String]) -> Result<Vec<String>, String> {
+pub(crate) fn selected_paths(state: &AppState, ids: &[String]) -> Result<Vec<String>, String> {
     let index = state.file_shelf.lock().unwrap_or_else(|e| e.into_inner());
     ids.iter().map(|id| {
         let entry = index.entries.iter().find(|e| &e.id == id).ok_or("中转条目已移除")?;

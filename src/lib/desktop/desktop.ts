@@ -18,7 +18,7 @@ export const isDesktop: boolean =
   typeof window !== 'undefined' && '__TAURI_INTERNALS__' in (window as unknown as Record<string, unknown>)
 
 /** 当前窗口标识：bar / pop / settings；浏览器样稿里是 browser。 */
-export const windowLabel: string = isDesktop ? getCurrentWindow().label : 'browser'
+export let windowLabel: string = isDesktop ? getCurrentWindow().label : 'browser'
 
 /** 调用宿主命令。宿主返回 Err(String) 时抛出，错误文案已经可直接展示给用户。 */
 export async function invokeHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -298,4 +298,9 @@ export async function describeTarget(target: string): Promise<TargetDescription 
   } catch {
     return null
   }
+}
+
+/** 由宿主确认窗口身份，动态窗口不依赖页面初始化时的元数据快照。 */
+export async function resolveWindowLabel(): Promise<void> {
+  if (isDesktop) windowLabel = await invokeHost<string>("current_window_label")
 }
