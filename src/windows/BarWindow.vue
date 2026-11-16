@@ -30,7 +30,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .bar-root {
-  display: inline-block;
+  display: block;
   background: transparent;
 }
 </style>

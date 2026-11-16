@@ -7,25 +7,34 @@ import { invokeHost, resizeBar } from '@/lib/desktop/desktop'
 import { pushToast, copyClip, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
 
 const element = ref<HTMLElement | null>(null)
-const expanded = computed(() => state.ui.islandExpanded)
-const peeking = ref(false)
+const hostExpanded = computed(() => state.ui.islandExpanded)
+const hoverClosing = ref(false)
+const expanded = computed(() => hostExpanded.value && !hoverClosing.value)
+const collapseMs = 235
 const attentionPreview = ref(false)
 const hovering = ref(false)
 const composing = ref(false)
 const pressed = ref(false)
 const content = ref<HTMLElement | null>(null)
+const chrome = ref<HTMLElement | null>(null)
 const contentHeight = ref(330)
+const chromeHeight = ref(56)
 const availableWidth = ref(window.screen.availWidth)
-const revealed = computed(() => expanded.value || peeking.value || attentionPreview.value)
+const revealed = computed(() => expanded.value || attentionPreview.value)
 const page = computed(() => state.ui.islandPage)
 const recentClips = computed(() => state.clips.slice(0, 5))
 const appearance = computed(() => state.ui.islandAppearance)
 const scale = computed(() => appearance.value.scale / 100)
-const expandedWidth = computed(() => Math.max(260, Math.min(720 * scale.value, availableWidth.value - 24)))
-const visibleWidth = computed(() => expanded.value ? expandedWidth.value : (revealed.value ? 184 : 72) * scale.value)
+const expandedWidth = computed(() => Math.max(260, Math.min(656 * scale.value, availableWidth.value - 24)))
+const tuckedWidth = computed(() => 80 * scale.value)
+const visibleWidth = computed(() => {
+  if (expanded.value) return expandedWidth.value
+  if (attentionPreview.value) return 156 * scale.value
+  return tuckedWidth.value
+})
 const visibleHeight = computed(() => expanded.value
-  ? Math.min((118 + contentHeight.value) * scale.value, window.screen.availHeight - 36)
-  : (revealed.value ? 36 : 5) * scale.value)
+  ? Math.min(46 + chromeHeight.value + contentHeight.value * scale.value, window.screen.availHeight - 36)
+  : (attentionPreview.value ? 36 : 5) * scale.value)
 const bounds = computed(() => ({
   width: Math.max(140, visibleWidth.value),
   height: Math.max(14, visibleHeight.value)
@@ -35,9 +44,15 @@ const rootStyle = computed(() => ({
   height: `${bounds.value.height}px`,
   '--island-tint': appearance.value.tint || 'var(--accent)',
   '--island-opacity': `${appearance.value.opacity}%`,
+  '--collapse-time': `${collapseMs}ms`,
   '--content-width': `${expandedWidth.value}px`,
   '--toolbar-target': `${Math.max(30, 36 * scale.value)}px`
 }))
+const sections = [
+  { value: 'applications', label: '应用', icon: 'grid' },
+  { value: 'clipboard', label: '剪贴板', icon: 'clipboard' },
+  { value: 'translation', label: '翻译', icon: 'translate' }
+] as const
 const anchors = [
   { value: 'left', label: '顶部左侧', icon: 'align-left' },
   { value: 'center', label: '顶部居中', icon: 'align-center' },
@@ -45,6 +60,9 @@ const anchors = [
 ] as const
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let leaveTimer: ReturnType<typeof setTimeout> | undefined
+let closeTimer: ReturnType<typeof setTimeout> | undefined
+let closeCommitted = false
+let reenterAfterClose = false
 let attentionTimer: ReturnType<typeof setTimeout> | undefined
 let observer: ResizeObserver | undefined
 let contentObserver: ResizeObserver | undefined
@@ -57,21 +75,62 @@ let visibilityIntent = Promise.resolve()
 
 function cancelHover(): void { clearTimeout(hoverTimer) }
 
+function cancelHoverClose(): void {
+  clearTimeout(closeTimer)
+  hoverClosing.value = false
+}
+
 function expand(value: boolean, focus = false): void {
+  if (value) {
+    closeCommitted = false
+    reenterAfterClose = false
+    cancelHoverClose()
+  } else {
+    if (closeCommitted) return
+    clearTimeout(closeTimer)
+    hoverClosing.value = true
+    closeCommitted = true
+  }
   cancelHover()
   clearTimeout(leaveTimer)
-  peeking.value = value
   visibilityIntent = visibilityIntent.catch(() => {}).then(async () => {
     if (!disposed) await invokeHost('set_island_expanded', { expanded: value, focus })
-  }).catch(() => { peeking.value = false })
+  }).catch(error => {
+    closeCommitted = false
+    reenterAfterClose = false
+    cancelHoverClose()
+    pushToast(String(error), 'error')
+  })
 }
 
 function activateCapsule(): void {
-  if (attentionPreview.value && !expanded.value) {
+  if (attentionPreview.value && !hostExpanded.value) {
     void openWechat()
     return
   }
   expand(!expanded.value, true)
+}
+
+function startHoverClose(): void {
+  if (!hostExpanded.value || hoverClosing.value) return
+  if (state.ui.islandReducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    expand(false)
+    return
+  }
+
+  // 先收起视觉外壳。鼠标有机会在实际关闭（会取消翻译）之前反向展开。
+  hoverClosing.value = true
+  closeTimer = setTimeout(() => {
+    if (!hoverClosing.value) return
+    if (hovering.value || editing()) cancelHoverClose()
+    else expand(false)
+  }, collapseMs + 34)
+}
+
+function scheduleHoverOpen(): void {
+  hoverTimer = setTimeout(() => {
+    if (hovering.value && !state.ui.fullscreenSuppressed) expand(true)
+  }, state.ui.islandHoverMs)
 }
 
 function enter(): void {
@@ -79,11 +138,13 @@ function enter(): void {
   availableWidth.value = window.screen.availWidth
   cancelHover()
   clearTimeout(leaveTimer)
-  if (expanded.value) return
-  peeking.value = true
-  hoverTimer = setTimeout(() => {
-    if (hovering.value) expand(true)
-  }, state.ui.islandHoverMs)
+  if (closeCommitted) {
+    // 提交关闭后已经无法撤回，请等宿主确认再按正常悬停处理。
+    reenterAfterClose = true
+    return
+  }
+  if (hoverClosing.value) cancelHoverClose()
+  if (!hostExpanded.value) scheduleHoverOpen()
 }
 
 function editing(): boolean {
@@ -97,12 +158,12 @@ function editing(): boolean {
 
 function leave(): void {
   hovering.value = false
+  reenterAfterClose = false
   cancelHover()
   clearTimeout(leaveTimer)
   leaveTimer = setTimeout(() => {
     if (hovering.value || editing()) return
-    if (expanded.value) expand(false)
-    else peeking.value = false
+    startHoverClose()
   }, state.ui.islandLeaveMs)
 }
 
@@ -118,18 +179,29 @@ function focusout(): void {
   })
 }
 
-watch(expanded, value => {
-  if (!value) {
+watch(hostExpanded, value => {
+  const shouldReopen = !value && hovering.value && reenterAfterClose
+  closeCommitted = false
+  reenterAfterClose = false
+  cancelHoverClose()
+  if (value) {
+    attentionPreview.value = false
+    clearTimeout(attentionTimer)
+  } else {
     cancelHover()
     clearTimeout(leaveTimer)
-    peeking.value = false
     composing.value = false
     pressed.value = false
+    if (shouldReopen) scheduleHoverOpen()
   }
 })
 
+watch(page, () => {
+  if (!closeCommitted) cancelHoverClose()
+})
+
 watch(() => state.ui.wechatEvent, (event, previous) => {
-  if (event === previous || !event || expanded.value || state.ui.fullscreenSuppressed) return
+  if (event === previous || !event || hostExpanded.value || state.ui.fullscreenSuppressed) return
   attentionPreview.value = true
   clearTimeout(attentionTimer)
   attentionTimer = setTimeout(() => { attentionPreview.value = false }, 4500)
@@ -193,6 +265,8 @@ async function sendGeometry(): Promise<void> {
 function measureContent(): void {
   const height = content.value?.getBoundingClientRect().height
   if (height) contentHeight.value = Math.min(478, Math.ceil(height))
+  const header = chrome.value?.getBoundingClientRect().height
+  if (header) chromeHeight.value = Math.ceil(header)
 }
 
 onMounted(() => {
@@ -200,6 +274,7 @@ onMounted(() => {
   contentObserver = new ResizeObserver(measureContent)
   if (element.value) observer.observe(element.value)
   if (content.value) contentObserver.observe(content.value)
+  if (chrome.value) contentObserver.observe(chrome.value)
   window.addEventListener('pointerup', handlePointerUp)
   window.addEventListener('pointercancel', handlePointerUp)
   queueGeometry()
@@ -213,6 +288,7 @@ onBeforeUnmount(() => {
   cancelHover()
   clearTimeout(leaveTimer)
   clearTimeout(attentionTimer)
+  clearTimeout(closeTimer)
   window.removeEventListener('pointerup', handlePointerUp)
   window.removeEventListener('pointercancel', handlePointerUp)
 })
@@ -220,7 +296,7 @@ onBeforeUnmount(() => {
 
 <template>
   <section ref="element" class="island-hit-area"
-    :class="{ expanded, tucked: !revealed, reduced: state.ui.islandReducedMotion, suppressed: state.ui.fullscreenSuppressed }"
+    :class="{ expanded, compact: expandedWidth < 560, tucked: !revealed, reduced: state.ui.islandReducedMotion, suppressed: state.ui.fullscreenSuppressed }"
     :style="rootStyle" aria-label="顶部灵动岛" :inert="state.ui.fullscreenSuppressed"
     @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
@@ -231,26 +307,30 @@ onBeforeUnmount(() => {
     <button class="capsule" type="button" :aria-expanded="expanded" :aria-label="attentionPreview && !expanded ? '微信有新提醒，打开微信' : '展开或收起应用面板'"
       :inert="!revealed" @pointerdown="cancelHover" @click="activateCapsule">
       <span v-if="attentionPreview && !expanded">微信有新提醒</span>
-      <Icon v-else name="grid" :size="16" />
-      <Icon name="chevron-down" :size="12" class="arrow" />
+      <span v-else class="grip" aria-hidden="true" />
     </button>
 
     <div class="expanded-content" :inert="!expanded">
+      <div ref="chrome" class="island-chrome">
       <header class="toolbar">
         <nav aria-label="灵动岛功能">
-          <button type="button" title="应用" aria-label="应用" :aria-pressed="page === 'applications'" :class="{ selected: page === 'applications' }" @click="selectPage('applications')"><Icon name="grid" :size="18" /></button>
-          <button type="button" title="剪贴板" aria-label="剪贴板" :aria-pressed="page === 'clipboard'" :class="{ selected: page === 'clipboard' }" @click="selectPage('clipboard')"><Icon name="clipboard" :size="18" /></button>
-          <button type="button" title="翻译" aria-label="翻译" :aria-pressed="page === 'translation'" :class="{ selected: page === 'translation' }" @click="selectPage('translation')"><Icon name="translate" :size="18" /></button>
+          <button v-for="section in sections" :key="section.value" type="button" :title="section.label"
+            :aria-label="section.label" :aria-pressed="page === section.value" :class="{ selected: page === section.value }"
+            @click="selectPage(section.value)">
+            <Icon :name="section.icon" :size="16" /><span>{{ section.label }}</span>
+          </button>
         </nav>
-        <div class="anchor-actions" role="group" aria-label="顶部停靠位置">
-          <button v-for="anchor in anchors" :key="anchor.value" class="icon-action" type="button"
-            :title="anchor.label" :aria-label="anchor.label" :aria-pressed="state.ui.islandAnchor === anchor.value"
-            :class="{ selected: state.ui.islandAnchor === anchor.value }"
-            @click="invokeHost('set_island_anchor', { anchor: anchor.value })"><Icon :name="anchor.icon" :size="16" /></button>
+        <div class="tools">
+          <div class="anchor-actions" role="group" aria-label="顶部停靠位置">
+            <button v-for="anchor in anchors" :key="anchor.value" class="icon-action" type="button"
+              :title="anchor.label" :aria-label="anchor.label" :aria-pressed="state.ui.islandAnchor === anchor.value"
+              :class="{ selected: state.ui.islandAnchor === anchor.value }"
+              @click="invokeHost('set_island_anchor', { anchor: anchor.value })"><Icon :name="anchor.icon" :size="14" /></button>
+          </div>
+          <button class="icon-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="15" /></button>
+          <button class="icon-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="16" /></button>
+          <button class="icon-action" type="button" title="收起" aria-label="收起灵动岛" @click="expand(false)"><Icon name="chevron-down" :size="15" /></button>
         </div>
-        <button class="icon-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="16" /></button>
-        <button class="icon-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="16" /></button>
-        <button class="icon-action" type="button" title="收起" aria-label="收起灵动岛" @click="expand(false)"><Icon name="chevron-down" :size="16" /></button>
       </header>
 
       <div v-if="state.ui.wechatAttention" class="attention-strip" role="status">
@@ -258,22 +338,27 @@ onBeforeUnmount(() => {
         <button type="button" @click="openWechat">打开微信</button>
         <button type="button" @click="invokeHost('clear_wechat_attention')">清除待关注</button>
       </div>
+      </div>
       <div ref="content" class="island-content">
       <div v-if="page === 'applications'" class="applications">
-        <nav class="categories" aria-label="应用分类">
-          <button v-for="category in state.categories" :key="category.id" type="button"
-            :class="{ selected: state.ui.activeCategoryId === category.id }" @click="setCategory(category.id)">{{ category.name }}</button>
-        </nav>
         <div class="columns">
-          <div class="app-grid scroll-y">
-            <button v-for="app in visibleApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
-              <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
-              <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
-            </button>
-            <p v-if="!visibleApps.length" class="empty">这个分类还没有应用</p>
-          </div>
+          <section class="launch-shelf" aria-labelledby="launch-heading">
+            <h2 id="launch-heading">启动台</h2>
+            <nav class="categories" aria-label="应用分类">
+              <button v-for="category in state.categories" :key="category.id" type="button"
+                :class="{ selected: state.ui.activeCategoryId === category.id }" @click="setCategory(category.id)">{{ category.name }}</button>
+            </nav>
+            <div class="app-grid scroll-y">
+              <button v-for="app in visibleApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
+                <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
+                <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
+                <span class="app-name">{{ app.name }}</span>
+              </button>
+              <p v-if="!visibleApps.length" class="empty">这个分类还没有应用</p>
+            </div>
+          </section>
           <aside class="recent">
-            <div class="recent-heading"><span>最近复制</span><button type="button" title="全部剪贴板记录" aria-label="全部剪贴板记录" @click="selectPage('clipboard')"><Icon name="chevron-right" :size="16" /></button></div>
+            <div class="recent-heading"><h2>最近复制</h2><button type="button" title="全部剪贴板记录" aria-label="全部剪贴板记录" @click="selectPage('clipboard')"><Icon name="chevron-right" :size="16" /></button></div>
             <button v-for="clip in recentClips" :key="clip.id" type="button" class="clip" @click="copyClip(clip)">
               <Icon :name="clip.kind === 'image' ? 'image' : 'clipboard'" :size="14" />
               <span>{{ clip.kind === 'image' ? `图片 ${clip.width} × ${clip.height}` : clip.text }}</span>
@@ -296,70 +381,117 @@ onBeforeUnmount(() => {
 <style scoped>
 .island-hit-area {
   position: relative; display: flex; justify-content: center; align-items: flex-start;
-  --geometry-time: 245ms;
-  --geometry-ease: cubic-bezier(.22, .75, .25, 1);
+  --geometry-time: 310ms;
+  --geometry-ease: cubic-bezier(.23, 1, .32, 1);
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), opacity 125ms;
 }
-.island-hit-area:not(.expanded) { --geometry-time: 190ms; }
-.island-hit-area.reduced { --geometry-time: 0ms; }
+.island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: cubic-bezier(.36, .15, .38, 1); }
+.island-hit-area.reduced { --geometry-time: 0ms; transition: none; }
 .island-hit-area.suppressed { opacity: 0; pointer-events: none; }
 .attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 1; background: #46c88a; border-radius: 50%; }
 .expanded > .attention-dot, .island:not(.tucked) > .attention-dot { top: 9px; }
 .attention-strip { display: flex; align-items: center; gap: 8px; min-height: 30px; color: var(--text); font-size: 12px; }
 .attention-strip button { padding: 2px 5px; border-radius: 5px; background: var(--hover); border: 1px solid var(--line); }
+.island-chrome { display: flow-root; }
 .island-content { width: 100%; }
 
 .tuck-trigger { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; padding: 0; background: transparent; border: 0; }
+/* 玻璃感来自单层纵深与边缘反光，不依赖 Windows 桌面模糊。 */
 .island {
   position: relative;
   overflow: hidden;
-  border-radius: 0 0 20px 20px;
+  border-radius: 0 0 21px 21px;
   flex: none;
-  background: color-mix(in srgb, color-mix(in srgb, var(--surface) 92%, var(--island-tint)) var(--island-opacity), transparent);
+  --glass-base: color-mix(in srgb, var(--surface) 77%, #101d2a);
+  --glass-rim: color-mix(in srgb, var(--line-strong) 67%, #637f94);
+  --glass-well: rgba(6, 15, 24, .24);
+  --glass-sheen: rgba(178, 220, 255, .12);
+  background: color-mix(in srgb, var(--surface) var(--island-opacity), transparent);
   color: var(--text);
-  box-shadow: inset 0 -1px 0 var(--line-strong);
+  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 -2px 4px rgba(0, 0, 0, .22);
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
-.island.glass { background: linear-gradient(155deg, color-mix(in srgb, var(--surface-2) 85%, var(--island-tint)), color-mix(in srgb, var(--surface) var(--island-opacity), transparent)); box-shadow: inset 0 1px 1px var(--line-strong); }
-.island.tucked { border-radius: 3px; box-shadow: inset 0 0 0 1px var(--line-strong); }
+:global(:root[data-theme='light'] .island) {
+  --glass-base: #e9f3fb;
+  --glass-rim: rgba(57, 83, 109, .34);
+  --glass-well: rgba(44, 98, 130, .08);
+  --glass-sheen: rgba(255, 255, 255, .55);
+}
+.island.glass {
+  background:
+    radial-gradient(100% 88% at 50% -38%, var(--glass-sheen), transparent 93%),
+    linear-gradient(160deg, color-mix(in srgb, color-mix(in srgb, var(--glass-base) 90%, var(--island-tint)) var(--island-opacity), transparent), color-mix(in srgb, var(--glass-base) var(--island-opacity), transparent));
+}
+.island.tucked {
+  border-radius: 5px;
+}
+.island::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 100%;
+  content: '';
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--island-tint) 35%, #d1ebff) 50%, transparent);
+  transition: opacity 85ms ease-out;
+}
+.island.tucked::before { opacity: 1; transition: opacity 95ms ease-in 100ms; }
 .island.tucked .capsule { visibility: hidden; }
-.island.expanded { border-radius: 0 0 32px 32px; }
+.island.expanded { border-radius: 0 0 29px 29px; }
 button { color: inherit; cursor: pointer; }
-.capsule { display: flex; align-items: center; justify-content: center; gap: 9px; height: 36px; width: 184px; margin: 0 auto; border: 0; background: transparent; white-space: nowrap; }
-.arrow { color: var(--text-3); transition: transform 240ms; }
-.expanded .arrow { transform: rotate(180deg); }
-.expanded-content { width: var(--content-width); max-height: calc(100% - 36px); overflow: hidden; padding: 0 20px 12px; opacity: 0; transform: translateY(-8px); transition: opacity 160ms ease, transform 220ms ease; }
-.expanded .expanded-content { overflow-y: auto; opacity: 1; transform: translateY(0); transition-delay: 80ms; }
-.toolbar { display: flex; height: 44px; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
-.toolbar nav { display: flex; gap: 4px; flex: 1; }
-.toolbar nav button { display: grid; place-items: center; width: var(--toolbar-target); height: var(--toolbar-target); padding: 0; }
-.toolbar button, .categories button { border: 0; background: transparent; padding: 7px 11px; border-radius: 8px; font-size: 12px; }
-.toolbar button, .categories button, .app-tile { transition: background 110ms ease, color 110ms ease; }
-.toolbar button:hover, .categories button:hover { background: var(--hover); }
-.toolbar button:active, .categories button:active { background: var(--active); }
-.toolbar button.selected, .categories button.selected { background: var(--accent-weak); color: var(--accent); }
-.anchor-actions { display: flex; gap: 2px; }
-.toolbar .icon-action { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; }
-.categories { display: flex; flex-wrap: wrap; gap: 4px; max-height: 70px; overflow-y: auto; margin-bottom: 12px; }
-.columns { display: grid; grid-template-columns: minmax(0,1fr) 216px; gap: 16px; height: 265px; }
-.app-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); align-content: start; overflow-y: auto; gap: 6px; }
-.app-tile { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 64px; border: 0; background: transparent; border-radius: 12px; padding: 12px 5px; }
+.capsule { display: flex; align-items: center; justify-content: center; gap: 9px; height: 30px; width: 156px; margin: 0 auto; border: 0; background: transparent; white-space: nowrap; font-size: 12px; }
+.grip { width: 44px; height: 3px; border-radius: 6px; background: var(--text-3); opacity: 0; transition: opacity 85ms ease, background 175ms ease; }
+.expanded .grip { opacity: .83; transition-delay: 70ms, 0ms; }
+.capsule:hover .grip { background: var(--text); }
+.expanded-content { width: var(--content-width); max-height: calc(100% - 30px); overflow: hidden; padding: 0 20px 16px; opacity: 0; transform: translateY(-8px); transition: opacity 85ms ease-in, transform 100ms ease-in; }
+.expanded .expanded-content { overflow-y: auto; opacity: 1; transform: translateY(0); transition: opacity 165ms ease-out 68ms, transform 200ms var(--geometry-ease) 62ms; }
+.toolbar {
+  display: flex; min-height: 44px; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: 6px 9px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.toolbar nav { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; border-radius: 11px; background: var(--glass-well); box-shadow: inset 0 0 0 1px var(--line); }
+.toolbar nav button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: max(29px, calc(var(--toolbar-target) - 6px)); padding: 4px 11px; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.toolbar button, .categories button { border: 0; background: transparent; border-radius: 8px; color: var(--text-2); }
+.toolbar button, .categories button, .app-tile, .clip { transition: background 130ms ease, color 130ms ease, transform 170ms var(--geometry-ease); }
+.toolbar button:hover, .categories button:hover { background: var(--hover); color: var(--text); }
+.toolbar button:active, .categories button:active, .app-tile:active { transform: scale(.96); }
+.toolbar nav .selected { color: var(--text); background: color-mix(in srgb, var(--accent-weak) 50%, var(--hover)); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.toolbar nav .selected svg { color: var(--accent-hover); }
+.tools, .anchor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.anchor-actions { padding-right: 7px; margin-right: 5px; border-right: 1px solid var(--line-strong); }
+.anchor-actions .selected { color: var(--accent-hover); }
+.toolbar .icon-action { display: grid; place-items: center; width: 29px; height: 29px; padding: 0; }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 36%); gap: 12px; align-items: stretch; }
+.launch-shelf { min-width: 0; padding: 3px 4px 0 0; }
+h2 { margin: 0; font-size: 14px; line-height: 1.35; font-weight: 650; letter-spacing: .03em; }
+.categories { display: flex; flex-wrap: wrap; gap: 4px; max-height: 64px; overflow-y: auto; margin: 9px 0; }
+.categories button { padding: 4px 10px; font-size: 12px; }
+.categories .selected { background: var(--accent-weak); color: var(--accent-hover); }
+.app-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: start; max-height: 195px; overflow-y: auto; gap: 4px; }
+.app-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-width: 0; min-height: 75px; border: 0; background: transparent; border-radius: 13px; padding: 7px 4px; }
 .app-tile:hover { background: var(--hover); }
-.app-tile:active { background: var(--active); }
-.app-tile img, .fallback { width: 34px; height: 34px; object-fit: contain; }
-.fallback { display: grid; place-items: center; border-radius: 9px; color: white; }
-.recent { border-left: 1px solid var(--line); padding-left: 16px; min-width: 0; }
-.recent-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 0 10px; font-size: 12px; color: var(--text-2); }
-.recent-heading button { border: 0; background: transparent; font-size: 11px; color: var(--accent); }
-.clip { display: flex; width: 100%; align-items: center; gap: 8px; margin-bottom: 5px; padding: 10px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; text-align: left; }
-.clip:hover { background: var(--surface-3); }
-.clip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.empty { grid-column: 1/-1; color: var(--text-3); font-size: 12px; line-height: 1.8; padding: 12px 4px; }
-.paused-note { color: var(--text-3); font-size: 11px; }
-.feature-pane { max-height: 440px; overflow: auto; }
-.feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
+.app-tile img, .fallback { width: 33px; height: 33px; object-fit: contain; }
+.fallback { display: grid; place-items: center; border-radius: 10px; color: white; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), inset 0 -12px 16px rgba(11, 22, 55, .23); }
+.app-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-2); }
+.recent { min-width: 0; padding: 9px 10px 8px; border-radius: 15px; background: var(--glass-well); box-shadow: inset 0 0 0 1px var(--line); }
+.recent-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; margin: 0 0 5px; }
+.recent-heading h2 { font-size: 12px; color: var(--text-2); }
+.recent-heading button { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--text-2); }
+.recent-heading button:hover { background: var(--hover); color: var(--text); }
+.clip { display: flex; width: 100%; align-items: center; gap: 7px; padding: 6px; border-radius: 7px; text-align: left; }
+.clip + .clip { margin-top: 1px; }
+.clip:hover { background: var(--hover); }
+.clip svg { flex: none; color: var(--accent-hover); }
+.clip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.empty { grid-column: 1/-1; color: var(--text-2); font-size: 12px; line-height: 1.7; padding: 9px 4px; }
+.paused-note { color: var(--text-2); font-size: 11px; }
+.feature-pane { max-height: 420px; overflow: auto; }
+.feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-@media (max-width: 560px) { .columns { grid-template-columns: minmax(0,1fr) 160px; } .app-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } .expanded-content { padding-right: 12px; padding-left: 12px; } }
-.island-hit-area.reduced .expanded-content, .island-hit-area.reduced .arrow, .island-hit-area.reduced button { transition: none; }
-@media (prefers-reduced-motion: reduce) { .island-hit-area, .island, .expanded-content, .arrow { transition: none; } }
+.compact .columns { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.compact .app-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.compact .expanded-content { padding-right: 12px; padding-left: 12px; }
+.island-hit-area.reduced .island::before, .island-hit-area.reduced .expanded-content, .island-hit-area.reduced .grip, .island-hit-area.reduced button { transition: none; }
+@media (prefers-reduced-motion: reduce) { .island-hit-area, .island, .island::before, .expanded-content, .grip, button { transition: none; } }
 </style>

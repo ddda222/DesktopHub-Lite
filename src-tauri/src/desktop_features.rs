@@ -29,7 +29,7 @@ impl Default for IslandAppearance {
             scale: 100,
             opacity: 100,
             tint: String::new(),
-            preset: "classic".into(),
+            preset: "glass".into(),
             avoid_fullscreen: true,
             auto_check_updates: false,
         }

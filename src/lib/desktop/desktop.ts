@@ -44,7 +44,7 @@ export interface IslandAppearance {
 }
 
 export function defaultIslandAppearance(): IslandAppearance {
-  return { scale: 100, opacity: 100, tint: '', preset: 'classic', avoidFullscreen: true, autoCheckUpdates: false }
+  return { scale: 100, opacity: 100, tint: '', preset: 'glass', avoidFullscreen: true, autoCheckUpdates: false }
 }
 
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */
