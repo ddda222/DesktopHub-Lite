@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "精简版只开放自绘界面所需的最小权限：窗口拖动、自身显示隐藏与位置/尺寸调整。不开放任意 Shell、任意路径读取或任意本地资源访问。",
+  "windows": ["bar", "pop", "settings", "toast"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:window:allow-inner-size",
+    "core:window:allow-scale-factor",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

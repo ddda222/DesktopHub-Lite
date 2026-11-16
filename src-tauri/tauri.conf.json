@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DesktopHub Lite",
+  "version": "0.1.0",
+  "identifier": "com.desktophub.lite",
+  "build": {
+    "frontendDist": "../../../DesktopHub-work/desktophub-lite-dist",
+    "devUrl": "http://localhost:4317",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "bar",
+        "url": "index.html",
+        "title": "DesktopHub Lite",
+        "width": 140,
+        "height": 14,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all",
+    "icon": ["icons/icon.ico"]
+  }
+}

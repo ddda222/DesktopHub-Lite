@@ -1,0 +1,54 @@
+export type IconName =
+  | 'clipboard'
+  | 'search'
+  | 'close'
+  | 'back'
+  | 'trash'
+  | 'copy'
+  | 'image'
+  | 'text'
+  | 'more'
+  | 'pause'
+  | 'play'
+  | 'settings'
+  | 'check'
+  | 'grid'
+  | 'chevron-down'
+  | 'chevron-right'
+  | 'grip'
+  | 'info'
+  | 'edit'
+  | 'translate'
+  | 'align-left'
+  | 'align-center'
+  | 'align-right'
+
+export const iconPaths: Record<IconName, string> = {
+  translate: '<path d="M3 5h12M9 3v2M5 5c1 6 4 9 9 11M13 5c-1 6-4 9-9 11M14 21l4-10 4 10M15.5 17h5"/>',
+  'align-left': '<path d="M4 3v18"/><rect x="7" y="6" width="13" height="12" rx="2"/>',
+  'align-center': '<path d="M12 2v4M12 18v4"/><rect x="5" y="6" width="14" height="12" rx="2"/>',
+  'align-right': '<path d="M20 3v18"/><rect x="4" y="6" width="13" height="12" rx="2"/>',
+  clipboard:
+    '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/>',
+  close: '<path d="M18 6 6 18M6 6l12 12"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  trash:
+    '<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  image:
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  text: '<path d="M17 6H3M21 12H3M17 18H3"/>',
+  more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  play: '<path d="M6 3.5 20 12 6 20.5z"/>',
+  settings:
+    '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6h.09A1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  check: '<path d="m20 6-11 11-5-5"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="3" width="7" height="7" rx="1.6"/><rect x="14" y="14" width="7" height="7" rx="1.6"/><rect x="3" y="14" width="7" height="7" rx="1.6"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  'chevron-right': '<path d="m9 6 6 6-6 6"/>',
+  grip: '<circle cx="9" cy="6" r="1.3"/><circle cx="9" cy="12" r="1.3"/><circle cx="9" cy="18" r="1.3"/><circle cx="15" cy="6" r="1.3"/><circle cx="15" cy="12" r="1.3"/><circle cx="15" cy="18" r="1.3"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>'
+}

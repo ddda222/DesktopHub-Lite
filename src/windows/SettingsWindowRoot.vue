@@ -1,0 +1,36 @@
+<script setup lang="ts">
+/**
+ * `settings` 窗口：设置独占一个窗口，不再画遮罩。
+ *
+ * 浏览器样稿里 SettingsWindow 自带遮罩与居中，桌面窗口本身就是那个「框」，
+ * 所以这里用 shell 标记把遮罩层去掉，只保留窗口内容。
+ */
+import { onBeforeUnmount, onMounted } from 'vue'
+import SettingsWindow from '@/features/settings/SettingsWindow.vue'
+import { bootstrap, subscribeHostEvents } from '@/store'
+
+let unsubscribe: (() => void) | null = null
+
+onMounted(async () => {
+  unsubscribe = await subscribeHostEvents()
+  await bootstrap()
+})
+
+onBeforeUnmount(() => {
+  unsubscribe?.()
+})
+</script>
+
+<template>
+  <div class="settings-root">
+    <SettingsWindow standalone />
+  </div>
+</template>
+
+<style scoped>
+.settings-root {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+</style>

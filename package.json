@@ -1,0 +1,24 @@
+{
+  "name": "desktophub-lite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "DesktopHub 精简版：应用快捷方式、剪贴板历史与翻译",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
+  }
+}
