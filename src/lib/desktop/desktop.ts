@@ -34,10 +34,33 @@ export async function listenHost<T>(
   return tauriListen<T>(event, (e) => handler(e.payload))
 }
 
+export interface IslandAppearance {
+  scale: number
+  opacity: number
+  tint: string
+  preset: 'classic' | 'glass'
+  avoidFullscreen: boolean
+  autoCheckUpdates: boolean
+}
+
+export function defaultIslandAppearance(): IslandAppearance {
+  return { scale: 100, opacity: 100, tint: '', preset: 'classic', avoidFullscreen: true, autoCheckUpdates: false }
+}
+
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */
 export interface UiState {
   islandExpanded: boolean
   islandAnchor: string
+  islandPage: 'applications' | 'clipboard' | 'translation'
+  islandHoverMs: number
+  islandLeaveMs: number
+  islandReducedMotion: boolean
+  islandAppearance: IslandAppearance
+  fullscreenSuppressed: boolean
+  wechatEnabled: boolean
+  wechatStatus: string
+  wechatAttention: boolean
+  wechatEvent: number
   panel: 'clipboard' | 'translation' | 'category' | 'overflow' | null
   settingsOpen: boolean
   paused: boolean
@@ -50,6 +73,16 @@ export interface UiState {
 const EMPTY_UI: UiState = {
   islandExpanded: false,
   islandAnchor: 'center',
+  islandPage: 'applications',
+  islandHoverMs: 320,
+  islandLeaveMs: 450,
+  islandReducedMotion: false,
+  islandAppearance: defaultIslandAppearance(),
+  fullscreenSuppressed: false,
+  wechatEnabled: false,
+  wechatStatus: 'off',
+  wechatAttention: false,
+  wechatEvent: 0,
   panel: null,
   settingsOpen: false,
   paused: false,

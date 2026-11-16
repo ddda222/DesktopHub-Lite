@@ -3,9 +3,11 @@
 //! 每个 Tauri 窗口是独立 WebView，各自有独立的 JS 上下文，所以「当前打开哪个弹层」
 //! 「当前分类」「当前主题」这类状态不能放在 Vue store 里，必须由 Rust 持有并广播给所有窗口。
 
+use crate::desktop_features::IslandAppearance;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
+pub const PANEL_APPLICATIONS: &str = "applications";
 pub const PANEL_CLIPBOARD: &str = "clipboard";
 pub const PANEL_TRANSLATION: &str = "translation";
 pub const PANEL_CATEGORY: &str = "category";
@@ -22,6 +24,16 @@ pub const CATEGORY_ALL: &str = "all";
 pub struct UiState {
     pub island_expanded: bool,
     pub island_anchor: String,
+    pub island_page: String,
+    pub island_hover_ms: u32,
+    pub island_leave_ms: u32,
+    pub island_reduced_motion: bool,
+    pub wechat_enabled: bool,
+    pub wechat_status: String,
+    pub wechat_attention: bool,
+    pub wechat_event: u32,
+    pub island_appearance: IslandAppearance,
+    pub fullscreen_suppressed: bool,
     /// 当前打开的弹层：clipboard / translation / category / overflow / null
     pub panel: Option<String>,
     pub settings_open: bool,
@@ -38,6 +50,16 @@ impl Default for UiState {
         Self {
             island_expanded: false,
             island_anchor: "center".into(),
+            island_page: default_page(),
+            island_hover_ms: default_hover(),
+            island_leave_ms: default_leave(),
+            island_reduced_motion: false,
+            wechat_enabled: false,
+            wechat_status: "off".into(),
+            wechat_attention: false,
+            wechat_event: 0,
+            island_appearance: IslandAppearance::default(),
+            fullscreen_suppressed: false,
             panel: None,
             settings_open: false,
             paused: false,
@@ -76,6 +98,18 @@ impl UiStateHandle {
 pub struct UiPreferences {
     #[serde(default = "default_anchor")]
     pub island_anchor: String,
+    #[serde(default = "default_page")]
+    pub island_page: String,
+    #[serde(default = "default_hover")]
+    pub island_hover_ms: u32,
+    #[serde(default = "default_leave")]
+    pub island_leave_ms: u32,
+    #[serde(default)]
+    pub island_reduced_motion: bool,
+    #[serde(default)]
+    pub wechat_enabled: bool,
+    #[serde(default)]
+    pub island_appearance: IslandAppearance,
     pub active_category_id: String,
     pub theme: String,
 }
@@ -84,6 +118,12 @@ impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             island_anchor: default_anchor(),
+            island_page: default_page(),
+            island_hover_ms: default_hover(),
+            island_leave_ms: default_leave(),
+            island_reduced_motion: false,
+            wechat_enabled: false,
+            island_appearance: IslandAppearance::default(),
             active_category_id: CATEGORY_ALL.to_string(),
             theme: THEME_DARK.to_string(),
         }
@@ -94,11 +134,35 @@ impl UiPreferences {
     pub fn from_state(state: &UiState) -> Self {
         Self {
             island_anchor: state.island_anchor.clone(),
+            island_page: state.island_page.clone(),
+            island_hover_ms: state.island_hover_ms,
+            island_leave_ms: state.island_leave_ms,
+            island_reduced_motion: state.island_reduced_motion,
+            wechat_enabled: state.wechat_enabled,
+            island_appearance: state.island_appearance.clone(),
             active_category_id: state.active_category_id.clone(),
             theme: state.theme.clone(),
         }
     }
 }
 
-fn default_anchor() -> String { "center".into() }
+fn default_anchor() -> String {
+    "center".into()
+}
 
+fn default_page() -> String {
+    PANEL_APPLICATIONS.into()
+}
+fn default_hover() -> u32 {
+    320
+}
+fn default_leave() -> u32 {
+    450
+}
+
+pub fn valid_island_page(page: &str) -> bool {
+    matches!(
+        page,
+        PANEL_APPLICATIONS | PANEL_CLIPBOARD | PANEL_TRANSLATION
+    )
+}

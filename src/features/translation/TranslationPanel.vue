@@ -9,9 +9,11 @@
  * - 密钥正文永不读取、永不显示，界面只知道「已保存 / 未保存」。
  */
 import { computed } from 'vue'
+import { invokeHost } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
 import {
   closePanel,
+  cancelTranslation,
   copyTranslation,
   setTranslationDirection,
   setTranslationSource,
@@ -22,6 +24,14 @@ import { findProvider } from '@/lib/desktop/providers'
 import type { TranslateDirection } from '@/lib/desktop/types'
 
 /** 方向三段式：自动判断 / 中→英 / 英→中 */
+const props = defineProps<{ standalone?: boolean }>()
+function dismiss(): void {
+  if (props.standalone) {
+    cancelTranslation()
+    void invokeHost('close_translation_window')
+  } else closePanel()
+}
+
 const directions: ReadonlyArray<{ value: TranslateDirection; label: string }> = [
   { value: 'auto', label: '自动判断' },
   { value: 'zh-en', label: '中→英' },
@@ -109,7 +119,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
-    closePanel()
+    dismiss()
     return
   }
 
@@ -125,7 +135,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   <section class="panel" aria-label="翻译面板" @keydown="onPanelKeydown">
     <header class="head">
       <h2 class="title">翻译</h2>
-      <button class="icon-btn" type="button" aria-label="关闭翻译面板" title="关闭" @click="closePanel()">
+      <button class="icon-btn" type="button" aria-label="关闭翻译面板" title="关闭" @click="dismiss()">
         <Icon name="close" :size="16" />
       </button>
     </header>

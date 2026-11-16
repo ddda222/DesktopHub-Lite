@@ -71,12 +71,17 @@ pub fn delete_translation_secret(app: AppHandle) -> Result<(), String> {
     match credential(&settings)?.delete_credential() { Ok(()) | Err(keyring::Error::NoEntry) => {}, Err(_) => return Err("删除密钥失败".into()) }
     drop(settings); settings_changed(&app); Ok(())
 }
-#[tauri::command]
-pub fn cancel_translation(state: State<'_, AppState>) {
-    if let Some(sender) = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).take() { let _ = sender.send(()); }
+pub fn cancel_for_window(state: &AppState, label: &str) {
+    if let Some(sender) = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).remove(label) {
+        let _ = sender.send(());
+    }
 }
 #[tauri::command]
-pub async fn translate_text(app: AppHandle, text: String, direction: String) -> Result<TranslationResult, String> {
+pub fn cancel_translation(state: State<'_, AppState>, window: tauri::WebviewWindow) {
+    cancel_for_window(&state, window.label());
+}
+#[tauri::command]
+pub async fn translate_text(app: AppHandle, window: tauri::WebviewWindow, text: String, direction: String) -> Result<TranslationResult, String> {
     let text = text.trim(); if text.is_empty() || text.chars().count() > 5000 { return Err("请输入 1–5000 个字符的原文".into()); }
     let settings = app.state::<AppState>().translation.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let url = validate(&settings)?;
@@ -95,7 +100,7 @@ pub async fn translate_text(app: AppHandle, text: String, direction: String) -> 
     {
         let state = app.state::<AppState>();
         let mut current = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(previous) = current.replace(sender) { let _ = previous.send(()); }
+        if let Some(previous) = current.insert(window.label().to_string(), sender) { let _ = previous.send(()); }
     }
     let start = std::time::Instant::now();
     let request = async {

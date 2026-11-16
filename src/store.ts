@@ -9,12 +9,14 @@
 import { computed, reactive, watch } from 'vue'
 import { host, newRequestId } from '@/lib/desktop/host'
 import {
+  defaultIslandAppearance,
   dismissPanel,
   dismissSettings,
   describeTarget,
   importDesktopShortcuts,
   invokeHost,
   isDesktop,
+  windowLabel,
   onApplicationsChanged,
   listenHost,
   onUiState,
@@ -60,6 +62,7 @@ export const state = reactive({
   categories: [] as Category[],
   clips: [] as ClipItem[],
   groups: [] as string[],
+  clipboardPreferences: { captureImages: true, historyLimit: null as number | null, defaultHistoryLimit: 500 },
   settings: {
     theme: 'dark',
     recordClipboard: true,
@@ -88,11 +91,22 @@ export const state = reactive({
   ui: {
     islandExpanded: false,
     islandAnchor: 'center',
+    islandPage: 'applications' as UiState['islandPage'],
+    islandHoverMs: 320,
+    islandLeaveMs: 450,
+    islandReducedMotion: false,
+    islandAppearance: defaultIslandAppearance(),
+    fullscreenSuppressed: false,
+    wechatEnabled: false,
+    wechatStatus: 'off',
+    wechatAttention: false,
+    wechatEvent: 0,
     activeCategoryId: 'all',
     panel: null as PanelName,
     settingsOpen: false,
     settingsSection: 'apps' as SettingsSection,
     query: '',
+    favoritesOnly: false,
     group: '全部',
     detailId: null as string | null,
     activeIndex: 0,
@@ -108,6 +122,8 @@ function toClipItem(record: ClipboardRecord): ClipItem {
     id: record.id,
     kind: record.kind,
     text: record.text ?? undefined,
+    favorite: record.favorite ?? false,
+    note: record.note ?? '',
     group: record.group,
     copiedAt: record.copiedAt,
     width: record.width ?? undefined,
@@ -120,12 +136,17 @@ async function refreshClipboard(): Promise<void> {
   const seq = ++clipboardRefresh
   const [entries, status] = await Promise.all([
     invokeHost<ClipboardRecord[]>('list_clipboard_entries'),
-    invokeHost<{ groups: string[]; paused: boolean }>('clipboard_status')
+    invokeHost<{ groups: string[]; paused: boolean; captureImages: boolean; historyLimit: number | null; defaultHistoryLimit: number }>('clipboard_status')
   ])
   if (seq !== clipboardRefresh) return
   const previous = new Map(state.clips.map((clip) => [clip.id, clip]))
   state.clips = entries.map((record) => ({ ...toClipItem(record), imageUrl: previous.get(record.id)?.imageUrl, imageMissing: previous.get(record.id)?.imageMissing }))
   state.groups = status.groups
+  state.clipboardPreferences = {
+    captureImages: status.captureImages,
+    historyLimit: status.historyLimit,
+    defaultHistoryLimit: status.defaultHistoryLimit
+  }
   state.ui.paused = status.paused
   state.settings.recordClipboard = !status.paused
   if (!groupFilters.value.includes(state.ui.group)) state.ui.group = '全部'
@@ -219,6 +240,16 @@ export async function bootstrap(): Promise<void> {
 function applyUiState(ui: UiState): void {
   state.ui.islandExpanded = ui.islandExpanded
   state.ui.islandAnchor = ui.islandAnchor
+  state.ui.islandPage = ui.islandPage
+  state.ui.islandHoverMs = ui.islandHoverMs
+  state.ui.islandLeaveMs = ui.islandLeaveMs
+  state.ui.islandReducedMotion = ui.islandReducedMotion
+  state.ui.islandAppearance = ui.islandAppearance
+  state.ui.fullscreenSuppressed = ui.fullscreenSuppressed
+  state.ui.wechatEnabled = ui.wechatEnabled
+  state.ui.wechatStatus = ui.wechatStatus
+  state.ui.wechatAttention = ui.wechatAttention
+  state.ui.wechatEvent = ui.wechatEvent
   state.ui.panel = ui.panel
   state.ui.settingsOpen = ui.settingsOpen
   state.ui.paused = ui.paused
@@ -293,7 +324,8 @@ export const filteredClips = computed(() => {
   const query = state.ui.query.trim().toLowerCase()
   return state.clips.filter((clip) => {
     if (state.ui.group !== '全部' && clip.group !== state.ui.group) return false
-    if (!query) return true
+    if (state.ui.favoritesOnly && !clip.favorite) return false
+    if (!query || (clip.note ?? '').toLowerCase().includes(query)) return true
     if (clip.kind === 'image') return '图片'.includes(query) || query.includes('图片')
     return (clip.text ?? '').toLowerCase().includes(query)
   })
@@ -658,6 +690,46 @@ export async function copyClip(clip: ClipItem): Promise<void> {
   }
 }
 
+async function updateClipboard(command: string, args: Record<string, unknown>): Promise<boolean> {
+  try {
+    await invokeHost(command, args)
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : String(error), 'error')
+    return false
+  }
+  try { await refreshClipboard() }
+  catch { pushToast('已保存，但读取最新剪贴板状态失败', 'error') }
+  return true
+}
+
+export async function editClip(clip: ClipItem, favorite: boolean, note: string): Promise<boolean> {
+  if (!isDesktop) { Object.assign(clip, { favorite, note: note.trim() }); return true }
+  return updateClipboard('edit_clipboard_entry', { id: clip.id, favorite, note })
+}
+
+export async function deleteSelectedClips(ids: string[], expectedFavorites: number): Promise<boolean> {
+  if (!isDesktop) {
+    state.clips = state.clips.filter((clip) => !ids.includes(clip.id))
+    return true
+  }
+  return updateClipboard('delete_clipboard_entries', { ids, expectedFavorites })
+}
+
+export async function setCaptureImages(enabled: boolean): Promise<boolean> {
+  if (!isDesktop) { state.clipboardPreferences.captureImages = enabled; return true }
+  return updateClipboard('set_clipboard_capture_images', { enabled })
+}
+
+export async function saveClipHistoryLimit(limit: number, expectedRemoved: number): Promise<boolean> {
+  if (!isDesktop) {
+    let ordinary = 0
+    state.clips = state.clips.filter((clip) => clip.favorite || ++ordinary <= limit)
+    state.clipboardPreferences.historyLimit = limit
+    return true
+  }
+  return updateClipboard('set_clipboard_history_limit', { limit, expectedRemoved })
+}
+
 export async function deleteClip(clip: ClipItem): Promise<void> {
   if (!isDesktop) {
     const index = state.clips.findIndex((item) => item.id === clip.id)
@@ -867,5 +939,5 @@ export async function saveAppCategory(id: string, name: string | null): Promise<
 watch(() => state.ui.panel, (panel, previous) => {
   if (!isDesktop) return
   if (panel === 'clipboard') void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error'))
-  if (previous === 'translation' && panel !== 'translation') cancelTranslation()
+  if (windowLabel !== 'translation' && previous === 'translation' && panel !== 'translation') cancelTranslation()
 })

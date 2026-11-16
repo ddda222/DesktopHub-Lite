@@ -27,6 +27,8 @@ export interface ClipItem {
   text?: string
   imageUrl?: string
   imageMissing?: boolean
+  favorite?: boolean
+  note?: string
   group: string
   copiedAt: number
   width?: number
@@ -90,6 +92,8 @@ export interface ClipboardRecord {
   kind: ClipKind
   text?: string | null
   imageFile?: string | null
+  favorite?: boolean
+  note?: string
   group: string
   copiedAt: number
   width?: number | null

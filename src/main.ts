@@ -13,6 +13,7 @@ import BrowserPreview from './windows/BrowserPreview.vue'
 import BarWindow from './windows/BarWindow.vue'
 import PopWindow from './windows/PopWindow.vue'
 import SettingsWindowRoot from './windows/SettingsWindowRoot.vue'
+import TranslationWindow from './windows/TranslationWindow.vue'
 import ToastWindow from './windows/ToastWindow.vue'
 import { isDesktop, windowLabel } from '@/lib/desktop/desktop'
 import * as store from './store'
@@ -28,6 +29,8 @@ function pickRoot(): { root: Component; shell: string } {
       return { root: PopWindow, shell: 'pop' }
     case 'settings':
       return { root: SettingsWindowRoot, shell: 'settings' }
+    case 'translation':
+      return { root: TranslationWindow, shell: 'translation' }
     case 'toast':
       return { root: ToastWindow, shell: 'toast' }
     default:

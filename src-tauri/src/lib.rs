@@ -11,6 +11,7 @@ mod applications;
 mod clipboard;
 mod clipboard_service;
 mod desktop_support;
+mod desktop_features;
 mod icons;
 mod launcher;
 mod logging;
@@ -18,6 +19,7 @@ mod state;
 mod storage;
 mod translation;
 mod windows;
+mod wechat;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,8 +58,10 @@ pub struct AppState {
     clipboard: Mutex<ClipboardIndex>,
     translation: Mutex<TranslationSettings>,
     running: AtomicBool,
-    translation_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    translation_cancel: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     shortcuts: Mutex<desktop_support::Shortcuts>,
+    update_status: Mutex<Option<desktop_features::UpdateStatus>>,
+    update_check_gate: tokio::sync::Mutex<()>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -135,11 +139,15 @@ fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> U
     let state = app.state::<AppState>();
     let next = state.ui.update(|ui| {
         ui.island_expanded = expanded;
-        if !expanded { ui.panel = None; }
+        ui.panel = if expanded && ui.island_page != state::PANEL_APPLICATIONS {
+            Some(ui.island_page.clone())
+        } else { None };
     });
     if expanded { state.windows.mark_pop_shown(); }
-    else { state.windows.clear_pop_shown(); }
-    if !expanded { translation::cancel_translation(app.state()); }
+    else {
+        state.windows.clear_pop_shown();
+        translation::cancel_for_window(&state, windows::BAR);
+    }
     if focus.unwrap_or(false) { show_window(&app, windows::BAR); }
     broadcast_ui(&app);
     next
@@ -156,6 +164,40 @@ fn set_island_anchor(app: AppHandle, anchor: String) -> Result<UiState, String> 
     Ok(next)
 }
 
+#[tauri::command]
+fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Result<UiState, String> {
+    if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
+    let state = app.state::<AppState>();
+    let previous = state.ui.snapshot();
+    let next = state.ui.update(|ui| {
+        ui.island_page = page.clone();
+        ui.island_expanded = true;
+        ui.panel = if page == state::PANEL_APPLICATIONS { None } else { Some(page.clone()) };
+    });
+    if previous.island_page == PANEL_TRANSLATION && page != PANEL_TRANSLATION {
+        translation::cancel_for_window(&state, windows::BAR);
+    }
+    if previous.island_page != page { persist_ui_prefs(&app, &next); }
+    if focus.unwrap_or(true) { show_window(&app, windows::BAR); }
+    hide_window(&app, windows::POP);
+    broadcast_ui(&app);
+    Ok(next)
+}
+
+#[tauri::command]
+fn open_translation_window(app: AppHandle) -> Result<(), String> {
+    windows::ensure_translation(&app)?;
+    show_window(&app, windows::TRANSLATION);
+    Ok(())
+}
+
+#[tauri::command]
+fn close_translation_window(app: AppHandle) {
+    translation::cancel_for_window(&app.state::<AppState>(), windows::TRANSLATION);
+    let _ = app.emit_to(windows::TRANSLATION, "translation-window-hidden", ());
+    hide_window(&app, windows::TRANSLATION);
+}
+
 // ---------------------------------------------------------------- 窗口命令
 
 #[tauri::command]
@@ -163,6 +205,9 @@ fn toggle_panel(app: AppHandle, panel: String) -> Result<UiState, String> {
     let allowed = [PANEL_CLIPBOARD, PANEL_TRANSLATION, PANEL_CATEGORY, PANEL_OVERFLOW];
     if !allowed.contains(&panel.as_str()) {
         return Err(format!("未知弹层：{panel}"));
+    }
+    if state::valid_island_page(&panel) {
+        return select_island_page(app, panel, Some(true));
     }
     log_info!("toggle_panel {panel}");
     let state = app.state::<AppState>();
@@ -194,7 +239,13 @@ fn toggle_panel(app: AppHandle, panel: String) -> Result<UiState, String> {
 #[tauri::command]
 fn close_panel(app: AppHandle) -> UiState {
     let state = app.state::<AppState>();
-    let next = state.ui.update(|ui| ui.panel = None);
+    let next = state.ui.update(|ui| {
+        if matches!(ui.panel.as_deref(), Some(PANEL_TRANSLATION | PANEL_CLIPBOARD)) {
+            ui.island_page = state::PANEL_APPLICATIONS.into();
+        }
+        ui.panel = None;
+    });
+    persist_ui_prefs(&app, &next);
     hide_window(&app, windows::POP);
     broadcast_ui(&app);
     next
@@ -227,18 +278,11 @@ fn close_settings(app: AppHandle) -> UiState {
 /// 界面量出真实尺寸后回调，让图标条窗口始终等于图标条本身。
 #[tauri::command]
 fn set_bar_size(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
+    if !width.is_finite() || !height.is_finite() || !(140.0..=1600.0).contains(&width) || !(14.0..=1200.0).contains(&height) {
+        return Err("灵动岛尺寸无效".into());
+    }
     let state = app.state::<AppState>();
     state.windows.set_bar_size(width, height);
-    let Some(window) = app.get_webview_window(windows::BAR) else {
-        return Ok(());
-    };
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    window
-        .set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
-            (width * scale).round() as u32,
-            (height * scale).round() as u32,
-        )))
-        .map_err(|e| e.to_string())?;
     windows::place_bar(&app, &state.windows);
     Ok(())
 }
@@ -857,7 +901,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "quit" => {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.running.store(false, Ordering::Relaxed);
-                    if let Some(sender) = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).take() { let _ = sender.send(()); }
+                    for (_, sender) in state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).drain() { let _ = sender.send(()); }
                     drop(state.clipboard.lock().unwrap_or_else(|e| e.into_inner()));
                     state.windows.persist_now(&state.store);
                 }
@@ -939,6 +983,16 @@ pub fn run() {
                     settings_open: false,
                     island_expanded: false,
                     island_anchor: prefs.island_anchor,
+                    island_page: if state::valid_island_page(&prefs.island_page) { prefs.island_page } else { state::PANEL_APPLICATIONS.into() },
+                    island_hover_ms: prefs.island_hover_ms.clamp(100, 2000),
+                    island_leave_ms: prefs.island_leave_ms.clamp(100, 4000),
+                    island_reduced_motion: prefs.island_reduced_motion,
+                    wechat_enabled: prefs.wechat_enabled,
+                    wechat_status: if prefs.wechat_enabled { "starting" } else { "off" }.into(),
+                    wechat_attention: false,
+                    wechat_event: 0,
+                    island_appearance: prefs.island_appearance,
+                    fullscreen_suppressed: false,
                     paused,
                     active_category_id: prefs.active_category_id,
                     theme: prefs.theme,
@@ -947,8 +1001,10 @@ pub fn run() {
                 clipboard: Mutex::new(clipboard),
                 translation: Mutex::new(translation),
                 running: AtomicBool::new(true),
-                translation_cancel: Mutex::new(None),
+                translation_cancel: Mutex::new(std::collections::HashMap::new()),
                 shortcuts: Mutex::new(shortcuts),
+                update_status: Mutex::new(None),
+                update_check_gate: tokio::sync::Mutex::new(()),
             });
 
             if let Err(error) = build_tray(&handle) {
@@ -956,6 +1012,14 @@ pub fn run() {
             }
             desktop_support::register(&handle);
             clipboard_service::start(handle.clone());
+            wechat::start(handle.clone());
+            desktop_features::start_fullscreen_watch(handle.clone());
+            if app.state::<AppState>().ui.snapshot().island_appearance.auto_check_updates {
+                let update_app = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = desktop_features::check_deskhub_updates(update_app.state()).await;
+                });
+            }
 
             // 图标条窗口：先按内容尺寸摆放，再显示，避免启动时闪一下大窗口。
             {
@@ -986,13 +1050,14 @@ pub fn run() {
                 WindowEvent::CloseRequested { api, .. } => {
                     // 关闭只隐藏，退出走托盘菜单。
                     api.prevent_close();
-                    let _ = window.hide();
+                    if window.label() == windows::TRANSLATION { close_translation_window(app.clone()); }
+                    else { let _ = window.hide(); }
                 }
                 WindowEvent::Moved(position) => {
                     if window.label() == windows::BAR {
+                        // 程序布局也会发 Moved；动画过程中不能把每帧写入数据文件。
                         if let Some(state) = app.try_state::<AppState>() {
                             state.windows.remember(position.x, position.y);
-                            state.windows.persist(&state.store);
                         }
                         if let Some(state) = app.try_state::<AppState>() {
                             if state.ui.snapshot().panel.is_some() {
@@ -1002,13 +1067,7 @@ pub fn run() {
                     }
                 }
                 WindowEvent::Focused(focused) => {
-                    if !*focused && window.label() == windows::BAR {
-                        if let Some(state) = app.try_state::<AppState>() {
-                            if state.ui.snapshot().island_expanded && !state.windows.pop_recently_shown() {
-                                set_island_expanded(app.clone(), false, None);
-                            }
-                        }
-                    }
+                    // 岛内交互由 WebView 管理，系统短暂失焦不关闭输入中的界面。
                     // 「点击弹层外面收起弹层」必须由系统焦点事件判断：
                     // 界面自己监听 blur 会把「窗口刚显示还没拿到焦点」也当成点了外面。
                     if !*focused && window.label() == windows::POP {
@@ -1049,6 +1108,18 @@ pub fn run() {
             ui_state,
             set_island_expanded,
             set_island_anchor,
+            select_island_page,
+            open_translation_window,
+            close_translation_window,
+            wechat::set_wechat_enabled,
+            wechat::clear_wechat_attention,
+            wechat::open_existing_wechat,
+            desktop_features::save_island_appearance,
+            desktop_features::startup_status,
+            desktop_features::set_startup_enabled,
+            desktop_features::check_deskhub_updates,
+            desktop_features::last_deskhub_update,
+            desktop_features::open_deskhub_release_page,
             toggle_panel,
             close_panel,
             open_settings,
@@ -1076,6 +1147,10 @@ pub fn run() {
             list_clipboard_entries,
             set_clipboard_paused,
             clipboard_service::clipboard_status,
+            clipboard_service::set_clipboard_capture_images,
+            clipboard_service::set_clipboard_history_limit,
+            clipboard_service::edit_clipboard_entry,
+            clipboard_service::delete_clipboard_entries,
             clipboard_service::copy_clipboard_entry,
             clipboard_service::copy_translation_result,
             clipboard_service::read_clipboard_thumbnail,

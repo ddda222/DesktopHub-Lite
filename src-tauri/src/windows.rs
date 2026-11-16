@@ -20,6 +20,7 @@ use crate::storage::Store;
 pub const BAR: &str = "bar";
 pub const POP: &str = "pop";
 pub const SETTINGS: &str = "settings";
+pub const TRANSLATION: &str = "translation";
 /// 轻提示窗口：图标条窗口刚好等于图标条本身，放不下提示，
 /// 所以提示单独用一个按内容自适应的小窗口，浮在图标条上方。
 pub const TOAST: &str = "toast";
@@ -30,8 +31,7 @@ pub const WINDOW_STATE_FILE: &str = "window-state.json";
 const POP_GAP: f64 = 10.0;
 /// 图标条离工作区边缘的默认距离（逻辑像素）。
 const SETTINGS_SIZE: (f64, f64) = (760.0, 560.0);
-/// 拖动时写入窗口位置的节流间隔。
-const SAVE_INTERVAL: Duration = Duration::from_millis(400);
+
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,7 +47,6 @@ pub struct WindowsHandle {
     /// 弹层相对图标条的水平对齐：center / left / right
     pop_align: Mutex<String>,
     toast_size: Mutex<(f64, f64)>,
-    last_save: Mutex<Option<Instant>>,
     /// 弹层窗口显示的时刻。刚显示时系统会给它一次焦点，
     /// 之后紧接着的失焦并不代表用户点了别处，需要忽略这一小段。
     pop_shown_at: Mutex<Option<Instant>>,
@@ -65,7 +64,6 @@ impl WindowsHandle {
             pop_size: Mutex::new((384.0, 480.0)),
             pop_align: Mutex::new("center".to_string()),
             toast_size: Mutex::new((360.0, 40.0)),
-            last_save: Mutex::new(None),
             pop_shown_at: Mutex::new(None),
             last_auto_close: Mutex::new(None),
         }
@@ -152,21 +150,6 @@ impl WindowsHandle {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// 拖动过程中节流写入，避免每个 Moved 事件都落盘。
-    pub fn persist(&self, store: &Store) {
-        {
-            let mut last = self.last_save.lock().unwrap_or_else(|e| e.into_inner());
-            let now = Instant::now();
-            if let Some(prev) = *last {
-                if now.duration_since(prev) < SAVE_INTERVAL {
-                    return;
-                }
-            }
-            *last = Some(now);
-        }
-        self.persist_now(store);
-    }
-
     pub fn persist_now(&self, store: &Store) {
         let state = self.snapshot();
         if let Err(error) = store.write(WINDOW_STATE_FILE, &state) {
@@ -229,10 +212,36 @@ pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
     let (width, height) = handle.bar_size();
     let (x, y) = default_bar_position(app, width, height);
     let scale = window.scale_factor().unwrap_or(1.0);
-    let _ = window.set_size(tauri::Size::Physical(PhysicalSize::new(
-        (width * scale).round() as u32,
-        (height * scale).round() as u32,
-    )));
+    let target = PhysicalSize::new((width * scale).round() as u32, (height * scale).round() as u32);
+    if window.inner_size().ok() == Some(target) &&
+        window.outer_position().ok() == Some(PhysicalPosition::new(x, y)) { return; }
+
+    // 位置和大小一次提交；两次系统调用会先移动旧尺寸，造成边缘跳动。
+    #[cfg(windows)]
+    if let Ok(native) = window.hwnd() {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+        let hwnd = HWND(native.0);
+        let moved = unsafe { SetWindowPos(hwnd, None, x, y, target.width as i32, target.height as i32,
+            SWP_NOACTIVATE | SWP_NOZORDER) };
+        if moved.is_ok() {
+            // 收起仍保留完整热区。展开后让透明圆角外的像素不截获鼠标。
+            unsafe {
+                if height <= 15.0 { SetWindowRgn(hwnd, None, true); }
+                else {
+                    let curve = ((height * 0.36).clamp(10.0, 28.0) * scale).round() as i32;
+                    let region = CreateRoundRectRgn(0, 0, target.width as i32 + 1, target.height as i32 + 1, curve, curve);
+                    if !region.0.is_null() && SetWindowRgn(hwnd, Some(region), true) == 0 {
+                        let _ = DeleteObject(region.into());
+                    }
+                }
+            }
+            return;
+        }
+    }
+
+    let _ = window.set_size(tauri::Size::Physical(target));
     let _ = window.set_position(tauri::Position::Physical(PhysicalPosition::new(x, y)));
 }
 
@@ -316,6 +325,16 @@ pub fn ensure_settings(app: &AppHandle) -> Result<WebviewWindow, String> {
         .map_err(|error| format!("创建设置窗口失败：{error}"))?;
     center_window(&window, SETTINGS_SIZE);
     Ok(window)
+}
+
+pub fn ensure_translation(app: &AppHandle) -> Result<WebviewWindow, String> {
+    if let Some(window) = app.get_webview_window(TRANSLATION) { return Ok(window); }
+    WebviewWindowBuilder::new(app, TRANSLATION, WebviewUrl::App("index.html".into()))
+        .title("DesktopHub Lite 翻译")
+        .inner_size(520.0, 620.0)
+        .min_inner_size(360.0, 420.0)
+        .visible(false)
+        .build().map_err(|error| format!("无法打开翻译窗口：{error}"))
 }
 
 /// 轻提示窗口：不抢焦点、不进任务栏、尺寸随内容变化。

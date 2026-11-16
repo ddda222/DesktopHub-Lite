@@ -10,6 +10,8 @@ import {
   closePanel,
   copyClip,
   deleteClip,
+  deleteSelectedClips,
+  editClip,
   filteredClips,
   groupFilters,
   moveActive,
@@ -25,6 +27,62 @@ const searchEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 
 const detailClip = computed(() => activeClip.value)
+const noteDraft = ref('')
+const savingNote = ref(false)
+const selecting = ref(false)
+const selectedIds = ref(new Set<string>())
+const deletePrompt = ref<{ ids: string[]; favorites: number } | null>(null)
+const deleting = ref(false)
+
+function toggleSelected(id: string): void {
+  deletePrompt.value = null
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function stopSelecting(): void {
+  selecting.value = false
+  selectedIds.value = new Set()
+  deletePrompt.value = null
+}
+
+function selectVisible(): void {
+  selectedIds.value = new Set([...selectedIds.value, ...filteredClips.value.map((clip) => clip.id)])
+  deletePrompt.value = null
+}
+
+function prepareDeletion(ids: string[]): void {
+  const wanted = new Set(ids)
+  const captured = state.clips.filter((clip) => wanted.has(clip.id))
+  if (!captured.length) return
+  deletePrompt.value = {
+    ids: captured.map((clip) => clip.id),
+    favorites: captured.filter((clip) => clip.favorite).length
+  }
+}
+
+async function confirmDeletion(): Promise<void> {
+  const pending = deletePrompt.value
+  if (!pending || deleting.value) return
+  deleting.value = true
+  try {
+    if (await deleteSelectedClips(pending.ids, pending.favorites)) {
+      if (state.ui.detailId && pending.ids.includes(state.ui.detailId)) closeDetail()
+      stopSelecting()
+    } else deletePrompt.value = null
+  } finally { deleting.value = false }
+}
+
+async function saveNote(clip: ClipItem, favorite = clip.favorite ?? false): Promise<void> {
+  if (savingNote.value) return
+  savingNote.value = true
+  try { await editClip(clip, favorite, noteDraft.value) }
+  finally { savingNote.value = false }
+}
+
+watch(() => detailClip.value?.id, () => { noteDraft.value = detailClip.value?.note ?? '' })
 
 /** 文件缺失或没有可用地址时都不渲染 <img>，避免出现破图 */
 function isImageBroken(clip: ClipItem | null): boolean {
@@ -66,6 +124,7 @@ function onCopy(clip: ClipItem | null): void {
 
 function onDelete(clip: ClipItem | null): void {
   if (!clip) return
+  if (clip.favorite) { prepareDeletion([clip.id]); return }
   void deleteClip(clip).then(clampActive)
 }
 
@@ -87,12 +146,14 @@ function onKeydown(event: KeyboardEvent): void {
 
   if (event.key === 'Escape') {
     event.stopPropagation()
+    if (deletePrompt.value) { deletePrompt.value = null; return }
+    if (selecting.value) { stopSelecting(); return }
     closePanel()
     return
   }
 
   // 详情视图内由详情自己的按钮负责操作，方向键与 Enter 不再作用于列表
-  if (state.ui.detailId) return
+  if (state.ui.detailId || selecting.value) return
 
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
@@ -137,7 +198,7 @@ watch(
           type="text"
           spellcheck="false"
           autocomplete="off"
-          placeholder="搜索文本、网址、图片…"
+          placeholder="搜索正文、备注、图片…"
           aria-label="搜索剪贴板历史"
           :value="state.ui.query"
           @input="onInput"
@@ -174,6 +235,22 @@ watch(
       </button>
     </div>
 
+    <div class="management" v-if="!detailClip">
+      <button class="chip" type="button" :aria-pressed="state.ui.favoritesOnly"
+        :class="{ 'is-on': state.ui.favoritesOnly }" @click="state.ui.favoritesOnly = !state.ui.favoritesOnly">只看收藏</button>
+      <button v-if="!selecting" class="chip" type="button" @click="selecting = true">批量管理</button>
+      <template v-else>
+        <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
+        <button class="chip" type="button" @click="stopSelecting">取消选择</button>
+        <button class="chip" type="button" :disabled="!selectedIds.size"
+          @click="prepareDeletion([...selectedIds])">删除已选（{{ selectedIds.size }}）</button>
+      </template>
+    </div>
+    <div v-if="deletePrompt" class="management" role="alert">
+      <span>删除 {{ deletePrompt.ids.length }} 条记录<span v-if="deletePrompt.favorites">（含 {{ deletePrompt.favorites }} 条收藏）</span>？</span>
+      <button class="chip" type="button" :disabled="deleting" @click="confirmDeletion">确认删除</button>
+      <button class="chip" type="button" :disabled="deleting" @click="deletePrompt = null">取消</button>
+    </div>
     <section v-if="detailClip" class="detail" aria-label="记录详情">
       <div class="detail-head">
         <button class="back" type="button" @click="closeDetail()">
@@ -200,6 +277,13 @@ watch(
         <pre v-else class="detail-text">{{ detailClip.text || '（空白文本）' }}</pre>
       </div>
 
+      <div class="management">
+        <input v-model="noteDraft" maxlength="200" aria-label="剪贴板备注" placeholder="添加备注（最多 200 字）" />
+        <button class="chip" type="button" :disabled="savingNote || noteDraft.trim() === (detailClip.note ?? '')" @click="saveNote(detailClip)">保存备注</button>
+        <button class="chip" type="button" :disabled="savingNote" :aria-pressed="!!detailClip.favorite" @click="saveNote(detailClip, !detailClip.favorite)">
+          {{ detailClip.favorite ? '取消收藏' : '收藏' }}
+        </button>
+      </div>
       <div class="detail-actions">
         <select :value="detailClip.group" aria-label="记录分组" @change="assignClipGroup(detailClip.id, ($event.target as HTMLSelectElement).value)">
           <option v-for="group in state.groups" :key="group" :value="group">{{ group }}</option>
@@ -248,9 +332,11 @@ watch(
           :data-index="index"
           :class="{ 'is-active': index === state.ui.activeIndex }"
           :aria-label="`${clipSummary(clip)}，${clip.group}，${relativeTime(clip.copiedAt)}`"
-          @click="onCopy(clip)"
+          @click="selecting ? toggleSelected(clip.id) : onCopy(clip)"
           @mouseenter="setActive(index)"
         >
+          <input v-if="selecting" type="checkbox" :checked="selectedIds.has(clip.id)"
+            :aria-label="`选择：${clipSummary(clip)}`" @click.stop="toggleSelected(clip.id)" />
           <div class="thumb" :class="{ 'is-broken': isImageBroken(clip) }">
             <img v-if="clip.kind === 'image' && !isImageBroken(clip)" :src="clip.imageUrl" alt="" />
             <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
@@ -258,14 +344,15 @@ watch(
           </div>
 
           <div class="row-main">
-            <div class="row-title">{{ clipSummary(clip) }}</div>
+            <div class="row-title">{{ clip.favorite ? '★ ' : '' }}{{ clipSummary(clip) }}</div>
             <div class="row-meta">
               <span class="row-meta-text">{{ clip.group }} · {{ relativeTime(clip.copiedAt) }}</span>
+              <span v-if="clip.note" class="row-meta-text" :title="clip.note">{{ clip.note }}</span>
               <span v-if="clip.imageMissing" class="tag-missing">图片缺失</span>
             </div>
           </div>
 
-          <div class="row-actions">
+          <div v-if="!selecting" class="row-actions">
             <button
               class="icon-btn"
               type="button"
@@ -304,6 +391,9 @@ watch(
 </template>
 
 <style scoped>
+.management { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; }
+.management input:not([type]) { min-width: 8rem; flex: 1; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; }
+
 .pop {
   display: flex;
   flex-direction: column;

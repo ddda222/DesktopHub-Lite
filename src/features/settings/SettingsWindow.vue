@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
+import DesktopFeatures from './DesktopFeatures.vue'
 import {
   addAppFromPicker,
   addAppByTarget,
   clearClips,
+  setCaptureImages,
+  saveClipHistoryLimit,
   createClipGroup,
   removeClipGroup,
   saveTranslationSettings,
@@ -182,6 +185,38 @@ function groupCount(group: string): number {
 function removeGroup(group: string): void {
   if (group === '未分组') return
   void removeClipGroup(group)
+}
+
+const historyLimitDraft = ref<number | null>(null)
+const historyLimitPrompt = ref<{ limit: number; removed: number } | null>(null)
+const savingClipboardPreferences = ref(false)
+const proposedHistoryLimit = computed(() =>
+  historyLimitDraft.value ?? state.clipboardPreferences.historyLimit ?? state.clipboardPreferences.defaultHistoryLimit)
+const ordinaryCount = computed(() => state.clips.filter((clip) => !clip.favorite).length)
+
+async function toggleCaptureImages(): Promise<void> {
+  if (savingClipboardPreferences.value) return
+  savingClipboardPreferences.value = true
+  try { await setCaptureImages(!state.clipboardPreferences.captureImages) }
+  finally { savingClipboardPreferences.value = false }
+}
+
+async function applyHistoryLimit(): Promise<void> {
+  if (savingClipboardPreferences.value) return
+  const limit = proposedHistoryLimit.value
+  if (!Number.isInteger(limit) || limit < 10 || limit > 5000) return
+  const removed = Math.max(0, ordinaryCount.value - limit)
+  if (removed && (historyLimitPrompt.value?.limit !== limit || historyLimitPrompt.value?.removed !== removed)) {
+    historyLimitPrompt.value = { limit, removed }
+    return
+  }
+  savingClipboardPreferences.value = true
+  try {
+    if (await saveClipHistoryLimit(limit, removed)) historyLimitDraft.value = null
+  } finally {
+    historyLimitPrompt.value = null
+    savingClipboardPreferences.value = false
+  }
 }
 
 const newGroup = ref('')
@@ -525,6 +560,32 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <div class="card">
+              <div class="set-row">
+                <span class="set-text">
+                  <span class="set-label">记录新图片</span>
+                  <span class="set-desc">关闭仅影响之后的捕获，已有图片仍可查看和复制。</span>
+                </span>
+                <button class="switch" type="button" role="switch" aria-label="记录新图片"
+                  :class="{ 'is-on': state.clipboardPreferences.captureImages }"
+                  :aria-checked="state.clipboardPreferences.captureImages" :disabled="savingClipboardPreferences"
+                  @click="toggleCaptureImages"><span class="switch-knob" aria-hidden="true" /></button>
+              </div>
+              <div class="set-row">
+                <label class="set-text" for="history-limit">
+                  <span class="set-label">普通记录数量上限</span>
+                  <span class="set-desc">10–5000 条；超出时淘汰最旧普通记录，收藏不计入。当前：{{ state.clipboardPreferences.historyLimit ?? '未限制（保留旧历史）' }}</span>
+                </label>
+                <input id="history-limit" class="control" style="width: 90px" type="number" min="10" max="5000"
+                  :value="proposedHistoryLimit" @input="historyLimitDraft = ($event.target as HTMLInputElement).valueAsNumber; historyLimitPrompt = null" />
+                <button class="btn" type="button" :disabled="savingClipboardPreferences || !Number.isInteger(proposedHistoryLimit) || proposedHistoryLimit < 10 || proposedHistoryLimit > 5000"
+                  @click="applyHistoryLimit">{{ historyLimitPrompt ? '确认应用' : '应用上限' }}</button>
+              </div>
+              <p v-if="historyLimitPrompt" class="hint" role="alert">将删除最旧的 {{ historyLimitPrompt.removed }} 条普通记录，不会删除收藏。
+                <button class="btn" type="button" @click="historyLimitPrompt = null">取消</button>
+              </p>
+            </div>
+
             <h4 class="sub-title">分组</h4>
             <div class="secret-edit">
               <input v-model="newGroup" class="control" maxlength="40" placeholder="新分组名称" @keydown.enter.prevent="addGroup" />
@@ -552,7 +613,7 @@ onBeforeUnmount(() => {
             <div class="danger-row">
               <span class="set-text">
                 <span class="set-label">全部记录</span>
-                <span class="set-desc">清空后无法恢复，需要再点一次确认。</span>
+                <span class="set-desc">包括所有收藏。清空后无法恢复，需要再点一次确认。</span>
               </span>
               <button
                 class="btn btn-danger"
@@ -713,36 +774,9 @@ onBeforeUnmount(() => {
                 </span>
               </div>
 
-              <div class="set-row">
-                <span class="set-text">
-                  <span class="set-label">剪贴板快捷键</span>
-                  <span class="set-desc">可在下方更换组合键；留空表示关闭。</span>
-                </span>
-                <kbd class="kbd">{{ state.settings.clipboardHotkey }}</kbd>
-              </div>
-
-              <div class="set-row is-disabled">
-                <span class="set-text">
-                  <span class="set-label">
-                    登录时启动
-                    <span class="tag tag-warn">待确认</span>
-                  </span>
-                  <span class="set-desc">该项尚未定稿，暂不可调整。</span>
-                </span>
-                <button
-                  class="switch"
-                  type="button"
-                  role="switch"
-                  disabled
-                  :class="{ 'is-on': state.settings.launchAtLogin }"
-                  :aria-checked="state.settings.launchAtLogin"
-                  aria-label="登录时启动（待确认）"
-                >
-                  <span class="switch-knob" aria-hidden="true" />
-                </button>
-              </div>
             </div>
 
+            <DesktopFeatures />
             <div class="card fields">
               <label class="field"><span class="field-label">唤出图标条</span><input v-model="state.shortcuts.bar" class="control" /></label>
               <label class="field"><span class="field-label">剪贴板</span><input v-model="state.shortcuts.clipboard" class="control" /></label>
