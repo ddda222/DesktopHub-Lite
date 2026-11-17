@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { defaultIslandAppearance, invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { pushToast, state } from '@/store'
 
-const appearance = ref({ ...state.ui.islandAppearance })
+const appearance = ref({ ...defaultIslandAppearance(), ...state.ui.islandAppearance })
 const anchor = ref(state.ui.islandAnchor)
 const hoverMs = ref(state.ui.islandHoverMs)
 const leaveMs = ref(state.ui.islandLeaveMs)
@@ -87,7 +87,7 @@ function loadGeneralStatus(): void {
 onMounted(loadGeneralStatus)
 watch(() => state.ui.settingsOpen, open => {
   if (!open) return
-  appearance.value = { ...state.ui.islandAppearance }
+  appearance.value = { ...defaultIslandAppearance(), ...state.ui.islandAppearance }
   anchor.value = state.ui.islandAnchor
   hoverMs.value = state.ui.islandHoverMs
   leaveMs.value = state.ui.islandLeaveMs
@@ -100,32 +100,16 @@ watch(() => state.ui.settingsOpen, open => {
   <section class="features" aria-label="灵动岛与系统">
     <h4>灵动岛</h4>
     <div class="box">
-      <fieldset class="appearance-picker">
-        <legend>外观预设</legend>
-        <div class="appearance-options">
-          <label class="appearance-option" :class="{ selected: appearance.preset === 'classic' }">
-            <input v-model="appearance.preset" type="radio" value="classic" name="island-appearance" />
-            <span class="appearance-swatch calm" aria-hidden="true"><i /><span><b /><b /><b /><b /></span><em /></span>
-            <span class="appearance-name">静谧工具</span>
-            <span class="appearance-description">中性底色 · 清晰轻巧</span>
-          </label>
-          <label class="appearance-option" :class="{ selected: appearance.preset === 'glass' }">
-            <input v-model="appearance.preset" type="radio" value="glass" name="island-appearance" />
-            <span class="appearance-swatch luminous" aria-hidden="true"><i /><span><b /><b /><b /><b /></span><em /></span>
-            <span class="appearance-name">液态玻璃</span>
-            <span class="appearance-description">清透浮层 · 顶部图标</span>
-          </label>
-        </div>
-      </fieldset>
+      <p class="appearance-summary">黑白实底 · 跟随显示主题</p>
+      <p>浅色为白底深字，深色为黑底浅字。胶囊与展开面板使用相同主题，正文背景保持不透明。</p>
       <div class="fields">
         <label>位置<select v-model="anchor"><option value="left">左上</option><option value="center">顶部居中</option><option value="right">右上</option></select></label>
         <label>大小 {{ appearance.scale }}%<input v-model.number="appearance.scale" type="range" min="75" max="125" /></label>
-        <label>材质浓度 {{ appearance.opacity }}<input v-model.number="appearance.opacity" type="range" min="75" max="100" /></label>
-        <label>点缀颜色<input type="color" :value="appearance.tint || '#5685ee'" @input="appearance.tint = ($event.target as HTMLInputElement).value" /></label>
         <label>展开延时（毫秒）<input v-model.number="hoverMs" type="number" min="100" max="2000" /></label>
         <label>收起延时（毫秒）<input v-model.number="leaveMs" type="number" min="100" max="4000" /></label>
       </div>
-      <p>选好外观后点击「应用设置」。切换外观保留当前大小、颜色和材质浓度；浓度越高，底色越明显。液态玻璃的透光效果随桌面背景变化。</p>
+      <label><input v-model="appearance.webgl" type="checkbox" aria-describedby="island-light-help" /> WebGL 边缘光效</label>
+      <p id="island-light-help">默认开启，鼠标移动时边缘随光、点击时出现短暂波纹。光效不覆盖正文；开启减少动画或高对比度时停用。修改后点击「应用设置」。</p>
       <div class="actions">
         <label><input v-model="reducedMotion" type="checkbox" /> 减少动画</label>
         <label><input v-model="appearance.avoidFullscreen" type="checkbox" /> 窗口最大化或全屏时收为细线</label>
@@ -166,31 +150,14 @@ watch(() => state.ui.settingsOpen, open => {
 
 <style scoped>
 .features h4 { margin: 14px 0 7px; font-size: 13px; }
-.appearance-picker { min-width: 0; margin: 0 0 16px; padding: 0; border: 0; }
-.appearance-picker legend { margin-bottom: 8px; font-size: 12px; color: var(--text-2); }
-.appearance-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.appearance-option { position: relative; display: grid; gap: 4px; min-width: 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: 12px; cursor: pointer; }
-.appearance-option:hover { background: var(--hover); }
-.appearance-option.selected { border-color: var(--accent); background: var(--accent-weak); }
-.appearance-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-.appearance-option input { position: absolute; right: 10px; bottom: 28px; margin: 0; accent-color: var(--accent); }
-.appearance-name { padding-right: 20px; font-size: 13px; font-weight: 600; }
-.appearance-description { font-size: 11px; color: var(--text-2); }
-.appearance-swatch { display: grid; grid-template-columns: 1fr; grid-template-rows: 4px 26px 8px; gap: 6px; padding: 12px; margin-bottom: 6px; border-radius: 16px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.appearance-swatch > i { width: 25%; border-radius: 3px; background: var(--hover); }
-.appearance-swatch > span { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; align-items: center; }
-.appearance-swatch b { aspect-ratio: 1; max-width: 20px; border-radius: 5px; background: var(--text-3); opacity: .5; }
-.appearance-swatch em { width: 52%; justify-self: center; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--hover); }
-.appearance-swatch.luminous { background: linear-gradient(125deg, #e2edff, #d6d7f0 60%, #e8dfe9); box-shadow: inset 0 1px 1px #fff, inset 0 -1px 1px #fff, 0 3px 8px -5px rgba(0,0,0,.2); }
-.luminous > i { background: var(--accent-weak); }
-.luminous em { border: 1px solid rgba(255,255,255,.75); border-radius: 18px; background: rgba(255,255,255,.4); }
+.appearance-summary { color: var(--text); font-weight: 600; }
 .box { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; }
 .fields label { display: grid; gap: 3px; }
 label, button, p, pre { font-size: 12px; }
 p { margin: 6px 0; color: var(--text-2); }
 button, select, input:not([type="range"]):not([type="checkbox"]) { color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 5px; }
-button:disabled { opacity: .45; }
+button:disabled { opacity: 1; color: var(--text-3); background: var(--surface-2); cursor: not-allowed; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 pre { max-height: 160px; white-space: pre-wrap; overflow: auto; }
 </style>

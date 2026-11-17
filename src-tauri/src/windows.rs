@@ -6,7 +6,7 @@
 //! 设置放在独立的 `settings` 窗口里。
 //! 任何窗口都不做「全屏透明覆盖」，否则桌面会被整块挡住。
 
-use std::sync::Mutex;
+use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,8 @@ pub struct BarRegion {
 
 pub struct WindowsHandle {
     state: Mutex<WindowState>,
+    /// 用户本轮拖动后，开合沿用当前窗口中心，不再按顶部停靠重新定位。
+    bar_free_position: AtomicBool,
     bar_size: Mutex<(f64, f64)>,
     bar_regions: Mutex<Vec<BarRegion>>,
     bar_regions_changed: Mutex<bool>,
@@ -72,6 +74,7 @@ impl WindowsHandle {
     pub fn new(state: WindowState) -> Self {
         Self {
             state: Mutex::new(state),
+            bar_free_position: AtomicBool::new(false),
             bar_size: Mutex::new((140.0, 14.0)),
             bar_regions: Mutex::new(Vec::new()),
             bar_regions_changed: Mutex::new(false),
@@ -129,6 +132,10 @@ impl WindowsHandle {
 
     pub fn bar_size(&self) -> (f64, f64) {
         *self.bar_size.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_bar_free_position(&self, free: bool) -> bool {
+        self.bar_free_position.swap(free, Ordering::Relaxed)
     }
 
     pub fn set_bar_size(&self, width: f64, height: f64) {
@@ -226,15 +233,58 @@ fn scale_of(app: &AppHandle) -> f64 {
 }
 
 
+/// Tao 的顶层无边框窗口仍保留 WS_CAPTION，只通过 WM_NCCALCSIZE 隐藏标题栏。
+/// 透明 WebView 失焦重绘时可能露出这层系统装饰；灵动岛不使用原生标题栏和缩放控件。
+#[cfg(windows)]
+pub fn enforce_bar_frameless(app: &AppHandle) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    };
+    let Some(window) = app.get_webview_window(BAR) else { return; };
+    let Ok(native) = window.hwnd() else { return; };
+    let hwnd = HWND(native.0);
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let decorations = (WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX).0 as isize;
+        let frameless = style & !decorations;
+        // 没有变化就不触发系统重绘；保留透明、置顶、拖放和窗口可见性等其他样式。
+        if frameless == style { return; }
+        SetWindowLongPtrW(hwnd, GWL_STYLE, frameless);
+        if GetWindowLongPtrW(hwnd, GWL_STYLE) != frameless {
+            crate::log_warn!("清除灵动岛原生标题栏样式失败");
+            return;
+        }
+        if let Err(error) = SetWindowPos(hwnd, None, 0, 0, 0, 0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER) {
+            crate::log_warn!("刷新灵动岛无边框样式失败：{error}");
+        }
+    }
+}
+
 /// 恢复或计算图标条位置，并让窗口尺寸等于图标条尺寸。
 pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
+    #[cfg(windows)]
+    enforce_bar_frameless(app);
     let Some(window) = app.get_webview_window(BAR) else {
         return;
     };
     let (width, height) = handle.bar_size();
-    let (x, y) = default_bar_position(app, width, height);
+    let (mut x, mut y) = default_bar_position(app, width, height);
     let scale = window.scale_factor().unwrap_or(1.0);
     let target = PhysicalSize::new((width * scale).round() as u32, (height * scale).round() as u32);
+    if handle.bar_free_position.load(Ordering::Relaxed) {
+        if let (Ok(position), Ok(previous)) = (window.outer_position(), window.inner_size()) {
+            x = position.x + (previous.width as i32 - target.width as i32) / 2;
+            y = position.y;
+            if let Some((ax, ay, aw, ah)) = work_area(app) {
+                x = x.clamp(ax, ax + (aw as i32 - target.width as i32).max(0));
+                y = y.clamp(ay, ay + (ah as i32 - target.height as i32).max(0));
+            }
+        }
+    }
     let regions_changed = std::mem::take(&mut *handle.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()));
     let bounds_changed = window.inner_size().ok() != Some(target) ||
         window.outer_position().ok() != Some(PhysicalPosition::new(x, y));

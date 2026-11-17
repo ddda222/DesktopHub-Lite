@@ -265,30 +265,32 @@ watch(
       </button>
     </header>
 
-    <div v-if="!detailClip" class="chips" role="group" aria-label="按分组筛选">
-      <button
-        v-for="group in groupFilters"
-        :key="group"
-        class="chip"
-        type="button"
-        :class="{ 'is-on': group === state.ui.group }"
-        :aria-pressed="group === state.ui.group"
-        @click="setGroup(group)"
-      >
-        {{ group }}
-      </button>
+    <div v-if="!detailClip" class="filter-bar">
+      <div class="chips" role="group" aria-label="按分组筛选">
+        <button
+          v-for="group in groupFilters"
+          :key="group"
+          class="chip"
+          type="button"
+          :class="{ 'is-on': group === state.ui.group }"
+          :aria-pressed="group === state.ui.group"
+          @click="setGroup(group)"
+        >
+          {{ group }}
+        </button>
+      </div>
+      <div class="filter-actions" role="group" aria-label="收藏与管理">
+        <button class="chip" type="button" :aria-pressed="state.ui.favoritesOnly"
+          :class="{ 'is-on': state.ui.favoritesOnly }" @click="state.ui.favoritesOnly = !state.ui.favoritesOnly">只看收藏</button>
+        <button class="chip" type="button" :aria-pressed="selecting" :class="{ 'is-on': selecting }"
+          @click="selecting ? stopSelecting() : selecting = true">{{ selecting ? '退出管理' : '批量管理' }}</button>
+      </div>
     </div>
-
-    <div class="management" v-if="!detailClip">
-      <button class="chip" type="button" :aria-pressed="state.ui.favoritesOnly"
-        :class="{ 'is-on': state.ui.favoritesOnly }" @click="state.ui.favoritesOnly = !state.ui.favoritesOnly">只看收藏</button>
-      <button v-if="!selecting" class="chip" type="button" @click="selecting = true">批量管理</button>
-      <template v-else>
-        <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
-        <button class="chip" type="button" @click="stopSelecting">取消选择</button>
-        <button class="chip" type="button" :disabled="!selectedIds.size"
-          @click="prepareDeletion([...selectedIds])">删除已选（{{ selectedIds.size }}）</button>
-      </template>
+    <div v-if="!detailClip && selecting" class="management selection-actions" role="group" aria-label="批量选择操作">
+      <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
+      <button class="chip" type="button" @click="stopSelecting">取消选择</button>
+      <button class="chip" type="button" :disabled="!selectedIds.size"
+        @click="prepareDeletion([...selectedIds])">删除已选（{{ selectedIds.size }}）</button>
     </div>
     <div v-if="deletePrompt" class="management" role="alert">
       <span>删除 {{ deletePrompt.ids.length }} 条记录<span v-if="deletePrompt.favorites">（含 {{ deletePrompt.favorites }} 条收藏）</span>？</span>
@@ -648,16 +650,28 @@ watch(
   background: var(--active);
 }
 
-/* 分组 chips：不换行，横向滚动 */
-.chips {
+/* 筛选与管理共用一行；分组独立滚动，操作按钮保持可见。 */
+.filter-bar {
   flex: none;
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
   padding: 0 10px 8px;
+}
+.chips {
+  flex: 1 1 140px;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  padding: 2px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
 }
+
+.filter-actions { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; border-left: 1px solid var(--line-strong); }
+.selection-actions { padding-top: 0; }
 
 .chips::-webkit-scrollbar {
   display: none;

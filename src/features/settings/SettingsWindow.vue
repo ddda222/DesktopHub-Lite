@@ -31,12 +31,19 @@ import {
 } from '@/store'
 import type { ThemeMode, TranslateDirection } from '@/lib/desktop/types'
 import { translationProviderPresets } from '@/lib/desktop/providers'
+import { isDesktop } from '@/lib/desktop/desktop'
+import { useWindowDrag } from '@/lib/useWindowDrag'
 
 /**
  * standalone：桌面版里设置独占一个窗口，窗口本身就是「框」，
  * 不能再画一层半透明遮罩，否则桌面会被整块挡住。
  */
 const props = withDefaults(defineProps<{ standalone?: boolean }>(), { standalone: false })
+const windowEl = ref<HTMLElement | null>(null)
+const windowDrag = useWindowDrag(windowEl, {
+  native: () => props.standalone && isDesktop,
+  onError: error => pushToast(`无法拖动设置：${String(error)}`, 'error')
+})
 
 /** 分区 id 直接取自 store，避免本地重复声明后与 store 漂移 */
 type SettingsSection = typeof state.ui.settingsSection
@@ -339,8 +346,8 @@ onBeforeUnmount(() => {
     @click.self="closeSettings()"
     @keydown.escape.stop="closeSettings()"
   >
-    <div class="win" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <header class="win-head">
+    <div ref="windowEl" class="win" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <header class="win-head" @pointerdown="windowDrag.begin" @click="windowDrag.consumeClick">
         <h2 id="settings-title" class="win-title">设置</h2>
         <button
           class="icon-btn"
@@ -795,7 +802,7 @@ onBeforeUnmount(() => {
               <div class="set-row">
                 <span class="set-text">
                   <span class="set-label">主题</span>
-                  <span class="set-desc">跟随系统会随 Windows 的浅色 / 深色设置切换。</span>
+                  <span class="set-desc">立即应用到设置、小胶囊和展开面板；跟随系统会随 Windows 的浅色 / 深色设置切换。</span>
                 </span>
                 <span class="seg" role="radiogroup" aria-label="主题">
                   <label
@@ -867,6 +874,7 @@ onBeforeUnmount(() => {
 }
 
 .win {
+  translate: var(--window-drag-x, 0px) var(--window-drag-y, 0px);
   width: 760px;
   height: 560px;
   max-width: 100%;
@@ -882,6 +890,9 @@ onBeforeUnmount(() => {
 }
 
 .win-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
   flex: none;
   display: flex;
   align-items: center;
@@ -898,6 +909,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   letter-spacing: 0.2px;
 }
+.window-dragging .win-head { cursor: grabbing; }
 
 .win-body {
   flex: 1 1 auto;

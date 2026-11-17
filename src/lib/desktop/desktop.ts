@@ -41,10 +41,11 @@ export interface IslandAppearance {
   preset: 'classic' | 'glass'
   avoidFullscreen: boolean
   autoCheckUpdates: boolean
+  webgl: boolean
 }
 
 export function defaultIslandAppearance(): IslandAppearance {
-  return { scale: 100, opacity: 100, tint: '', preset: 'glass', avoidFullscreen: true, autoCheckUpdates: false }
+  return { scale: 100, opacity: 100, tint: '', preset: 'classic', avoidFullscreen: true, autoCheckUpdates: false, webgl: true }
 }
 
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */

@@ -74,6 +74,12 @@ input {
   color: inherit;
 }
 
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+  opacity: 1;
+}
+
 :focus {
   outline: none;
 }

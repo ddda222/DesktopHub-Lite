@@ -31,18 +31,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown))
 <template>
   <div class="preview" :class="{ plain, dark: state.settings.theme === 'dark' }">
     <header class="preview-tools">
-      <span>DesktopHub <small>液态玻璃预览</small></span>
+      <span>DesktopHub <small>黑白实底预览</small></span>
       <div class="preview-options">
         <button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button>
         <button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button>
         <label>尺寸<select v-model.number="state.ui.islandAppearance.scale"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option></select></label>
         <label><input v-model="plain" type="checkbox" />纯色背景</label>
         <label>场景<select v-model="scene" aria-label="模拟窗口状态"><option value="normal">桌面／普通窗口</option><option value="maximized">窗口最大化</option><option value="fullscreen">游戏／全屏</option></select></label>
+        <label><input v-model="state.ui.islandAppearance.webgl" type="checkbox" />WebGL 边缘光效</label>
         <button type="button" :disabled="state.ui.fullscreenSuppressed" @click="state.ui.islandExpanded = true">展开</button>
       </div>
     </header>
-    <main class="preview-stage"><IslandEntry /></main>
-    <p class="preview-note">真实 Vue 组件 · 合成内容 · 窗口状态为模拟<br />普通窗口显示胶囊，悬停展开；最大化／全屏只留细线。Windows 检测与材质需桌面版验证。</p>
+    <main class="preview-stage">
+      <IslandEntry />
+    </main>
+    <p class="preview-note">拖动胶囊或展开后的顶部握柄调整位置，设置窗口可拖动标题栏。<br />切换「场景」查看细线与胶囊。浏览器使用合成内容和模拟窗口状态。</p>
     <SettingsWindow v-if="state.ui.settingsOpen" />
     <div class="toasts" role="status" aria-live="polite">
       <div v-for="toast in state.toasts" :key="toast.id" class="toast"><Icon :name="toast.kind === 'success' ? 'check' : 'info'" :size="16" /><span>{{ toast.text }}</span></div>

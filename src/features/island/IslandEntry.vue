@@ -1,16 +1,32 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
+import GlassLight from '@/components/GlassLight.vue'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
 import { addShelfFiles, shelf } from '@/features/files/shelf'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
 import { pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
 
 const element = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
+const windowDrag = useWindowDrag(viewport, {
+  native: () => isDesktop,
+  onPress: () => {
+    pressed.value = true
+    cancelHover()
+    clearTimeout(leaveTimer)
+    cancelHoverClose()
+  },
+  onEnd: () => {
+    pressed.value = false
+    if (!hovering.value) leave()
+  },
+  onError: error => pushToast(`无法拖动窗口：${String(error)}`, 'error')
+})
 const panel = ref<HTMLElement | null>(null)
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 const dark = ref(document.documentElement.dataset.theme === 'dark')
@@ -23,9 +39,10 @@ const collapseMs = 200
 const geometryMoving = ref(false)
 const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(systemMotion.matches)
+const glassAvailable = ref(true)
 const clockText = ref(formatTime())
 const feedbackText = ref('')
-const capsuleText = computed(() => feedbackText.value || (!expanded.value ? clockText.value : ''))
+const capsuleText = computed(() => feedbackText.value || clockText.value)
 const hovering = ref(false)
 const composing = ref(false)
 const pressed = ref(false)
@@ -64,13 +81,10 @@ const viewportStyle = computed(() => ({
 const rootStyle = computed(() => ({
   width: `${bounds.value.width}px`,
   height: `${bounds.value.height}px`,
-  '--island-tint': appearance.value.tint || 'var(--accent)',
-  '--island-opacity': `${appearance.value.opacity}%`,
   '--collapse-time': `${collapseMs}ms`,
   '--expand-time': `${expandMs}ms`,
   '--content-width': `${expandedWidth.value - 24}px`,
-  // 桌面端不用会产生黑色底板的整窗模糊，提高本地面板遮罩以保持文字对比。
-  '--glass-opacity': `${isDesktop ? 72 + (appearance.value.opacity - 75) * .4 : 18 + appearance.value.opacity - 75}%`,
+  '--capsule-height': `${32 * scale.value}px`,
   '--page-index': Math.max(0, sections.findIndex(section => section.value === page.value)),
   '--section-count': sections.length
 }))
@@ -122,7 +136,7 @@ watch(geometryMoving, queueGeometry, { flush: 'post' })
 function reserveGeometry(): void {
   clearTimeout(geometryTimer)
   const target = bounds.value
-  if (suppressed.value || state.ui.islandReducedMotion || reducedMotion.value) {
+  if ((isDesktop && suppressed.value) || state.ui.islandReducedMotion || reducedMotion.value) {
     geometryMoving.value = false
     viewportSize.value = { ...target }
     queueGeometry()
@@ -176,7 +190,8 @@ function expand(value: boolean, focus = false): void {
   })
 }
 
-function activateCapsule(): void {
+function activateCapsule(event: MouseEvent): void {
+  if (windowDrag.consumeClick(event)) return
   expand(!expanded.value, true)
 }
 
@@ -198,7 +213,7 @@ function startHoverClose(): void {
 
 function scheduleHoverOpen(): void {
   hoverTimer = setTimeout(() => {
-    if (hovering.value && !state.ui.fullscreenSuppressed) expand(true)
+    if (hovering.value && !pressed.value && !state.ui.fullscreenSuppressed) expand(true)
   }, state.ui.islandHoverMs)
 }
 
@@ -267,6 +282,7 @@ watch(hostExpanded, value => {
 watch(page, () => {
   if (!closeCommitted) cancelHoverClose()
 })
+watch(() => state.ui.islandAnchor, () => { if (!isDesktop) windowDrag.reset() })
 watch(() => shelf.busy, busy => {
   if (!busy) {
     pressed.value = false
@@ -465,19 +481,22 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" class="island-viewport" :class="`anchor-${state.ui.islandAnchor}`" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
-    :class="{ expanded, desktop: isDesktop, glass: appearance.preset === 'glass', dark, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: state.ui.fullscreenSuppressed }"
+    :class="{ expanded, moving: geometryMoving, desktop: isDesktop, dark, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: state.ui.fullscreenSuppressed }"
     :style="rootStyle" aria-label="顶部灵动岛" :inert="state.ui.fullscreenSuppressed"
     @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
-    <div ref="panel" class="island glass-surface" :class="{ expanded, tucked: !revealed }"
+    <div ref="panel" class="island solid-surface" :class="{ expanded, tucked: !revealed }"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
+      <GlassLight v-if="appearance.webgl !== false && glassAvailable && !suppressed && !state.ui.islandReducedMotion && !reducedMotion"
+        :light-surface="!dark" @unavailable="glassAvailable = false" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !suppressed" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
-      <button class="capsule" type="button" :aria-expanded="expanded"
+      <button class="capsule" :class="{ 'has-feedback': feedbackText }" type="button" :aria-expanded="expanded"
         :aria-label="expanded ? '收起面板' : `${clockText}，展开面板`"
-        :inert="!revealed" @pointerdown="cancelHover" @click="activateCapsule">
-        <span v-if="capsuleText" class="capsule-text" :class="{ feedback: feedbackText }">{{ capsuleText }}</span>
-        <span v-else class="grip" aria-hidden="true" />
+        :inert="!revealed" aria-description="按住拖动位置，单击展开或收起"
+        @pointerdown.stop="windowDrag.begin" @click="activateCapsule">
+        <span class="capsule-text" :class="{ feedback: feedbackText }" aria-hidden="true">{{ capsuleText }}</span>
+        <span class="grip" aria-hidden="true" />
       </button>
       <span class="capsule-announcement" role="status">{{ feedbackText }}</span>
       <div class="expanded-content" :class="{ 'fixed-search': page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
@@ -532,105 +551,92 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* 材质作用于主浮层；顶部图标导航与内容共用外壳。 */
-.island-viewport { position: relative; flex: none; background: transparent; }
+.island-viewport { position: relative; z-index: 2; flex: none; background: transparent; translate: var(--window-drag-x, 0px) var(--window-drag-y, 0px); }
 .island-viewport > .island-hit-area { position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
 .island-viewport.anchor-left > .island-hit-area { left: 0; transform: none; }
 .island-viewport.anchor-right > .island-hit-area { left: auto; right: 0; transform: none; }
 .island-hit-area {
   --geometry-time: var(--expand-time);
   --geometry-ease: cubic-bezier(.23, 1, .32, 1);
-  --glass-fill: #edf0f8;
-  --glass-edge: rgba(255, 255, 255, .82);
-  --glass-rim: rgba(255, 255, 255, .26);
-  --glass-shade: rgba(74, 79, 109, .14);
-  --glass-sheen: rgba(255, 255, 255, .32);
-  --glass-control: rgba(255, 255, 255, .24);
-  --glass-control-active: rgba(255, 255, 255, .46);
+  --island-shadow: rgb(0 0 0 / .2);
+  --island-outline: rgb(0 0 0 / .16);
   --surface-inset: 2px;
   position: relative;
   flex: none;
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), opacity 125ms;
 }
-.island-hit-area.glass {
-  --text: #202431; --text-2: #505767; --text-3: #666e80;
-  --surface: #f2f4fa; --surface-2: rgba(244, 246, 252, .5); --surface-3: rgba(255, 255, 255, .55);
-  --hover: rgba(255, 255, 255, .25); --active: rgba(255, 255, 255, .4);
-  --line: rgba(90, 103, 133, .13); --line-strong: rgba(90, 103, 133, .22);
-  --accent: #087bff; --accent-hover: #0664da; --accent-weak: rgba(8, 123, 255, .12);
-  color: var(--text);
-}
-.island-hit-area.dark {
-  --glass-fill: #222632;
-  --glass-edge: rgba(255, 255, 255, .43);
-  --glass-rim: rgba(255, 255, 255, .07);
-  --glass-shade: rgba(4, 8, 20, .28);
-  --glass-sheen: rgba(223, 231, 255, .09);
-  --glass-control: rgba(255, 255, 255, .065);
-  --glass-control-active: rgba(235, 240, 255, .13);
-}
-.island-hit-area.glass.dark {
-  --text: #f4f5fa; --text-2: #c6ccda; --text-3: #a2acbf;
-  --surface: #242834; --surface-2: rgba(29, 34, 46, .58); --surface-3: rgba(246, 248, 255, .12);
-  --hover: rgba(255, 255, 255, .08); --active: rgba(255, 255, 255, .14);
-  --line: rgba(238, 242, 255, .12); --line-strong: rgba(238, 242, 255, .2);
-  --accent: #71adff; --accent-hover: #a0c7ff; --accent-weak: rgba(88, 155, 255, .17);
-}
+.island-hit-area.dark { --island-shadow: rgb(0 0 0 / .5); --island-outline: rgb(255 255 255 / .14); }
 .island-hit-area.expanded { --surface-inset: 12px; }
 .island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: cubic-bezier(.22, .7, .3, 1); }
 .island-hit-area.reduced { --geometry-time: 0ms; transition: none; }
-.island-hit-area.suppressed { --surface-inset: 0px; --geometry-time: 0ms; pointer-events: none; }
+.island-hit-area.suppressed { --surface-inset: 0px; pointer-events: none; }
+.island-hit-area.desktop.suppressed { --geometry-time: 0ms; }
+/* 预览的三种形态保持同一顶部位置，避免变形时整体上下漂移。 */
+.island-hit-area:not(.desktop) { --surface-inset: 2px; }
 .tuck-trigger { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; }
-.glass-surface { background: color-mix(in srgb, var(--surface) var(--island-opacity), transparent); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.glass .glass-surface {
-  background: linear-gradient(145deg, var(--glass-sheen), transparent 48%, var(--glass-control)),
-    color-mix(in srgb, color-mix(in srgb, var(--glass-fill) 96%, var(--island-tint)) var(--glass-opacity), transparent);
-  backdrop-filter: blur(22px) saturate(1.4);
-  box-shadow: inset 0 2px 2px var(--glass-edge), inset 0 -2px 3px var(--glass-edge),
-    inset 1px 0 2px var(--glass-rim), inset -1px 0 2px var(--glass-rim), 0 12px 28px -8px var(--glass-shade);
+.solid-surface {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--island-outline), 0 10px 24px -10px var(--island-shadow);
+  isolation: isolate;
 }
-.glass .glass-surface::before {
-  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
-  background: linear-gradient(145deg, var(--glass-edge) 4%, var(--glass-rim) 30%, transparent 48%, var(--glass-edge) 76%, var(--glass-rim));
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-}
-/* WebView 滤镜不能模糊桌面；桌面端使用圆角半透明材质，避免整窗原生模糊的黑底。 */
-.desktop.glass .glass-surface { backdrop-filter: none; }
-/* 小胶囊用轻描边，避免多层亮边在低分辨率圆弧上叠出白色台阶。 */
-.glass .island:not(.expanded):not(.tucked) {
-  box-shadow: inset 0 0 0 1px var(--glass-rim), inset 0 1px 1px var(--glass-edge);
-}
-.glass .island:not(.expanded):not(.tucked)::before { opacity: .45; }
 .island {
   position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%);
   overflow: hidden; border-radius: 24px; color: var(--text);
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
-.island.expanded { border-radius: 36px; }
+.island.expanded { border-radius: 26px; }
 .island.tucked { border-radius: 5px; }
 .island.tucked .capsule { visibility: hidden; }
-.glass .island.tucked { background: linear-gradient(90deg, var(--glass-fill), var(--glass-edge), var(--glass-fill)); }
-.capsule { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; height: 24px; width: 156px; margin: 0 auto; white-space: nowrap; font-size: 12px; }
-.island:not(.expanded) .capsule { height: 100%; width: 100%; }
+.island.tucked :deep(.glass-light) { visibility: hidden; }
+.capsule { position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; height: 24px; width: 156px; margin: 0 auto; white-space: nowrap; font-size: 12px; }
+.capsule { cursor: grab; touch-action: none; user-select: none; }
+.capsule:active { transform: none; }
+.window-dragging .capsule { cursor: grabbing; }
+.island:not(.expanded) .capsule { height: var(--capsule-height); width: 100%; }
+.island-hit-area:not(.desktop) .island .capsule { transition: opacity 120ms ease-out 65ms; }
+.island-hit-area:not(.desktop) .island.tucked .capsule {
+  visibility: visible;
+  opacity: 0;
+  transition: opacity 85ms ease-out;
+}
 .capsule-text { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: .6px; font-variant-numeric: tabular-nums; }
+.capsule-text { transition: opacity 90ms ease-out 100ms; }
+.expanded .capsule-text:not(.feedback) { opacity: 0; transition: opacity 55ms ease-out; }
 .capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }
+.capsule-text {
+  font-weight: 600;
+  letter-spacing: .22px;
+}
+.capsule-text { color: var(--text); }
 .capsule-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.grip { width: 40px; height: 4px; border-radius: 8px; background: currentColor; opacity: .26; transition: opacity 130ms; }
-.capsule:hover .grip { opacity: .55; }
-.expanded-content { position: relative; width: var(--content-width); max-height: calc(100% - 24px); overflow: hidden; padding: 0 20px 20px; opacity: 0; transform: translateY(-6px); transition: opacity 85ms ease, transform 140ms ease; }
+.grip { position: absolute; width: 40px; height: 4px; border-radius: 8px; background: currentColor; opacity: 0; transition: opacity 70ms ease-out; }
+.expanded .grip { opacity: .26; transition: opacity 110ms ease-out 100ms; }
+.grip { width: 28px; height: 3px; }
+.expanded .capsule:hover .grip { opacity: .55; }
+.capsule.has-feedback .grip { opacity: 0; }
+.expanded-content { position: relative; z-index: 3; width: var(--content-width); max-height: calc(100% - 24px); overflow: hidden; padding: 0 20px 20px; opacity: 0; transform: translateY(-6px); transition: opacity 85ms ease, transform 140ms ease; }
 .expanded .expanded-content { overflow-y: auto; opacity: 1; transform: translateY(0); transition: opacity 160ms ease-out 65ms, transform 200ms var(--geometry-ease) 60ms; }
+.moving .expanded-content { overflow-y: hidden; }
 .island-chrome { display: flow-root; }
 .island-content { width: 100%; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0 8px; }
+.toolbar {
+  margin-bottom: 8px;
+  padding: 0 0 7px;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+}
 .tools { display: flex; align-items: center; gap: 10px; }
+.tools { gap: 6px; }
 .round-action { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); }
-.glass .round-action { background: var(--glass-control); box-shadow: inset 0 1px 1px var(--glass-edge), inset 0 0 0 1px var(--glass-rim), 0 2px 5px -3px var(--glass-shade); }
+.round-action { background: transparent; border-radius: 10px; }
 .collapse-action svg { transform: rotate(180deg); }
-.round-action:hover { background: var(--glass-control-active); color: var(--text); }
+.round-action:hover { background: var(--surface-3); color: var(--text); }
 .categories { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-height: 80px; overflow-y: auto; margin: 0 0 12px; padding: 2px; }
 .categories button { flex: none; padding: 6px 12px; border-radius: 22px; min-height: 34px; font-size: 14px; color: var(--text-2); }
 .categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; }
-.glass .categories .selected { background: var(--glass-control-active); box-shadow: inset 0 1px 1px var(--glass-edge), inset 0 -1px 1px var(--glass-rim), 0 2px 5px -3px var(--glass-shade); }
+.categories { gap: 4px; margin-bottom: 8px; }
+.categories .selected { background: var(--surface-3); color: var(--text); }
 .categories button:hover { color: var(--text); background: var(--hover); }
 .app-grid { --app-icon-size: 28px; --app-cell-size: 44px; --app-gap: 8px; display: grid; grid-template-columns: repeat(auto-fill, var(--app-cell-size)); grid-auto-rows: var(--app-cell-size); justify-content: start; align-content: start; max-height: calc(var(--app-cell-size) * 2 + var(--app-gap)); overflow-y: auto; gap: var(--app-gap); padding: 0 2px; }
 .app-tile { display: flex; align-items: center; justify-content: center; width: var(--app-cell-size); height: var(--app-cell-size); padding: 8px; border-radius: 12px; }
@@ -639,14 +645,15 @@ onBeforeUnmount(() => {
 .app-grid:hover, .app-grid:focus-within { scrollbar-color: var(--line-strong) transparent; }
 .app-tile img, .fallback { flex: none; width: var(--app-icon-size); height: var(--app-icon-size); object-fit: contain; }
 .app-tile img { filter: drop-shadow(0 3px 2px rgba(0,0,0,.08)); }
-.fallback { display: grid; place-items: center; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600; box-shadow: inset 0 1px 1px rgba(255,255,255,.4), 0 3px 5px -3px var(--glass-shade); }
+.fallback { display: grid; place-items: center; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600; box-shadow: inset 0 1px 1px rgba(255,255,255,.4), 0 3px 5px -3px var(--island-shadow); }
 .empty { display: flex; align-items: center; min-height: 64px; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.8; padding: 16px 4px; }
 .mode-nav { position: relative; flex: none; width: calc(var(--section-count) * 44px); height: 40px; display: grid; grid-template-columns: repeat(var(--section-count), minmax(0, 1fr)); color: var(--text); }
 .mode-selection { position: absolute; inset: 0 auto 0 0; width: calc(100% / var(--section-count)); border-radius: 20px; background: var(--surface-3); transform: translateX(calc(var(--page-index) * 100%)); transition: transform 220ms var(--geometry-ease); }
-.glass .mode-selection { background: var(--glass-control-active); box-shadow: inset 0 1px 1px var(--glass-edge), inset 0 -1px 1px var(--glass-rim), 0 3px 8px -4px var(--glass-shade); }
+.mode-selection { inset-block: 3px; border-radius: 11px; background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .mode-nav button { position: relative; display: flex; align-items: center; justify-content: center; gap: 9px; min-width: 0; border-radius: 24px; color: var(--text-2); font-size: 14px; }
+.mode-nav button { border-radius: 12px; }
 .mode-nav .selected { color: var(--text); font-weight: 600; }
-.mode-nav .selected svg { color: var(--island-tint); }
+.mode-nav .selected svg { color: var(--accent); }
 .mode-nav button:hover { color: var(--text); }
 button { transition: background 130ms ease, color 130ms ease, transform 150ms var(--geometry-ease); }
 button:active { transform: scale(.97); }
@@ -660,25 +667,33 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .feature-pane { max-height: 420px; overflow: auto; }
 .feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 .feature-pane :deep(.panel > .head) { display: none; }
+.feature-pane :deep(button:disabled) { opacity: 1; color: var(--text-3); background: var(--surface-2); cursor: not-allowed; }
 .feature-pane :deep(.pop > .head), .feature-pane :deep(.panel > .content) { padding-left: 0; padding-right: 0; }
-.glass .feature-pane { --r-chip: 16px; --r-tile: 16px; --thumb-bg: var(--glass-control); }
-.glass .feature-pane :deep(.search) { height: 38px; border-radius: 20px; background: var(--glass-control); }
-.glass .feature-pane :deep(.pause) { height: 38px; border-radius: 20px; }
-.glass .feature-pane :deep(.chips) { gap: 6px; padding: 0 0 10px; }
-.glass .feature-pane :deep(.chip) { height: 30px; padding: 0 12px; }
-.glass .feature-pane :deep(.list) { padding-left: 0; padding-right: 0; }
-.glass .feature-pane :deep(.row) { padding: 10px; }
-.glass .feature-pane :deep(.row.is-active) { background: var(--glass-control-active); box-shadow: inset 0 1px 0 var(--glass-edge); }
-.glass .feature-pane :deep(.seg) { padding: 4px; border-radius: 22px; background: var(--glass-control); }
-.glass .feature-pane :deep(.seg-btn) { height: 32px; border-radius: 18px; }
-.glass .feature-pane :deep(.textarea) { border-radius: 18px; background: var(--glass-control); }
+.feature-pane { --r-chip: 8px; --r-tile: 10px; }
+.feature-pane :deep(.search) { height: 36px; border-radius: 11px; background: var(--surface-2); }
+.feature-pane :deep(.pause) { height: 36px; border-radius: 11px; }
+.feature-pane :deep(.filter-bar) { padding: 0 0 8px; }
+.feature-pane :deep(.chips) { gap: 4px; padding: 2px; }
+.feature-pane :deep(.chip) { height: 30px; padding: 0 12px; }
+.feature-pane :deep(.filter-bar .chip) { height: 28px; padding: 0 8px; }
+.feature-pane :deep(.chips .chip:not(.is-on)) { border-color: transparent; }
+.feature-pane :deep(.list) { padding-left: 0; padding-right: 0; }
+.feature-pane :deep(.row) { padding: 10px; border-bottom: 1px solid var(--line); }
+.feature-pane :deep(.row.is-active) { background: var(--accent-weak); box-shadow: inset 2px 0 0 var(--accent); }
+.feature-pane :deep(.seg) { padding: 4px; border-radius: 22px; background: var(--surface-2); }
+.feature-pane :deep(.seg-btn) { height: 32px; border-radius: 18px; }
+.feature-pane :deep(.textarea) { border-radius: 18px; background: var(--surface-2); }
 .compact .expanded-content { padding-left: 20px; padding-right: 20px; }
 .narrow .expanded-content { padding-left: 16px; padding-right: 16px; }
+.expanded-content { padding-inline: 18px; }
+.narrow .expanded-content { padding-inline: 14px; }
 .narrow .categories { gap: 2px; }
 .narrow .categories button { padding: 6px 10px; }
-.reduced *, .reduced *::before { transition: none !important; }
-@media (prefers-reduced-motion: reduce) { *, *::before { transition: none !important; } }
-@media (prefers-reduced-transparency: reduce) { .glass .glass-surface { background: var(--glass-fill); backdrop-filter: none; } }
+.reduced *, .reduced *::before, .reduced *::after { transition: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+@media (prefers-contrast: more) {
+  .mode-selection, .categories .selected { box-shadow: inset 0 0 0 2px var(--accent); }
+}
 </style>
 
 <style scoped>

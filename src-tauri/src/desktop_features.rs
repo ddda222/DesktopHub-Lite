@@ -22,6 +22,7 @@ pub struct IslandAppearance {
     pub preset: String,
     pub avoid_fullscreen: bool,
     pub auto_check_updates: bool,
+    pub webgl: bool,
 }
 impl Default for IslandAppearance {
     fn default() -> Self {
@@ -29,10 +30,21 @@ impl Default for IslandAppearance {
             scale: 100,
             opacity: 100,
             tint: String::new(),
-            preset: "glass".into(),
+            preset: "classic".into(),
             avoid_fullscreen: true,
             auto_check_updates: false,
+            webgl: true,
         }
+    }
+}
+
+impl IslandAppearance {
+    // 保留旧配置字段以兼容便携数据，显示统一采用主题实底。
+    pub fn solid(mut self) -> Self {
+        self.preset = "classic".into();
+        self.opacity = 100;
+        self.tint.clear();
+        self
     }
 }
 
@@ -45,25 +57,18 @@ pub fn save_island_appearance(
     leave_ms: u32,
     reduced_motion: bool,
 ) -> Result<(), String> {
+    let appearance = appearance.solid();
     if !(100..=2000).contains(&hover_ms) || !(100..=4000).contains(&leave_ms) {
         return Err("展开延时为 100–2000 毫秒，收起延时为 100–4000 毫秒".into());
     }
-    let valid_tint = appearance.tint.is_empty()
-        || (appearance.tint.len() == 7
-            && appearance.tint.starts_with('#')
-            && appearance.tint[1..]
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit()));
     if !(75..=125).contains(&appearance.scale)
-        || !(75..=100).contains(&appearance.opacity)
-        || !valid_tint
-        || !matches!(appearance.preset.as_str(), "classic" | "glass")
         || !matches!(anchor.as_str(), "left" | "center" | "right")
     {
         return Err("无效的外观参数".into());
     }
     let state = app.state::<AppState>();
     let mut next = state.ui.snapshot();
+    let anchor_changed = next.island_anchor != anchor;
     next.island_appearance = appearance.clone();
     next.island_anchor = anchor.clone();
     next.island_hover_ms = hover_ms;
@@ -79,6 +84,7 @@ pub fn save_island_appearance(
         ui.island_leave_ms = leave_ms;
         ui.island_reduced_motion = reduced_motion;
     });
+    if anchor_changed { state.windows.set_bar_free_position(false); }
     windows::place_bar(&app, &state.windows);
     broadcast_ui(&app);
     Ok(())

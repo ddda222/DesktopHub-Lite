@@ -164,6 +164,7 @@ fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> U
 fn set_island_anchor(app: AppHandle, anchor: String) -> Result<UiState, String> {
     if !["left", "center", "right"].contains(&anchor.as_str()) { return Err("未知停靠位置".into()); }
     let state = app.state::<AppState>();
+    state.windows.set_bar_free_position(false);
     let next = state.ui.update(|ui| ui.island_anchor = anchor);
     persist_ui_prefs(&app, &next);
     windows::place_bar(&app, &state.windows);
@@ -322,8 +323,15 @@ fn set_pop_size(app: AppHandle, width: f64, height: f64) {
 }
 
 #[tauri::command]
-fn start_bar_drag(window: WebviewWindow) -> Result<(), String> {
-    window.start_dragging().map_err(|e| e.to_string())
+fn start_bar_drag(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let is_bar = window.label() == windows::BAR;
+    let was_free = if is_bar { state.windows.set_bar_free_position(true) } else { false };
+    if let Err(error) = window.start_dragging() {
+        if is_bar { state.windows.set_bar_free_position(was_free); }
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 /// 切换图标条分类。分类是跨窗口状态：弹层窗口也要跟着变。
@@ -1016,7 +1024,7 @@ pub fn run() {
                     wechat_status: if prefs.wechat_enabled { "starting" } else { "off" }.into(),
                     wechat_attention: false,
                     wechat_event: 0,
-                    island_appearance: prefs.island_appearance,
+                    island_appearance: prefs.island_appearance.solid(),
                     fullscreen_suppressed: false,
                     paused,
                     active_category_id: prefs.active_category_id,
@@ -1095,6 +1103,10 @@ pub fn run() {
                     }
                 }
                 WindowEvent::Focused(focused) => {
+                    #[cfg(windows)]
+                    if window.label() == windows::BAR {
+                        windows::enforce_bar_frameless(app);
+                    }
                     // 岛内交互由 WebView 管理，系统短暂失焦不关闭输入中的界面。
                     // 「点击弹层外面收起弹层」必须由系统焦点事件判断：
                     // 界面自己监听 blur 会把「窗口刚显示还没拿到焦点」也当成点了外面。
