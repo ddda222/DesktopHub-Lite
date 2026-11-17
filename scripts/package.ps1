@@ -2,6 +2,11 @@
 param([string]$OutputRoot = 'D:\codex\DesktopHub-work\packages')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$version = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
+if ($version -notmatch '^\d+\.\d+\.\d+$') { throw '无效的便携版版本号' }
+$tauriVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
+$cargoManifest = Get-Content -LiteralPath (Join-Path $projectRoot 'src-tauri\Cargo.toml') -Raw
+if ($version -ne $tauriVersion -or $cargoManifest -notmatch ('(?m)^version = "' + [regex]::Escape($version) + '"\r?$')) { throw '前端与桌面版本号不一致' }
 $env:CARGO_HOME = 'D:\codex\DesktopHub-work\rust\cargo'
 $env:RUSTUP_HOME = 'D:\codex\DesktopHub-work\rust\rustup'
 $env:CARGO_TARGET_DIR = 'D:\codex\DesktopHub-work\rust\target'
@@ -28,13 +33,19 @@ try {
     $env:TAURI_CONFIG = @{ build = @{ frontendDist = $relativeDist } } | ConvertTo-Json -Compress
     & "$env:CARGO_HOME\bin\cargo.exe" build --release --locked --manifest-path (Join-Path $nativeDirectory 'Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw '桌面程序编译失败' }
-    $packageName = 'DesktopHub-Lite-0.1.0-win-x64-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
+    $packageName = "DesktopHub-Lite-$version-win-x64-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
     $packageDirectory = Join-Path $OutputRoot $packageName
     New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\desktophub-lite.exe" -Destination (Join-Path $packageDirectory 'DesktopHub-Lite.exe')
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\WebView2Loader.dll" -Destination $packageDirectory
     New-Item -ItemType File -Path (Join-Path $packageDirectory 'portable.flag') | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot 'PORTABLE.md') -Destination (Join-Path $packageDirectory '使用说明.md')
+    $releaseNotes = Join-Path (Split-Path -Parent $projectRoot) "docs\releases\lite-v$version.md"
+    if (Test-Path -LiteralPath $releaseNotes) { Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $packageDirectory '更新说明.md') }
+    $sourceCommit = & git -C $projectRoot rev-parse HEAD
+    if ($LASTEXITCODE -ne 0) { throw '无法读取源码提交号' }
+    [ordered]@{ Product = 'DesktopHub Lite'; Version = $version; SourceCommit = $sourceCommit; Platform = 'windows-x64'; BuiltAtUtc = [DateTime]::UtcNow.ToString('o') } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageDirectory 'release-metadata.json') -Encoding utf8
     $archive = Join-Path $OutputRoot "$packageName.zip"
     Compress-Archive -LiteralPath $packageDirectory -DestinationPath $archive -CompressionLevel Optimal
     Write-Output "便携包：$archive"

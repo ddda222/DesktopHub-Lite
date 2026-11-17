@@ -1,6 +1,6 @@
 [package]
 name = "desktophub-lite"
-version = "0.1.0"
+version = "0.1.1"
 description = "DesktopHub 精简版：应用快捷方式与剪贴板历史"
 edition = "2021"
 rust-version = "1.77"

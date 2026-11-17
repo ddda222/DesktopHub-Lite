@@ -1,7 +1,7 @@
 {
   "name": "desktophub-lite",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "DesktopHub 精简版：应用快捷方式、剪贴板历史与翻译",
   "scripts": {
