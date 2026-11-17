@@ -1,7 +1,8 @@
 #requires -Version 7.0
-param([string]$OutputRoot = 'D:\codex\DesktopHub-work\packages')
+param([string]$OutputRoot = 'D:\codex\DesktopHub-work\packages', [string]$ReleaseNotesFile = '')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ($ReleaseNotesFile) { $ReleaseNotesFile = (Resolve-Path -LiteralPath $ReleaseNotesFile).Path }
 $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw '无效的便携版版本号' }
 $tauriVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
@@ -40,11 +41,13 @@ try {
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\WebView2Loader.dll" -Destination $packageDirectory
     New-Item -ItemType File -Path (Join-Path $packageDirectory 'portable.flag') | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot 'PORTABLE.md') -Destination (Join-Path $packageDirectory '使用说明.md')
-    $releaseNotes = Join-Path (Split-Path -Parent $projectRoot) "docs\releases\lite-v$version.md"
+    $releaseNotes = if ($ReleaseNotesFile) { $ReleaseNotesFile } else { Join-Path (Split-Path -Parent $projectRoot) "docs\releases\lite-v$version.md" }
     if (Test-Path -LiteralPath $releaseNotes) { Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $packageDirectory '更新说明.md') }
     $sourceCommit = & git -C $projectRoot rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw '无法读取源码提交号' }
-    [ordered]@{ Product = 'DesktopHub Lite'; Version = $version; SourceCommit = $sourceCommit; Platform = 'windows-x64'; BuiltAtUtc = [DateTime]::UtcNow.ToString('o') } |
+    $sourceStatus = @(& git -C $projectRoot status --porcelain --untracked-files=normal)
+    if ($LASTEXITCODE -ne 0) { throw '无法读取源码修改状态' }
+    [ordered]@{ Product = 'DesktopHub Lite'; Version = $version; SourceCommit = $sourceCommit; SourceDirty = $sourceStatus.Count -gt 0; Platform = 'windows-x64'; BuiltAtUtc = [DateTime]::UtcNow.ToString('o') } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $packageDirectory 'release-metadata.json') -Encoding utf8
     $archive = Join-Path $OutputRoot "$packageName.zip"
     Compress-Archive -LiteralPath $packageDirectory -DestinationPath $archive -CompressionLevel Optimal

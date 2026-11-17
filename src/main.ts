@@ -10,11 +10,13 @@
  */
 import { createApp, type Component } from 'vue'
 import BrowserPreview from './windows/BrowserPreview.vue'
+import StyleLab from './windows/StyleLab.vue'
 import BarWindow from './windows/BarWindow.vue'
 import PopWindow from './windows/PopWindow.vue'
 import SettingsWindowRoot from './windows/SettingsWindowRoot.vue'
 import TranslationWindow from './windows/TranslationWindow.vue'
 import ImagePreviewWindow from './windows/ImagePreviewWindow.vue'
+import CompareWindow from './windows/CompareWindow.vue'
 import ToastWindow from './windows/ToastWindow.vue'
 import { isDesktop, windowLabel, resolveWindowLabel } from '@/lib/desktop/desktop'
 import * as store from './store'
@@ -22,8 +24,9 @@ import './styles/tokens.css'
 import './styles/base.css'
 
 function pickRoot(): { root: Component; shell: string } {
-  if (!isDesktop) return { root: BrowserPreview, shell: 'browser' }
+  if (!isDesktop) return { root: new URLSearchParams(location.search).get('preview') === 'styles' ? StyleLab : BrowserPreview, shell: 'browser' }
   if (windowLabel.startsWith('image-preview-')) return { root: ImagePreviewWindow, shell: 'image-preview' }
+  if (windowLabel.startsWith('compare-')) return { root: CompareWindow, shell: 'compare' }
   switch (windowLabel) {
     case 'bar':
       return { root: BarWindow, shell: 'bar' }
@@ -45,7 +48,7 @@ async function mountWindow(): Promise<void> {
   const { root, shell } = pickRoot()
   document.documentElement.dataset.shell = shell
   if (isDesktop) document.documentElement.dataset.theme = 'dark'
-  try { if (shell !== 'image-preview') await store.bootstrap() } finally { createApp(root).mount('#app') }
+  try { if (!['image-preview', 'compare'].includes(shell)) await store.bootstrap() } finally { createApp(root).mount('#app') }
 }
 void mountWindow().catch(error => {
   document.getElementById('app')!.textContent = `窗口加载失败，请关闭后重新打开：${String(error)}`

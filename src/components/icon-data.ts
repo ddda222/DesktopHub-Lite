@@ -1,4 +1,6 @@
 export type IconName =
+  | 'volume'
+  | 'compare'
   | 'folder'
   | 'clipboard'
   | 'search'
@@ -27,6 +29,8 @@ export type IconName =
   | 'external'
 
 export const iconPaths: Record<IconName, string> = {
+  volume: '<path d="M3 10h4l5-4v12l-5-4H3zM16 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/>',
+  compare: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M6 12h3m6 0h3"/>',
   folder: '<path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 8h18"/>',
   external: '<path d="M13 5h6v6m0-6-8 8M10 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/>',
   translate: '<path d="M3 5h12M9 3v2M5 5c1 6 4 9 9 11M13 5c-1 6-4 9-9 11M14 21l4-10 4 10M15.5 17h5"/>',

@@ -16,6 +16,10 @@ mod desktop_features;
 mod file_shelf;
 mod icons;
 mod image_preview;
+mod compare;
+mod audio;
+mod config_format;
+mod config_transfer;
 mod launcher;
 mod logging;
 mod state;
@@ -56,6 +60,7 @@ pub const UI_PREFS_FILE: &str = "ui-preferences.json";
 /// 应用运行期共享状态。
 pub struct AppState {
     store: Store,
+    configuration_gate: Mutex<()>,
     apps: Mutex<AppConfig>,
     ui: UiStateHandle,
     windows: WindowsHandle,
@@ -114,15 +119,16 @@ fn show_window(app: &AppHandle, label: &str) {
     }
 }
 
-/// 分类与主题要跨重启保留：写在隔离目录，失败只记录不打断操作。
-fn persist_ui_prefs(app: &AppHandle, snapshot: &UiState) {
-    let Some(state) = app.try_state::<AppState>() else {
-        return;
-    };
-    let prefs = state::UiPreferences::from_state(snapshot);
-    if let Err(error) = state.store.write(UI_PREFS_FILE, &prefs) {
-        crate::log_warn!("保存界面偏好失败：{error}");
-    }
+/// 保存成功后才发布内存状态；与配置恢复共用锁，避免旧快照覆盖刚恢复的数据。
+fn update_ui_preferences(app: &AppHandle, change: impl FnOnce(&mut UiState)) -> Result<UiState, String> {
+    let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
+    let mut current = state.ui.0.lock().map_err(|_| "界面状态暂时不可用")?;
+    let mut next = current.clone();
+    change(&mut next);
+    state.store.write(UI_PREFS_FILE, &state::UiPreferences::from_state(&next))?;
+    *current = next.clone();
+    Ok(next)
 }
 
 // ---------------------------------------------------------------- 基础命令
@@ -166,9 +172,8 @@ fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> U
 fn set_island_anchor(app: AppHandle, anchor: String) -> Result<UiState, String> {
     if !["left", "center", "right"].contains(&anchor.as_str()) { return Err("未知停靠位置".into()); }
     let state = app.state::<AppState>();
+    let next = update_ui_preferences(&app, |ui| ui.island_anchor = anchor)?;
     state.windows.set_bar_free_position(false);
-    let next = state.ui.update(|ui| ui.island_anchor = anchor);
-    persist_ui_prefs(&app, &next);
     windows::place_bar(&app, &state.windows);
     broadcast_ui(&app);
     Ok(next)
@@ -179,15 +184,14 @@ fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Resu
     if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
     let state = app.state::<AppState>();
     let previous = state.ui.snapshot();
-    let next = state.ui.update(|ui| {
+    let next = update_ui_preferences(&app, |ui| {
         ui.island_page = page.clone();
         ui.island_expanded = true;
         ui.panel = if page == state::PANEL_APPLICATIONS { None } else { Some(page.clone()) };
-    });
+    })?;
     if previous.island_page == PANEL_TRANSLATION && page != PANEL_TRANSLATION {
         translation::cancel_for_window(&app, windows::BAR);
     }
-    if previous.island_page != page { persist_ui_prefs(&app, &next); }
     if focus.unwrap_or(true) { show_window(&app, windows::BAR); }
     hide_window(&app, windows::POP);
     broadcast_ui(&app);
@@ -251,18 +255,16 @@ fn toggle_panel(app: AppHandle, panel: String) -> Result<UiState, String> {
 }
 
 #[tauri::command]
-fn close_panel(app: AppHandle) -> UiState {
-    let state = app.state::<AppState>();
-    let next = state.ui.update(|ui| {
+fn close_panel(app: AppHandle) -> Result<UiState, String> {
+    let next = update_ui_preferences(&app, |ui| {
         if matches!(ui.panel.as_deref(), Some(PANEL_TRANSLATION | PANEL_CLIPBOARD)) {
             ui.island_page = state::PANEL_APPLICATIONS.into();
         }
         ui.panel = None;
-    });
-    persist_ui_prefs(&app, &next);
+    })?;
     hide_window(&app, windows::POP);
     broadcast_ui(&app);
-    next
+    Ok(next)
 }
 
 #[tauri::command]
@@ -334,20 +336,16 @@ fn start_bar_drag(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
 
 /// 切换图标条分类。分类是跨窗口状态：弹层窗口也要跟着变。
 #[tauri::command]
-fn set_category(app: AppHandle, category_id: String) -> UiState {
+fn set_category(app: AppHandle, category_id: String) -> Result<UiState, String> {
     let state = app.state::<AppState>();
-    let known = {
-        let config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
-        config.categories.iter().any(|c| c.id == category_id)
-    };
-    let next = state.ui.update(|ui| {
+    let next = update_ui_preferences(&app, |ui| {
+        let known = state.apps.lock().unwrap_or_else(|e| e.into_inner()).categories.iter().any(|c| c.id == category_id);
         if known || category_id == CATEGORY_ALL {
             ui.active_category_id = category_id.clone();
         }
-    });
-    persist_ui_prefs(&app, &next);
+    })?;
     broadcast_ui(&app);
-    next
+    Ok(next)
 }
 
 /// 自检：直接按标签显示窗口并回报真实可见状态，用于无人工介入地验证窗口链路。
@@ -379,9 +377,7 @@ fn set_theme(app: AppHandle, theme: String) -> Result<UiState, String> {
     if ![THEME_DARK, THEME_LIGHT, THEME_SYSTEM].contains(&theme.as_str()) {
         return Err(format!("未知主题：{theme}"));
     }
-    let state = app.state::<AppState>();
-    let next = state.ui.update(|ui| ui.theme = theme.clone());
-    persist_ui_prefs(&app, &next);
+    let next = update_ui_preferences(&app, |ui| ui.theme = theme)?;
     broadcast_ui(&app);
     Ok(next)
 }
@@ -444,6 +440,7 @@ fn list_applications(state: State<'_, AppState>) -> AppConfig {
 #[tauri::command]
 fn open_application(app: AppHandle, id: String) -> Result<OpenResult, String> {
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let found = {
         let config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
         config.find(&id).cloned()
@@ -457,13 +454,9 @@ fn open_application(app: AppHandle, id: String) -> Result<OpenResult, String> {
         // 目标已经不在：把「失效」写进配置，图标条据此显示告警态。
         {
             let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(existing) = config.apps.iter_mut().find(|a| a.id == item.id) {
-                existing.broken = Some(true);
-            }
-            let snapshot = config.clone();
-            drop(config);
-            let _ = state.store.write(applications::CONFIG_FILE, &snapshot);
-            broadcast_apps(&app, &snapshot);
+            if let Ok(snapshot) = state.store.update(applications::CONFIG_FILE, &mut *config, |next| {
+                if let Some(existing) = next.apps.iter_mut().find(|a| a.id == item.id) { existing.broken = Some(true); }
+            }) { drop(config); broadcast_apps(&app, &snapshot); }
         }
         return Ok(OpenResult {
             launched: false,
@@ -477,13 +470,9 @@ fn open_application(app: AppHandle, id: String) -> Result<OpenResult, String> {
             {
                 let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
                 if config.apps.iter().any(|a| a.id == item.id && a.broken.is_some()) {
-                    if let Some(existing) = config.apps.iter_mut().find(|a| a.id == item.id) {
-                        existing.broken = None;
-                    }
-                    let snapshot = config.clone();
-                    drop(config);
-                    let _ = state.store.write(applications::CONFIG_FILE, &snapshot);
-                    broadcast_apps(&app, &snapshot);
+                    if let Ok(snapshot) = state.store.update(applications::CONFIG_FILE, &mut *config, |next| {
+                        if let Some(existing) = next.apps.iter_mut().find(|a| a.id == item.id) { existing.broken = None; }
+                    }) { drop(config); broadcast_apps(&app, &snapshot); }
                 }
             }
             Ok(OpenResult {
@@ -501,22 +490,23 @@ fn open_application(app: AppHandle, id: String) -> Result<OpenResult, String> {
 #[tauri::command]
 fn save_application(app: AppHandle, application: HubApp) -> Result<AppConfig, String> {
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let snapshot = {
         let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
         let mut incoming = application;
+        if incoming.id.trim().is_empty() || incoming.name.trim().is_empty() || incoming.target.trim().is_empty() { return Err("应用名称和目标不能为空".into()); }
+        if !config.categories.iter().any(|c| c.id == incoming.category_id) { incoming.category_id = CATEGORY_ALL.into(); }
         // 失效状态由目标是否存在决定，不接受界面瞎传。
         incoming.broken = if launcher::exists(&incoming.target) {
             None
         } else {
             Some(true)
         };
-        match config.apps.iter_mut().find(|a| a.id == incoming.id) {
+        state.store.update(applications::CONFIG_FILE, &mut *config, |next| match next.apps.iter_mut().find(|a| a.id == incoming.id) {
             Some(existing) => *existing = incoming,
-            None => config.apps.push(incoming),
-        }
-        config.clone()
+            None => next.apps.push(incoming),
+        })?
     };
-    state.store.write(applications::CONFIG_FILE, &snapshot)?;
     broadcast_apps(&app, &snapshot);
     Ok(snapshot)
 }
@@ -525,6 +515,7 @@ fn save_application(app: AppHandle, application: HubApp) -> Result<AppConfig, St
 fn save_application_category(app: AppHandle, id: String, name: Option<String>) -> Result<AppConfig, String> {
     if id == "all" || id.trim().is_empty() { return Err("默认分类不能修改".into()); }
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
     let mut next = config.clone();
     if let Some(name) = name {
@@ -536,19 +527,27 @@ fn save_application_category(app: AppHandle, id: String, name: Option<String>) -
         next.categories.retain(|category| category.id != id);
         for item in &mut next.apps { if item.category_id == id { item.category_id = "all".into(); } }
     }
-    state.store.write(applications::CONFIG_FILE, &next)?;
-    *config = next.clone(); drop(config); broadcast_apps(&app, &next); Ok(next)
+    let previous = state.ui.snapshot();
+    let reset_category = !next.categories.iter().any(|category| category.id == previous.active_category_id);
+    if reset_category {
+        let mut ui = previous.clone(); ui.active_category_id = CATEGORY_ALL.into();
+        let backup = config_format::ConfigurationBackup::capture(&config, &previous);
+        state.store.write_configuration(&next, &state::UiPreferences::from_state(&ui), &backup)?;
+        state.ui.update(|ui| ui.active_category_id = CATEGORY_ALL.into());
+    } else { state.store.write(applications::CONFIG_FILE, &next)?; }
+    *config = next.clone(); drop(config); broadcast_apps(&app, &next);
+    if reset_category { broadcast_ui(&app); }
+    Ok(next)
 }
 
 #[tauri::command]
 fn remove_application(app: AppHandle, id: String) -> Result<AppConfig, String> {
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let snapshot = {
         let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
-        config.apps.retain(|a| a.id != id);
-        config.clone()
+        state.store.update(applications::CONFIG_FILE, &mut *config, |next| next.apps.retain(|a| a.id != id))?
     };
-    state.store.write(applications::CONFIG_FILE, &snapshot)?;
     broadcast_apps(&app, &snapshot);
     Ok(snapshot)
 }
@@ -556,8 +555,11 @@ fn remove_application(app: AppHandle, id: String) -> Result<AppConfig, String> {
 #[tauri::command]
 fn reorder_applications(app: AppHandle, ids: Vec<String>) -> Result<AppConfig, String> {
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let snapshot = {
         let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
+        let mut unique = std::collections::HashSet::new();
+        if ids.iter().any(|id| !unique.insert(id) || !config.apps.iter().any(|a| &a.id == id)) { return Err("排序包含重复或已失效的应用，请刷新后重试".into()); }
         let mut ordered = Vec::with_capacity(config.apps.len());
         for id in &ids {
             if let Some(found) = config.apps.iter().find(|a| &a.id == id) {
@@ -569,10 +571,8 @@ fn reorder_applications(app: AppHandle, ids: Vec<String>) -> Result<AppConfig, S
                 ordered.push(app.clone());
             }
         }
-        config.apps = ordered;
-        config.clone()
+        state.store.update(applications::CONFIG_FILE, &mut *config, |next| next.apps = ordered)?
     };
-    state.store.write(applications::CONFIG_FILE, &snapshot)?;
     broadcast_apps(&app, &snapshot);
     Ok(snapshot)
 }
@@ -615,39 +615,40 @@ struct ImportResult {
 ///
 /// 只读这两个目录，不做全盘扫描；同一个目标已经存在就跳过，不重复添加。
 #[tauri::command]
-fn import_desktop_shortcuts(app: AppHandle, category_id: Option<String>) -> ImportResult {
+fn import_desktop_shortcuts(app: AppHandle, category_id: Option<String>) -> Result<ImportResult, String> {
     let state = app.state::<AppState>();
     let found = applications::desktop_shortcuts();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let total = found.len();
     let fallback_category = category_id.unwrap_or_else(|| "c-common".into());
 
     let (snapshot, added) = {
         let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = config.clone();
+        let fallback_category = if next.categories.iter().any(|c| c.id == fallback_category) { fallback_category } else { CATEGORY_ALL.into() };
         let mut added = 0usize;
         for (target, name) in &found {
-            if config.find_by_target(target).is_some() {
+            if next.find_by_target(target).is_some() {
                 continue;
             }
             let app_entry = applications::app_from_target(target, &fallback_category, Some(name));
-            config.apps.push(app_entry);
+            next.apps.push(app_entry);
             added += 1;
         }
-        (config.clone(), added)
+        if added > 0 { state.store.write(applications::CONFIG_FILE, &next)?; *config = next.clone(); }
+        (next, added)
     };
 
     if added > 0 {
-        if let Err(error) = state.store.write(applications::CONFIG_FILE, &snapshot) {
-            log_warn!("导入桌面快捷方式后保存失败：{error}");
-        }
         broadcast_apps(&app, &snapshot);
     }
     log_info!("导入桌面快捷方式：发现 {total}，新增 {added}");
-    ImportResult {
+    Ok(ImportResult {
         added,
         skipped: total.saturating_sub(added),
         total,
         config: snapshot,
-    }
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1006,6 +1007,9 @@ pub fn run() {
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
             app.manage(image_preview::Previews::default());
+            app.manage(compare::Comparisons::default());
+            app.manage(audio::AudioState::default());
+            app.manage(config_transfer::ConfigurationTransfers::default());
             app.manage(file_shelf::ShelfHistory::default());
             app.manage(AppState {
                 store,
@@ -1031,6 +1035,7 @@ pub fn run() {
                     active_category_id: prefs.active_category_id,
                     theme: prefs.theme,
                 }),
+                configuration_gate: Mutex::new(()),
                 windows: WindowsHandle::new(window_state),
                 clipboard: Mutex::new(clipboard),
                 file_shelf: Mutex::new(file_shelf),
@@ -1089,13 +1094,13 @@ pub fn run() {
             let app = window.app_handle();
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
-                    if window.label().starts_with("image-preview-") { return; }
+                    if window.label().starts_with("image-preview-") || window.label().starts_with("compare-") { return; }
                     // 关闭只隐藏，退出走托盘菜单。
                     api.prevent_close();
                     if window.label() == windows::TRANSLATION { close_translation_window(app.clone()); }
                     else { let _ = window.hide(); }
                 }
-                WindowEvent::Destroyed => { image_preview::forget(app, window.label()); }
+                WindowEvent::Destroyed => { image_preview::forget(app, window.label()); compare::forget(app, window.label()); }
                 WindowEvent::Moved(position) => {
                     if window.label() == windows::BAR {
                         // 程序布局也会发 Moved；动画过程中不能把每帧写入数据文件。
@@ -1151,6 +1156,15 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            config_transfer::export_configuration,
+            config_transfer::preview_configuration_import,
+            config_transfer::cancel_configuration_import,
+            config_transfer::apply_configuration_import,
+            audio::list_audio_sessions,
+            audio::update_audio_session,
+            audio::list_audio_profiles,
+            audio::save_audio_profile,
+            audio::apply_audio_profile,
             file_shelf::list_shelf_files,
             file_shelf::add_shelf_files,
             file_shelf::remove_shelf_files,
@@ -1160,6 +1174,9 @@ pub fn run() {
             file_shelf::reveal_shelf_file,
             file_shelf::drag_shelf_files,
             image_preview::open_image_preview,
+            compare::open_compare_window,
+            compare::compare_window_content,
+            compare::pin_compare_window,
             image_preview::image_preview_content,
             image_preview::pin_image_preview,
             current_window_label,

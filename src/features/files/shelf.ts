@@ -48,7 +48,7 @@ export async function subscribeShelf(): Promise<() => void> {
   return stop
 }
 export async function addShelfFiles(paths: string[]): Promise<void> {
-  if (!paths.length || !isDesktop) return
+  if (!paths.length || !isDesktop || shelf.busy) return
   shelf.error = ''; shelf.busy = true; shelf.activity = '正在暂存'
   try {
     const result = await invokeHost<{ entries: ShelfItem[]; added: number }>('add_shelf_files', { paths })
@@ -95,6 +95,14 @@ export async function undoShelfRemove(): Promise<void> {
   } catch (error) { shelf.error = String(error) }
   finally { shelf.busy = false; shelf.activity = '' }
 }
+export async function readShelfPreview(item: ShelfItem): Promise<FilePreview> {
+  if (isDesktop) return invokeHost<FilePreview>('preview_shelf_file', { id: item.id })
+  if (!item.available) throw new Error('原文件已移动或删除（模拟状态）')
+  const preview = samplePreviews.get(item.id)
+  if (!preview) throw new Error('请先载入浏览器示例文件')
+  return preview
+}
+
 export async function openShelfPreview(item: ShelfItem): Promise<void> {
   const seq = ++previewSeq
   shelf.previewItem = item; shelf.preview = null; shelf.previewError = ''; shelf.previewLoading = true

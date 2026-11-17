@@ -69,6 +69,7 @@ pub fn save_island_appearance(
         return Err("无效的外观参数".into());
     }
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let previous = state.ui.snapshot();
     let mut next = previous.clone();
     let capture_changed = appearance.hide_from_capture != previous.island_appearance.hide_from_capture

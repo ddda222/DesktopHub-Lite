@@ -12,6 +12,8 @@ import { makeShelfSamples } from '@/mock/shelf-samples'
 import { closeShelfPreview, loadBrowserShelfSamples, openShelfPreview, removeShelfFiles, shelf, undoShelfRemove } from '@/features/files/shelf'
 
 const plain = ref(false)
+const previewMode = new URLSearchParams(location.search).get('preview')
+const settingsStandalone = previewMode === 'settings-window'
 const scene = ref('normal')
 const keepOpen = ref(false)
 const feedback = ref({ kind: '', sequence: 0 })
@@ -35,6 +37,7 @@ state.icons = previewIcons
 state.ui.islandExpanded = false
 state.ui.fullscreenSuppressed = false
 setTheme('light')
+if (previewMode === 'settings' || settingsStandalone) state.ui.settingsOpen = true
 
 // 只模拟宿主通知，不改变真实 Windows 前台窗口或显示模式。
 watch([scene, () => state.ui.islandAppearance.avoidFullscreen], () => {
@@ -115,6 +118,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
     <header class="preview-tools">
       <span>DesktopHub <small>黑白实底预览</small></span>
       <div class="preview-options">
+        <a href="?preview=styles" style="color: inherit; font-weight: 600">十款样式实验室 ↗</a>
+        <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button>
         <button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button>
         <label>尺寸<select v-model.number="state.ui.islandAppearance.scale"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option></select></label>
@@ -149,11 +154,11 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
       <label class="keep-open"><input v-model="keepOpen" type="checkbox" />保持面板展开</label>
       <p class="lab-note" role="status">{{ demoNote }}</p>
       <p class="lab-help">试细线：顶部「场景」选最大化或全屏，鼠标移入立即展开，移开后收回。</p>
-      <small class="lab-scope">全部为模拟效果，不调用翻译服务、不读取本机文件。</small>
+      <small class="lab-scope">光轨舱门 · 中转文件与声音为模拟。对照台只读取你主动选择的图片，不上传内容。</small>
     </aside>
     </div>
     <p class="preview-note">拖动胶囊或展开后的顶部握柄调整位置。<br />黑白实底、主题跟随与局部 WebGL 光晕。</p>
-    <SettingsWindow v-if="state.ui.settingsOpen" />
+    <SettingsWindow v-if="state.ui.settingsOpen" :standalone="settingsStandalone" />
     <dialog ref="imageDialog" class="image-demo" aria-label="独立图片预览演示" :style="{ width: `${imageDemoSize.width}px`, height: `${imageDemoSize.height}px` }" @cancel.prevent="closeImageDemo" @close="browserImagePreview = null">
       <header ref="imageDemoHeader" class="image-demo-header"><span>网页演示 · 置顶仅展示状态</span><div><button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button><button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button></div></header>
       <ImagePreviewWindow v-if="browserImagePreview" :demo-content="browserImagePreview" @close="closeImageDemo" @resize="resizeImageDemo" />

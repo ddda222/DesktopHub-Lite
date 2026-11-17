@@ -8,7 +8,8 @@
     "settings",
     "toast",
     "translation",
-    "image-preview-*"
+    "image-preview-*",
+    "compare-*"
   ],
   "permissions": [
     "core:default",

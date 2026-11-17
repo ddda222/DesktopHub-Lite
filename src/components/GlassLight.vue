@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps<{ lightSurface: boolean; signal?: string }>()
+const props = defineProps<{ lightSurface: boolean; signal?: string; expanded?: boolean }>()
 const emit = defineEmits<{ unavailable: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 let dispose: (() => void) | undefined
@@ -15,6 +15,7 @@ void main() {
 const fragmentSource = `
 precision mediump float;
 uniform vec2 resolution;
+uniform vec2 bufferResolution;
 uniform vec2 light;
 uniform float radius;
 uniform float pixel;
@@ -22,8 +23,10 @@ uniform float intensity;
 uniform float lightSurface;
 uniform vec2 rippleOrigin;
 uniform float rippleAge;
+uniform float sweep;
+uniform float openingAge;
 void main() {
-  vec2 point = gl_FragCoord.xy;
+  vec2 point = gl_FragCoord.xy * resolution / bufferResolution;
   vec2 box = abs(point - resolution * .5) - resolution * .5 + radius + pixel * .75;
   float edge = (length(max(box, 0.)) + min(max(box.x, box.y), 0.) - radius) / pixel;
   float depth = max(-edge, 0.);
@@ -39,7 +42,13 @@ void main() {
   // 无全周常亮项：未被光斑照到的边缘交给 CSS 中性描边。
   float spot = smoothstep(.03, .85, focus) * intensity;
   float halo = glow * spot * mix(.72, .58, lightSurface);
-  float alpha = (rim * spot * .65 + halo + wave * .5) * edgeMask;
+  // 06 光轨舱门：沿用演示的轮廓巡行，展开时从上沿中心向两侧分流。
+  float angle = atan((point.y - resolution.y * .5) / resolution.y, (point.x - resolution.x * .5) / resolution.x);
+  float trail = pow(max(0., cos(angle - sweep)), 24.);
+  float progress = clamp(openingAge / .85, 0., 1.);
+  float travel = (1. - pow(1. - progress, 1.5)) * 3.141593;
+  float split = (pow(max(0., cos(angle - 1.570796 - travel)), 20.) + pow(max(0., cos(angle - 1.570796 + travel)), 20.)) * (1. - smoothstep(.65, 1., progress));
+  float alpha = (rim * spot * .65 + halo + wave * .5 + (trail * .8 + split * .7) * (rim + glow * .4)) * edgeMask;
   vec3 darkLight = mix(vec3(.28, .65, 1.), vec3(.65, .95, 1.), spot);
   vec3 paleLight = mix(vec3(.08, .38, .78), vec3(.02, .54, .85), spot);
   gl_FragColor = vec4(mix(darkLight, paleLight, lightSurface), min(alpha, .9) * (1. - smoothstep(-.4, .7, edge)));
@@ -97,6 +106,7 @@ onMounted(() => {
 
   const position = gl.getAttribLocation(program, 'position')
   const resolution = gl.getUniformLocation(program, 'resolution')
+  const bufferResolution = gl.getUniformLocation(program, 'bufferResolution')
   const light = gl.getUniformLocation(program, 'light')
   const radius = gl.getUniformLocation(program, 'radius')
   const pixel = gl.getUniformLocation(program, 'pixel')
@@ -104,6 +114,8 @@ onMounted(() => {
   const lightSurface = gl.getUniformLocation(program, 'lightSurface')
   const rippleOrigin = gl.getUniformLocation(program, 'rippleOrigin')
   const rippleAge = gl.getUniformLocation(program, 'rippleAge')
+  const sweep = gl.getUniformLocation(program, 'sweep')
+  const openingAge = gl.getUniformLocation(program, 'openingAge')
   gl.useProgram(program)
   gl.bindBuffer(gl.ARRAY_BUFFER, triangle)
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW)
@@ -122,22 +134,38 @@ onMounted(() => {
   let rippleX = targetX
   let rippleY = targetY
   let surfaceTone = Number(props.lightSurface)
+  let openingStart = props.expanded ? performance.now() : -Infinity
+  let lastPaint = 0
+  let visible = true
+  const contrast = window.matchMedia('(prefers-contrast: more)')
+  const transparency = window.matchMedia('(prefers-reduced-transparency: reduce)')
 
+  let surfaceWidth = element.clientWidth
+  let surfaceHeight = element.clientHeight
+  let corner = parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0
+  let bufferTimer: ReturnType<typeof setTimeout> | undefined
   const requestDraw = (): void => {
     if (!frame) frame = requestAnimationFrame(draw)
   }
 
   const draw = (now: number): void => {
     frame = 0
+    if (document.hidden || !visible || contrast.matches || transparency.matches) { previousTime = 0; return }
+    // 持续巡光限制为 30 fps；保留现有小画布与低功耗上下文。
+    if (now - lastPaint < 1000 / 30) { requestDraw(); return }
+    lastPaint = now
     const ratio = Math.min(window.devicePixelRatio, 1.5)
-    const width = Math.round(element.clientWidth * ratio)
-    const height = Math.round(element.clientHeight * ratio)
+    const width = Math.round(surfaceWidth * ratio)
+    const height = Math.round(surfaceHeight * ratio)
     if (!width || !height) return
-    if (element.width !== width || element.height !== height) {
-      element.width = width
-      element.height = height
-      gl.viewport(0, 0, width, height)
+    // 缓冲区只按 128 像素档扩容；开合时复用，避免每一帧重新分配 GPU 绘制缓冲。
+    const bufferWidth = Math.max(element.width, Math.ceil(width / 128) * 128)
+    const bufferHeight = Math.max(element.height, Math.ceil(height / 128) * 128)
+    if (element.width !== bufferWidth || element.height !== bufferHeight) {
+      element.width = bufferWidth
+      element.height = bufferHeight
     }
+    gl.viewport(0, 0, element.width, element.height)
 
     const elapsed = previousTime ? Math.min(now - previousTime, 50) : 16
     const follow = 1 - Math.exp(-elapsed / 55)
@@ -147,8 +175,8 @@ onMounted(() => {
     surfaceTone += (Number(props.lightSurface) - surfaceTone) * follow
     const age = Math.min((now - rippleStart) / 1000, 1)
 
-    const corner = parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0
     gl.uniform2f(resolution, width, height)
+    gl.uniform2f(bufferResolution, element.width, element.height)
     gl.uniform2f(light, lightX, lightY)
     gl.uniform1f(radius, Math.min(corner * ratio, width / 2, height / 2))
     gl.uniform1f(pixel, ratio)
@@ -156,11 +184,13 @@ onMounted(() => {
     gl.uniform1f(lightSurface, surfaceTone)
     gl.uniform2f(rippleOrigin, rippleX, rippleY)
     gl.uniform1f(rippleAge, age)
+    gl.uniform1f(sweep, now / 1300)
+    gl.uniform1f(openingAge, Math.min((now - openingStart) / 1000, 1))
     gl.drawArrays(gl.TRIANGLES, 0, 3)
 
     const remaining = Math.abs(targetX - lightX) + Math.abs(targetY - lightY) + Math.abs(targetEnergy - energy) + Math.abs(Number(props.lightSurface) - surfaceTone)
     previousTime = remaining > 0.006 || age < 0.9 ? now : 0
-    if (previousTime) requestDraw()
+    requestDraw()
   }
 
   const followPointer = (event: PointerEvent): void => {
@@ -190,13 +220,33 @@ onMounted(() => {
 
   const unavailable = () => emit('unavailable')
   const stopTone = watch(() => props.lightSurface, requestDraw)
-  // 任务状态改变只扫过一次边缘，不新建画布，也不持续运行动画。
+  const stopOpening = watch(() => props.expanded, value => { openingStart = value ? performance.now() : -Infinity; requestDraw() })
+  const visibility = () => requestDraw()
+  document.addEventListener('visibilitychange', visibility)
+  contrast.addEventListener('change', visibility)
+  transparency.addEventListener('change', visibility)
+  const intersection = new IntersectionObserver(entries => { visible = entries.some(entry => entry.isIntersecting); requestDraw() })
+  intersection.observe(element)
+  // 任务反馈只追加一次波纹，主题、切页和开合都复用同一画布。
   const stopSignal = watch(() => props.signal, signal => {
     if (!signal || signal === 'idle') return
     rippleX = .5; rippleY = 1; rippleStart = performance.now()
     requestDraw()
   })
-  const resize = new ResizeObserver(requestDraw)
+  const resize = new ResizeObserver(entries => {
+    const box = entries[0]?.contentRect
+    if (box) { surfaceWidth = box.width; surfaceHeight = box.height }
+    corner = parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0
+    clearTimeout(bufferTimer)
+    bufferTimer = setTimeout(() => {
+      // 尺寸稳定后收回缓冲，胶囊空闲时不持续绘制展开面板大小的纹理。
+      const ratio = Math.min(window.devicePixelRatio, 1.5)
+      element.width = Math.max(1, Math.ceil(surfaceWidth * ratio / 128) * 128)
+      element.height = Math.max(1, Math.ceil(surfaceHeight * ratio / 128) * 128)
+      requestDraw()
+    }, 200)
+    requestDraw()
+  })
   resize.observe(element)
   surface.addEventListener('pointermove', followPointer, { passive: true })
   surface.addEventListener('pointerdown', flash, { passive: true })
@@ -206,9 +256,15 @@ onMounted(() => {
 
   dispose = () => {
     cancelAnimationFrame(frame)
+    clearTimeout(bufferTimer)
     resize.disconnect()
     stopTone()
+    stopOpening()
     stopSignal()
+    intersection.disconnect()
+    document.removeEventListener('visibilitychange', visibility)
+    contrast.removeEventListener('change', visibility)
+    transparency.removeEventListener('change', visibility)
     surface.removeEventListener('pointermove', followPointer)
     surface.removeEventListener('pointerdown', flash)
     surface.removeEventListener('pointerleave', dim)

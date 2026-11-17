@@ -5,6 +5,8 @@ import GlassLight from '@/components/GlassLight.vue'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
+import AudioMixer from '@/features/audio/AudioMixer.vue'
+import CompareBoard from '@/features/compare/CompareBoard.vue'
 import { addShelfFiles, shelf, subscribeShelf } from '@/features/files/shelf'
 import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -38,7 +40,7 @@ const hoverClosing = ref(false)
 const expanded = computed(() => hostExpanded.value && !hoverClosing.value)
 // 避让只决定收起形态；细线也能悬停展开。
 const tucked = computed(() => suppressed.value && !expanded.value)
-const expandMs = 260
+const expandMs = 550
 const collapseMs = 200
 const geometryMoving = ref(false)
 const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -65,6 +67,7 @@ let stopFileDrop: (() => void) | undefined
 let stopShelf: (() => void) | undefined
 const content = ref<HTMLElement | null>(null)
 const chrome = ref<HTMLElement | null>(null)
+const modeNav = ref<HTMLElement | null>(null)
 const contentHeight = ref(330)
 const chromeHeight = ref(56)
 const availableWidth = ref(window.screen.availWidth)
@@ -107,8 +110,20 @@ const sections = [
   { value: 'applications', label: '应用', icon: 'grid' },
   { value: 'clipboard', label: '剪贴板', icon: 'clipboard' },
   { value: 'translation', label: '翻译', icon: 'translate' },
-  { value: 'files', label: '文件中转', icon: 'folder' }
+  { value: 'files', label: '文件中转', icon: 'folder' },
+  { value: 'compare', label: '对照台', icon: 'compare' },
+  { value: 'audio', label: '调音台', icon: 'volume' }
 ] as const
+function revealSelectedPage(): void {
+  const nav = modeNav.value
+  const selected = nav?.querySelector<HTMLElement>('button.selected')
+  if (!nav || !selected) return
+  if (selected.offsetLeft < nav.scrollLeft) nav.scrollLeft = selected.offsetLeft
+  else if (selected.offsetLeft + selected.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = selected.offsetLeft + selected.offsetWidth - nav.clientWidth
+}
+watch(page, revealSelectedPage, { flush: 'post' })
+watch(scale, revealSelectedPage, { flush: 'post' })
+onMounted(revealSelectedPage)
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let leaveTimer: ReturnType<typeof setTimeout> | undefined
 let closeTimer: ReturnType<typeof setTimeout> | undefined
@@ -512,7 +527,8 @@ onBeforeUnmount(() => {
     <div ref="panel" class="island solid-surface" :class="{ expanded, tucked: !revealed }"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
       <GlassLight v-if="appearance.webgl !== false && glassAvailable && !tucked && !state.ui.islandReducedMotion && !reducedMotion"
-        :light-surface="!dark" :signal="taskSignal" @unavailable="glassAvailable = false" />
+        :light-surface="!dark" :signal="taskSignal" :expanded="expanded" @unavailable="glassAvailable = false" />
+      <div class="light-gates" aria-hidden="true"><i /><i /><i /><i /></div>
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
       <button class="capsule" :class="{ 'has-feedback': capsuleStatus.kind !== 'idle' }" type="button" :aria-expanded="expanded"
         :aria-label="`${capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
@@ -527,7 +543,7 @@ onBeforeUnmount(() => {
       <div class="expanded-content" :class="{ 'fixed-search': page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
         <div ref="chrome" class="island-chrome">
           <header class="toolbar">
-            <nav class="mode-nav" aria-label="灵动岛功能">
+            <nav ref="modeNav" class="mode-nav" aria-label="灵动岛功能">
               <span class="mode-selection" aria-hidden="true" />
               <button v-for="section in sections" :key="section.value" type="button"
                 :title="section.label" :aria-label="section.label" :aria-pressed="page === section.value"
@@ -566,6 +582,8 @@ onBeforeUnmount(() => {
             <ClipboardPopover v-if="page === 'clipboard'" />
             <TranslationPanel v-else-if="page === 'translation'" />
             <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
+            <CompareBoard v-else-if="page === 'compare'" />
+            <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
           </div>
         </div>
       </div>
@@ -576,7 +594,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* 材质作用于主浮层；顶部图标导航与内容共用外壳。 */
-.island-viewport { position: relative; z-index: 2; flex: none; background: transparent; translate: var(--window-drag-x, 0px) var(--window-drag-y, 0px); }
+.island-viewport { position: relative; z-index: 2; flex: none; background: transparent; }
 .island-viewport > .island-hit-area { position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
 .island-viewport.anchor-left > .island-hit-area { left: 0; transform: none; }
 .island-viewport.anchor-right > .island-hit-area { left: auto; right: 0; transform: none; }
@@ -608,10 +626,18 @@ onBeforeUnmount(() => {
 }
 .island {
   position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%);
-  overflow: hidden; border-radius: 24px; color: var(--text);
+  overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
-.island.expanded { border-radius: 26px; }
+.island.expanded { border-radius: 18px; }
+.light-gates { position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0; }
+.expanded > .light-gates { opacity:1; }
+.light-gates i { position:absolute; width:13px; height:13px; border:1px solid var(--text-3); opacity:0; transform:translate(var(--gate-x),var(--gate-y)); transition:opacity 180ms ease-out, transform 320ms var(--geometry-ease); }
+.light-gates i:nth-child(1) { top:5px; left:5px; border-right:0; border-bottom:0; border-radius:10px 0 0; --gate-x:-4px; --gate-y:-4px; }
+.light-gates i:nth-child(2) { top:5px; right:5px; border-left:0; border-bottom:0; border-radius:0 10px 0 0; --gate-x:4px; --gate-y:-4px; }
+.light-gates i:nth-child(3) { bottom:5px; right:5px; border-left:0; border-top:0; border-radius:0 0 10px; --gate-x:4px; --gate-y:4px; }
+.light-gates i:nth-child(4) { bottom:5px; left:5px; border-right:0; border-top:0; border-radius:0 0 0 10px; --gate-x:-4px; --gate-y:4px; }
+.expanded > .light-gates i { opacity:1; transform:none; }
 .island.tucked { border-radius: 5px; }
 .island.tucked .capsule { visibility: hidden; }
 .island.tucked :deep(.glass-light) { visibility: hidden; }
@@ -641,8 +667,8 @@ onBeforeUnmount(() => {
 .grip { width: 28px; height: 3px; }
 .expanded .capsule:hover .grip { opacity: .55; }
 .capsule.has-feedback .grip { opacity: 0; }
-.expanded-content { position: relative; z-index: 3; width: var(--content-width); max-height: calc(100% - 24px); overflow: hidden; padding: 0 20px 20px; opacity: 0; transform: translateY(-6px); transition: opacity 85ms ease, transform 140ms ease; }
-.expanded .expanded-content { overflow-y: auto; opacity: 1; transform: translateY(0); transition: opacity 160ms ease-out 65ms, transform 200ms var(--geometry-ease) 60ms; }
+.expanded-content { position: relative; z-index: 3; width: var(--content-width); max-height: calc(100% - 24px); overflow: hidden; padding: 0 20px 20px; opacity: 0; clip-path:inset(0 45% 100% round 18px); transition: opacity 85ms ease-out, clip-path var(--collapse-time) var(--geometry-ease); }
+.expanded .expanded-content { overflow-y: auto; opacity: 1; clip-path:inset(0 round 18px); transition: opacity 160ms ease-out 40ms, clip-path var(--expand-time) var(--geometry-ease); }
 .moving .expanded-content { overflow-y: hidden; }
 .island-chrome { display: flow-root; }
 .island-content { width: 100%; }
@@ -682,6 +708,11 @@ onBeforeUnmount(() => {
 .mode-nav .selected { color: var(--text); font-weight: 600; }
 .mode-nav .selected svg { color: var(--accent); }
 .mode-nav button:hover { color: var(--text); }
+.toolbar { flex-wrap:nowrap; }
+.mode-nav { display:flex; flex:1; min-width:0; width:auto; height:46px; overflow-x:auto; scrollbar-width:thin; }
+.mode-nav button { flex:0 0 40px; min-height:38px; }
+.mode-selection { display:none; }
+.mode-nav .selected { background:var(--accent-weak); box-shadow:inset 0 0 0 1px var(--line-strong); }
 button { transition: background 130ms ease, color 130ms ease, transform 150ms var(--geometry-ease); }
 button:active { transform: scale(.97); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -716,8 +747,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .narrow .expanded-content { padding-inline: 14px; }
 .narrow .categories { gap: 2px; }
 .narrow .categories button { padding: 6px 10px; }
-.reduced *, .reduced *::before, .reduced *::after { transition: none !important; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+.reduced *, .reduced *::before, .reduced *::after { transition: none !important; animation:none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation:none !important; } }
 @media (prefers-contrast: more) {
   .mode-selection, .categories .selected { box-shadow: inset 0 0 0 2px var(--accent); }
 }

@@ -50,7 +50,7 @@ import type {
   TranslationSettings
 } from '@/lib/desktop/types'
 
-export type PanelName = 'clipboard' | 'translation' | 'files' | 'category' | 'overflow' | null
+export type PanelName = 'clipboard' | 'translation' | 'files' | 'compare' | 'audio' | 'category' | 'overflow' | null
 export type SettingsSection = 'apps' | 'clipboard' | 'translation' | 'general'
 
 export const state = reactive({
@@ -162,8 +162,11 @@ async function loadClipImages(): Promise<void> {
   }
 }
 
+let translationSettingsRefresh = 0
 async function refreshTranslationSettings(): Promise<void> {
-  state.translationSettings = await invokeHost<TranslationSettings>('get_translation_settings')
+  const ticket = ++translationSettingsRefresh
+  const settings = await invokeHost<TranslationSettings>('get_translation_settings')
+  if (ticket === translationSettingsRefresh) state.translationSettings = settings
 }
 
 function applyApps(config: AppConfig): void {
@@ -182,7 +185,7 @@ function applyApps(config: AppConfig): void {
 async function loadMissingIcons(): Promise<void> {
   if (!isDesktop) return
   const targets = [
-    ...new Set(state.apps.filter((app) => !app.hidden).map((app) => app.target))
+    ...new Set(state.apps.filter((app) => !app.hidden && !app.broken).map((app) => app.target))
   ].filter((target) => !state.icons[target])
   if (targets.length === 0) return
   const payloads = await readAppIcons(targets)
@@ -404,8 +407,8 @@ export function setGroup(group: string): void {
 }
 
 export function setCategory(id: string): void {
-  state.ui.activeCategoryId = id
-  if (isDesktop) void requestCategory(id)
+  if (isDesktop) void requestCategory(id).catch(error => pushToast(`切换分类失败：${String(error)}`, 'error'))
+  else state.ui.activeCategoryId = id
 }
 
 export function moveActive(delta: number): void {
@@ -416,15 +419,14 @@ export function moveActive(delta: number): void {
 
 /* ---------- 应用 ---------- */
 
+const launchingApps = new Set<string>()
 export async function launchApp(app: HubApp): Promise<boolean> {
-  if (app.broken) {
-    pushToast(`目标失效：${app.name}`, 'error')
-    return false
-  }
   if (!isDesktop) {
     pushToast(`已提交启动请求：${app.name}（浏览器样稿，未真的启动）`, 'success')
     return false
   }
+  if (launchingApps.has(app.id)) return false
+  launchingApps.add(app.id)
   try {
     const result = await invokeHost<{ launched: boolean; reason: string }>('open_application', {
       id: app.id
@@ -438,25 +440,14 @@ export async function launchApp(app: HubApp): Promise<boolean> {
     }
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '启动失败', 'error')
+  } finally {
+    launchingApps.delete(app.id)
   }
   return false
 }
 
 export function reorderApps(fromId: string, toId: string): void {
-  const from = state.apps.findIndex((app) => app.id === fromId)
-  const to = state.apps.findIndex((app) => app.id === toId)
-  if (from < 0 || to < 0 || from === to) return
-  const [moved] = state.apps.splice(from, 1)
-  state.apps.splice(to, 0, moved)
-  persistOrder()
-}
-
-/** 把当前顺序写回宿主；设置页的上移/下移也走这里，不再只改本地数组。 */
-export function persistOrder(): void {
-  if (!isDesktop) return
-  void invokeHost('reorder_applications', { ids: state.apps.map((app) => app.id) }).catch(() => {
-    pushToast('保存应用顺序失败', 'error')
-  })
+  void reorderVisibleApps(state.apps.map(app => app.id), fromId, toId)
 }
 
 /** 上移 / 下移一位，并立刻落盘。 */
@@ -464,35 +455,55 @@ export function moveApp(index: number, delta: number): void {
   const target = index + delta
   if (index < 0 || index >= state.apps.length) return
   if (target < 0 || target >= state.apps.length) return
-  const [moved] = state.apps.splice(index, 1)
-  state.apps.splice(target, 0, moved)
-  persistOrder()
+  reorderApps(state.apps[index].id, state.apps[target].id)
 }
 
-export function toggleAppHidden(id: string): void {
+export async function toggleAppHidden(id: string): Promise<boolean> {
   const app = state.apps.find((item) => item.id === id)
-  if (!app) return
-  app.hidden = !app.hidden
-  void saveApp(app)
+  if (!app) return false
+  return saveApp({ ...app, hidden: !app.hidden })
 }
 
-export function setAppCategory(id: string, categoryId: string): void {
+export async function setAppCategory(id: string, categoryId: string): Promise<boolean> {
   const app = state.apps.find((item) => item.id === id)
-  if (!app) return
-  app.categoryId = categoryId
-  void saveApp(app)
+  if (!app) return false
+  return saveApp({ ...app, categoryId })
 }
 
-async function saveApp(app: HubApp): Promise<void> {
-  if (!isDesktop) return
+async function saveApp(app: HubApp): Promise<boolean> {
+  if (!isDesktop) {
+    const current = state.apps.find(item => item.id === app.id)
+    if (current) Object.assign(current, app)
+    return !!current
+  }
   try {
     const config = await invokeHost<AppConfig>('save_application', {
       application: { ...app }
     })
     applyApps(config)
+    return true
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '保存应用设置失败', 'error')
+    return false
   }
+}
+
+/** 仅重排指定可见项占据的位置；搜索外、其他分类的条目保持原位。 */
+export async function reorderVisibleApps(visibleIds: string[], fromId: string, toId: string): Promise<boolean> {
+  const visible = new Set(visibleIds)
+  const ordered = state.apps.filter(app => visible.has(app.id))
+  const from = ordered.findIndex(app => app.id === fromId)
+  const to = ordered.findIndex(app => app.id === toId)
+  if (from < 0 || to < 0 || from === to) return false
+  const [moved] = ordered.splice(from, 1)
+  ordered.splice(to, 0, moved)
+  let cursor = 0
+  const next = state.apps.map(app => visible.has(app.id) ? ordered[cursor++] : app)
+  if (!isDesktop) { state.apps = next; return true }
+  try {
+    applyApps(await invokeHost<AppConfig>('reorder_applications', { ids: next.map(app => app.id) }))
+    return true
+  } catch (error) { pushToast(`保存应用顺序失败：${String(error)}`, 'error'); return false }
 }
 
 /** 添加结果，供界面给出明确反馈（而不是笼统的「成功」）。 */
@@ -761,7 +772,7 @@ export async function clearClips(): Promise<void> {
   }
   try {
     await invokeHost('clear_clipboard_entries')
-    state.clips.splice(0, state.clips.length)
+    await refreshClipboard()
     state.ui.detailId = null
     pushToast('已清空全部记录', 'success')
   } catch (error) {
@@ -860,8 +871,8 @@ export async function copyTranslation(): Promise<void> {
 /* ---------- 设置 ---------- */
 
 export function setTheme(theme: HubSettings['theme']): void {
-  state.settings.theme = theme
-  if (isDesktop) void requestTheme(theme)
+  if (isDesktop) void requestTheme(theme).catch(error => pushToast(`保存主题失败：${String(error)}`, 'error'))
+  else state.settings.theme = theme
 }
 
 /* ---------- 主题落地 ---------- */
@@ -889,18 +900,18 @@ export function cancelTranslation(): void {
   if (isDesktop && wasLoading) void invokeHost('cancel_translation').catch(() => {})
 }
 
-export async function saveTranslationSettings(): Promise<boolean> {
+export async function saveTranslationSettings(settings: TranslationSettings = state.translationSettings): Promise<boolean> {
   if (!isDesktop) return false
   try {
-    state.translationSettings = await invokeHost<TranslationSettings>('save_translation_settings', { settings: { ...state.translationSettings } })
+    state.translationSettings = await invokeHost<TranslationSettings>('save_translation_settings', { settings: { ...settings } })
     state.translation.direction = state.translationSettings.direction
     pushToast('翻译设置已保存', 'success')
     return true
   } catch (error) { pushToast(String(error), 'error'); return false }
 }
 
-export async function saveTranslationSecret(secret: string): Promise<boolean> {
-  if (!await saveTranslationSettings()) return false
+export async function saveTranslationSecret(secret: string, settings: TranslationSettings = state.translationSettings): Promise<boolean> {
+  if (!await saveTranslationSettings(settings)) return false
   try { await invokeHost('save_translation_secret', { secret }); await refreshTranslationSettings(); pushToast('密钥已保存', 'success'); return true }
   catch (error) { pushToast(String(error), 'error'); return false }
 }
@@ -925,19 +936,33 @@ export async function assignClipGroup(id: string, group: string): Promise<void> 
   catch (error) { pushToast(String(error), 'error') }
 }
 
-export async function saveShortcuts(): Promise<void> {
+export async function saveShortcuts(settings: typeof state.shortcuts = state.shortcuts): Promise<boolean> {
+  if (!isDesktop) return false
   try {
-    state.shortcuts = await invokeHost<typeof state.shortcuts>('save_shortcuts', { settings: { ...state.shortcuts } })
+    state.shortcuts = await invokeHost<typeof state.shortcuts>('save_shortcuts', { settings: { ...settings } })
     state.settings.clipboardHotkey = state.shortcuts.clipboard
     pushToast(state.shortcuts.errors.length ? '部分快捷键注册失败，请查看提示' : '快捷键已保存', state.shortcuts.errors.length ? 'error' : 'success')
-  } catch (error) { pushToast(String(error), 'error') }
+    return !state.shortcuts.errors.length
+  } catch (error) { pushToast(String(error), 'error'); return false }
 }
 
-export async function saveAppCategory(id: string, name: string | null): Promise<void> {
+export async function saveAppCategory(id: string, name: string | null): Promise<boolean> {
+  if (id === 'all' || !id.trim() || (name !== null && (!name.trim() || [...name.trim()].length > 40))) {
+    pushToast('分类名称需为 1–40 个字符', 'error'); return false
+  }
   try {
-    applyApps(await invokeHost<AppConfig>('save_application_category', { id, name }))
+    if (isDesktop) applyApps(await invokeHost<AppConfig>('save_application_category', { id, name }))
+    else if (name === null) {
+      state.categories = state.categories.filter(category => category.id !== id)
+      state.apps.forEach(app => { if (app.categoryId === id) app.categoryId = 'all' })
+    } else {
+      const category = state.categories.find(category => category.id === id)
+      if (category) category.name = name.trim()
+      else state.categories.push({ id, name: name.trim() })
+    }
     if (!state.categories.some((category) => category.id === state.ui.activeCategoryId)) setCategory('all')
-  } catch (error) { pushToast(String(error), 'error') }
+    return true
+  } catch (error) { pushToast(String(error), 'error'); return false }
 }
 
 watch(() => state.ui.panel, (panel, previous) => {

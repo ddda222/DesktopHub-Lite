@@ -22,8 +22,8 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
   function apply(x: number, y: number): void {
     offsetX = x
     offsetY = y
-    element.value?.style.setProperty('--window-drag-x', `${x}px`)
-    element.value?.style.setProperty('--window-drag-y', `${y}px`)
+    // 直接移动拖动层，避免继承变量使设置页／应用列表的所有子节点逐帧重算样式。
+    if (element.value) element.value.style.translate = `${x}px ${y}px`
   }
 
   function clamp(): void {

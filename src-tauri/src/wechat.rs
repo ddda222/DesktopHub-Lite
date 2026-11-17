@@ -209,6 +209,7 @@ fn register_listener() -> Result<(HWND, u32), String> {
 #[tauri::command]
 pub fn set_wechat_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let mut next = state.ui.snapshot();
     next.wechat_enabled = enabled;
     state

@@ -53,7 +53,7 @@ export function defaultIslandAppearance(): IslandAppearance {
 export interface UiState {
   islandExpanded: boolean
   islandAnchor: string
-  islandPage: 'applications' | 'clipboard' | 'translation' | 'files'
+  islandPage: 'applications' | 'clipboard' | 'translation' | 'files' | 'compare' | 'audio'
   islandHoverMs: number
   islandLeaveMs: number
   islandReducedMotion: boolean
@@ -65,7 +65,7 @@ export interface UiState {
   wechatStatus: string
   wechatAttention: boolean
   wechatEvent: number
-  panel: 'clipboard' | 'translation' | 'files' | 'category' | 'overflow' | null
+  panel: 'clipboard' | 'translation' | 'files' | 'compare' | 'audio' | 'category' | 'overflow' | null
   settingsOpen: boolean
   paused: boolean
   /** 图标条当前分类；弹层窗口也按这个分类展示 */

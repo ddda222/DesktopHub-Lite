@@ -1,0 +1,5 @@
+/** 代码绘制的合成设计稿，仅用于功能演示。 */
+export function sampleImage(variant: boolean): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="360" viewBox="0 0 600 360"><rect width="600" height="360" fill="#efeee9"/><rect x="32" y="28" width="536" height="304" rx="12" fill="white"/><text x="60" y="69" font-family="sans-serif" font-size="14" fill="#555">STUDIO / 01</text><path d="M60 88H540" stroke="#ddd"/><text x="${variant ? 76 : 60}" y="139" font-family="sans-serif" font-size="28" font-weight="600" fill="#171717">留一点空间，专注当下。</text><text x="60" y="177" font-family="sans-serif" font-size="14" fill="#555">让常用工具，离你更近一步。</text><rect x="60" y="211" width="${variant ? 158 : 130}" height="42" rx="${variant ? 20 : 6}" fill="#202020"/><text x="84" y="238" font-family="sans-serif" font-size="14" fill="white">${variant ? '开始体验 →' : '开始使用 →'}</text><circle cx="470" cy="248" r="43" fill="${variant ? '#c9c7bc' : '#dbdad3'}"/><path d="M449 248h42m-21-21v42" stroke="#555" stroke-width="2"/></svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
