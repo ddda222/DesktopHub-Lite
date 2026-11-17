@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { version as appVersion } from '../../../package.json'
 import Icon from '@/components/Icon.vue'
 import DesktopFeatures from './DesktopFeatures.vue'
 import {
@@ -834,7 +835,7 @@ onBeforeUnmount(() => {
               <button class="btn" type="button" @click="saveShortcuts">保存快捷键</button>
               <p v-for="error in state.shortcuts.errors" :key="error" class="hint">{{ error }}</p>
             </div>
-            <p class="about">版本 0.1.0 · DesktopHub Lite · 数据保存在本机独立目录</p>
+            <p class="about">版本 {{ appVersion }} · DesktopHub Lite · 数据保存在本机独立目录</p>
           </div>
         </section>
       </div>
