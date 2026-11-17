@@ -96,6 +96,8 @@ export const state = reactive({
     islandLeaveMs: 450,
     islandReducedMotion: false,
     islandAppearance: defaultIslandAppearance(),
+    islandCaptureError: null as string | null,
+    translationPending: 0,
     fullscreenSuppressed: false,
     wechatEnabled: false,
     wechatStatus: 'off',
@@ -245,6 +247,8 @@ function applyUiState(ui: UiState): void {
   state.ui.islandLeaveMs = ui.islandLeaveMs
   state.ui.islandReducedMotion = ui.islandReducedMotion
   state.ui.islandAppearance = ui.islandAppearance
+  state.ui.islandCaptureError = ui.islandCaptureError ?? null
+  state.ui.translationPending = ui.translationPending ?? 0
   state.ui.fullscreenSuppressed = ui.fullscreenSuppressed
   state.ui.wechatEnabled = ui.wechatEnabled
   state.ui.wechatStatus = ui.wechatStatus

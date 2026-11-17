@@ -10,6 +10,7 @@
 mod applications;
 mod clipboard;
 mod clipboard_service;
+mod capture_privacy;
 mod desktop_support;
 mod desktop_features;
 mod file_shelf;
@@ -20,6 +21,7 @@ mod logging;
 mod state;
 mod storage;
 mod translation;
+mod file_preview;
 mod windows;
 mod wechat;
 
@@ -61,7 +63,7 @@ pub struct AppState {
     file_shelf: Mutex<file_shelf::ShelfIndex>,
     translation: Mutex<TranslationSettings>,
     running: AtomicBool,
-    translation_cancel: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    translation_cancel: Mutex<std::collections::HashMap<String, translation::PendingTranslation>>,
     shortcuts: Mutex<desktop_support::Shortcuts>,
     update_status: Mutex<Option<desktop_features::UpdateStatus>>,
     update_check_gate: tokio::sync::Mutex<()>,
@@ -97,7 +99,8 @@ fn hide_window(app: &AppHandle, label: &str) {
 }
 
 fn show_window(app: &AppHandle, label: &str) {
-    if label == windows::BAR && app.try_state::<AppState>().is_some_and(|state| state.ui.snapshot().fullscreen_suppressed) {
+    if label == windows::BAR && !capture_privacy::prepare_to_show(app) {
+        let _ = open_settings(app.clone());
         return;
     }
     if let Some(window) = app.get_webview_window(label) {
@@ -143,7 +146,6 @@ fn ui_state(state: State<'_, AppState>) -> UiState {
 #[tauri::command]
 fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> UiState {
     let state = app.state::<AppState>();
-    if expanded && state.ui.snapshot().fullscreen_suppressed { return state.ui.snapshot(); }
     let next = state.ui.update(|ui| {
         ui.island_expanded = expanded;
         ui.panel = if expanded && ui.island_page != state::PANEL_APPLICATIONS {
@@ -153,7 +155,7 @@ fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> U
     if expanded { state.windows.mark_pop_shown(); }
     else {
         state.windows.clear_pop_shown();
-        translation::cancel_for_window(&state, windows::BAR);
+        translation::cancel_for_window(&app, windows::BAR);
     }
     if focus.unwrap_or(false) { show_window(&app, windows::BAR); }
     broadcast_ui(&app);
@@ -177,14 +179,13 @@ fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Resu
     if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
     let state = app.state::<AppState>();
     let previous = state.ui.snapshot();
-    if previous.fullscreen_suppressed { return Ok(previous); }
     let next = state.ui.update(|ui| {
         ui.island_page = page.clone();
         ui.island_expanded = true;
         ui.panel = if page == state::PANEL_APPLICATIONS { None } else { Some(page.clone()) };
     });
     if previous.island_page == PANEL_TRANSLATION && page != PANEL_TRANSLATION {
-        translation::cancel_for_window(&state, windows::BAR);
+        translation::cancel_for_window(&app, windows::BAR);
     }
     if previous.island_page != page { persist_ui_prefs(&app, &next); }
     if focus.unwrap_or(true) { show_window(&app, windows::BAR); }
@@ -206,7 +207,7 @@ async fn open_translation_window(app: AppHandle, focus: Option<bool>) -> Result<
 
 #[tauri::command]
 fn close_translation_window(app: AppHandle) {
-    translation::cancel_for_window(&app.state::<AppState>(), windows::TRANSLATION);
+    translation::cancel_for_window(&app, windows::TRANSLATION);
     let _ = app.emit_to(windows::TRANSLATION, "translation-window-hidden", ());
     hide_window(&app, windows::TRANSLATION);
 }
@@ -215,9 +216,6 @@ fn close_translation_window(app: AppHandle) {
 
 #[tauri::command]
 fn toggle_panel(app: AppHandle, panel: String) -> Result<UiState, String> {
-    if app.state::<AppState>().ui.snapshot().fullscreen_suppressed {
-        return Ok(app.state::<AppState>().ui.snapshot());
-    }
     let allowed = [PANEL_CLIPBOARD, PANEL_TRANSLATION, PANEL_CATEGORY, PANEL_OVERFLOW];
     if !allowed.contains(&panel.as_str()) {
         return Err(format!("未知弹层：{panel}"));
@@ -932,7 +930,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "quit" => {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.running.store(false, Ordering::Relaxed);
-                    for (_, sender) in state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).drain() { let _ = sender.send(()); }
+                    for (_, pending) in state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).drain() { let _ = pending.sender.send(()); }
                     drop(state.clipboard.lock().unwrap_or_else(|e| e.into_inner()));
                     state.windows.persist_now(&state.store);
                 }
@@ -1008,6 +1006,7 @@ pub fn run() {
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
             app.manage(image_preview::Previews::default());
+            app.manage(file_shelf::ShelfHistory::default());
             app.manage(AppState {
                 store,
                 apps: Mutex::new(config),
@@ -1025,6 +1024,8 @@ pub fn run() {
                     wechat_attention: false,
                     wechat_event: 0,
                     island_appearance: prefs.island_appearance.solid(),
+                    island_capture_error: None,
+                    translation_pending: 0,
                     fullscreen_suppressed: false,
                     paused,
                     active_category_id: prefs.active_category_id,
@@ -1062,6 +1063,12 @@ pub fn run() {
                 let _ = windows::ensure_pop(&handle);
                 let _ = windows::ensure_settings(&handle);
                 let _ = windows::ensure_toast(&handle);
+            }
+            // 初始窗口不可见，先确认捕获排除再显示，避免重启时闪出未受保护的内容。
+            if capture_privacy::prepare_to_show(&handle) {
+                if let Some(window) = handle.get_webview_window(windows::BAR) { let _ = window.show(); }
+            } else {
+                let _ = open_settings(handle.clone());
             }
 
             // 无人值守自检：设置 DESKTOPHUB_LITE_SELFTEST=1 时，
@@ -1147,6 +1154,8 @@ pub fn run() {
             file_shelf::list_shelf_files,
             file_shelf::add_shelf_files,
             file_shelf::remove_shelf_files,
+            file_shelf::undo_shelf_remove,
+            file_preview::preview_shelf_file,
             file_shelf::pick_shelf_files,
             file_shelf::reveal_shelf_file,
             file_shelf::drag_shelf_files,

@@ -6,7 +6,7 @@ use ::windows::Win32::{
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL},
     System::Registry::*,
     UI::WindowsAndMessaging::{
-        GetClassNameW, GetForegroundWindow, GetShellWindow, GetWindowRect, IsIconic, IsWindowVisible, IsZoomed,
+        GetClassNameW, GetForegroundWindow, GetShellWindow, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,7 @@ pub struct IslandAppearance {
     pub avoid_fullscreen: bool,
     pub auto_check_updates: bool,
     pub webgl: bool,
+    pub hide_from_capture: bool,
 }
 impl Default for IslandAppearance {
     fn default() -> Self {
@@ -34,6 +35,7 @@ impl Default for IslandAppearance {
             avoid_fullscreen: true,
             auto_check_updates: false,
             webgl: true,
+            hide_from_capture: false,
         }
     }
 }
@@ -67,31 +69,51 @@ pub fn save_island_appearance(
         return Err("无效的外观参数".into());
     }
     let state = app.state::<AppState>();
-    let mut next = state.ui.snapshot();
+    let previous = state.ui.snapshot();
+    let mut next = previous.clone();
+    let capture_changed = appearance.hide_from_capture != previous.island_appearance.hide_from_capture
+        || appearance.hide_from_capture || previous.island_capture_error.is_some();
+    if capture_changed {
+        if let Err(error) = crate::capture_privacy::apply(&app, appearance.hide_from_capture) {
+            crate::capture_privacy::hold_on_error(&app, error.clone());
+            return Err(error);
+        }
+    }
     let anchor_changed = next.island_anchor != anchor;
     next.island_appearance = appearance.clone();
     next.island_anchor = anchor.clone();
     next.island_hover_ms = hover_ms;
     next.island_leave_ms = leave_ms;
     next.island_reduced_motion = reduced_motion;
-    state
-        .store
-        .write(UI_PREFS_FILE, &UiPreferences::from_state(&next))?;
+    if let Err(error) = state.store.write(UI_PREFS_FILE, &UiPreferences::from_state(&next)) {
+        if capture_changed {
+            if let Err(rollback) = crate::capture_privacy::apply(&app, previous.island_appearance.hide_from_capture) {
+                let detail = format!("保存设置失败：{error}；恢复原隐藏状态失败：{rollback}");
+                crate::capture_privacy::hold_on_error(&app, detail.clone());
+                return Err(detail);
+            }
+        }
+        return Err(error);
+    }
     state.ui.update(|ui| {
         ui.island_appearance = appearance;
         ui.island_anchor = anchor;
         ui.island_hover_ms = hover_ms;
         ui.island_leave_ms = leave_ms;
         ui.island_reduced_motion = reduced_motion;
+        ui.island_capture_error = None;
     });
     if anchor_changed { state.windows.set_bar_free_position(false); }
     windows::place_bar(&app, &state.windows);
+    if previous.island_capture_error.is_some() {
+        if let Some(window) = app.get_webview_window(windows::BAR) { let _ = window.show(); }
+    }
     broadcast_ui(&app);
     Ok(())
 }
 
 /// 桌面保持胶囊；普通最大化窗口和覆盖显示器的全屏窗口都让灵动岛退为细线。
-fn foreground_occupies_screen() -> bool {
+fn foreground_occupies_screen() -> Option<bool> {
     unsafe {
         let foreground = GetForegroundWindow();
         if foreground.0.is_null()
@@ -99,37 +121,41 @@ fn foreground_occupies_screen() -> bool {
             || !IsWindowVisible(foreground).as_bool()
             || IsIconic(foreground).as_bool()
         {
-            return false;
+            return Some(false);
         }
+        // 在全屏背景上点开自己的面板时，沿用背景状态，避免每 500ms 误收起。
+        let mut foreground_pid = 0;
+        GetWindowThreadProcessId(foreground, Some(&mut foreground_pid));
+        if foreground_pid == std::process::id() { return None; }
         // 桌面可能由 WorkerW 承载，不能仅凭它覆盖屏幕就按游戏全屏处理。
         let mut class_name = [0u16; 256];
         let length = GetClassNameW(foreground, &mut class_name);
         if length > 0 && matches!(String::from_utf16_lossy(&class_name[..length as usize]).as_str(), "Progman" | "WorkerW") {
-            return false;
+            return Some(false);
         }
         if IsZoomed(foreground).as_bool() {
-            return true;
+            return Some(true);
         }
         let mut rect = RECT::default();
         if GetWindowRect(foreground, &mut rect).is_err() {
-            return false;
+            return Some(false);
         }
         let monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONULL);
         if monitor.0.is_null() {
-            return false;
+            return Some(false);
         }
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             ..Default::default()
         };
         if !GetMonitorInfoW(monitor, &mut info).as_bool() {
-            return false;
+            return Some(false);
         }
         let screen = info.rcMonitor;
-        rect.left <= screen.left + 2
+        Some(rect.left <= screen.left + 2
             && rect.top <= screen.top + 2
             && rect.right >= screen.right - 2
-            && rect.bottom >= screen.bottom - 2
+            && rect.bottom >= screen.bottom - 2)
     }
 }
 
@@ -137,13 +163,13 @@ pub fn start_fullscreen_watch(app: AppHandle) {
     std::thread::spawn(move || {
         let mut suppressed = false;
         while app.state::<AppState>().running.load(Ordering::Relaxed) {
-            let next = app
+            let avoid = app
                 .state::<AppState>()
                 .ui
                 .snapshot()
                 .island_appearance
-                .avoid_fullscreen
-                && foreground_occupies_screen();
+                .avoid_fullscreen;
+            let next = avoid && foreground_occupies_screen().unwrap_or(suppressed);
             if next != suppressed {
                 suppressed = next;
                 let handle = app.clone();
@@ -156,7 +182,8 @@ pub fn start_fullscreen_watch(app: AppHandle) {
                         ui.island_expanded = false;
                     });
                     if let Some(bar) = handle.get_webview_window(windows::BAR) {
-                        if let Err(error) = bar.set_ignore_cursor_events(next) {
+                        // 细线保留小范围鼠标热区，悬停展开不设置焦点。
+                        if let Err(error) = bar.set_ignore_cursor_events(false) {
                             crate::log_warn!("灵动岛鼠标避让更新失败：{error}");
                         }
                     }

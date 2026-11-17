@@ -28,6 +28,8 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
 
   function clamp(): void {
     if (options.native() || !element.value || session) return
+    // 未拖动时遵循文档布局；页面滚动／内容增高不应生成新的拖动偏移。
+    if (offsetX === 0 && offsetY === 0) return
     const box = element.value.getBoundingClientRect()
     const dx = Math.min(Math.max(box.left, 8), Math.max(8, window.innerWidth - box.width - 8)) - box.left
     const dy = Math.min(Math.max(box.top, 8), Math.max(8, window.innerHeight - box.height - 8)) - box.top

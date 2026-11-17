@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps<{ lightSurface: boolean }>()
+const props = defineProps<{ lightSurface: boolean; signal?: string }>()
 const emit = defineEmits<{ unavailable: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 let dispose: (() => void) | undefined
@@ -190,6 +190,12 @@ onMounted(() => {
 
   const unavailable = () => emit('unavailable')
   const stopTone = watch(() => props.lightSurface, requestDraw)
+  // 任务状态改变只扫过一次边缘，不新建画布，也不持续运行动画。
+  const stopSignal = watch(() => props.signal, signal => {
+    if (!signal || signal === 'idle') return
+    rippleX = .5; rippleY = 1; rippleStart = performance.now()
+    requestDraw()
+  })
   const resize = new ResizeObserver(requestDraw)
   resize.observe(element)
   surface.addEventListener('pointermove', followPointer, { passive: true })
@@ -202,6 +208,7 @@ onMounted(() => {
     cancelAnimationFrame(frame)
     resize.disconnect()
     stopTone()
+    stopSignal()
     surface.removeEventListener('pointermove', followPointer)
     surface.removeEventListener('pointerdown', flash)
     surface.removeEventListener('pointerleave', dim)

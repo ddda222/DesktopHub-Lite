@@ -5,6 +5,10 @@ use std::path::Path;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use crate::AppState;
 
+/// 只保留本次运行的最近十次移出，不写入用户文件或撤销历史文件。
+#[derive(Default)]
+pub struct ShelfHistory(pub std::sync::Mutex<Vec<Vec<(usize, ShelfEntry)>>>);
+
 pub const INDEX_FILE: &str = "file-shelf.json";
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ShelfIndex { pub entries: Vec<ShelfEntry> }
@@ -15,6 +19,13 @@ pub struct ShelfEntry { pub id: String, pub path: String }
 pub struct ShelfItem { id: String, path: String, name: String, is_dir: bool, available: bool }
 #[derive(Serialize)]
 pub struct AddResult { entries: Vec<ShelfItem>, added: usize }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShelfSnapshot { entries: Vec<ShelfItem>, undo_count: usize }
+
+fn snapshot(index: &ShelfIndex, history: &[Vec<(usize, ShelfEntry)>]) -> ShelfSnapshot {
+    ShelfSnapshot { entries: items(index), undo_count: history.last().map_or(0, Vec::len) }
+}
 
 fn items(index: &ShelfIndex) -> Vec<ShelfItem> {
     index.entries.iter().map(|entry| {
@@ -26,8 +37,9 @@ fn items(index: &ShelfIndex) -> Vec<ShelfItem> {
     }).collect()
 }
 #[tauri::command]
-pub fn list_shelf_files(state: State<'_, AppState>) -> Vec<ShelfItem> {
-    items(&state.file_shelf.lock().unwrap_or_else(|e| e.into_inner()))
+pub fn list_shelf_files(state: State<'_, AppState>, history: State<'_, ShelfHistory>) -> ShelfSnapshot {
+    let index = state.file_shelf.lock().unwrap_or_else(|e| e.into_inner());
+    snapshot(&index, &history.0.lock().unwrap_or_else(|e| e.into_inner()))
 }
 #[tauri::command]
 pub fn add_shelf_files(app: AppHandle, paths: Vec<String>) -> Result<AddResult, String> {
@@ -54,16 +66,79 @@ pub fn add_shelf_files(app: AppHandle, paths: Vec<String>) -> Result<AddResult, 
     Ok(AddResult { entries, added })
 }
 #[tauri::command]
-pub fn remove_shelf_files(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+pub fn remove_shelf_files(app: AppHandle, ids: Vec<String>) -> Result<ShelfSnapshot, String> {
     let state = app.state::<AppState>();
     let mut current = state.file_shelf.lock().unwrap_or_else(|e| e.into_inner());
     let mut next = current.clone();
+    let removed: Vec<_> = next.entries.iter().enumerate().filter(|(_, entry)| ids.contains(&entry.id))
+        .map(|(position, entry)| (position, entry.clone())).collect();
+    let history_state = app.state::<ShelfHistory>();
+    let mut history = history_state.0.lock().unwrap_or_else(|e| e.into_inner());
+    if removed.is_empty() { return Ok(snapshot(&current, &history)); }
     next.entries.retain(|entry| !ids.contains(&entry.id));
     state.store.write(INDEX_FILE, &next)?;
     *current = next;
+    history.push(removed);
+    if history.len() > 10 { history.remove(0); }
+    let result = snapshot(&current, &history);
+    drop(history);
     drop(current);
     let _ = app.emit("file-shelf-changed", ());
-    Ok(())
+    Ok(result)
+}
+
+fn restore_entries(index: &mut ShelfIndex, removed: &[(usize, ShelfEntry)]) {
+    for (position, entry) in removed {
+        if !index.entries.iter().any(|existing| existing.id == entry.id) {
+            index.entries.insert((*position).min(index.entries.len()), entry.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn entry(id: &str) -> ShelfEntry { ShelfEntry { id: id.into(), path: format!("D:\\sample\\{id}") } }
+    fn ids(index: &ShelfIndex) -> Vec<&str> { index.entries.iter().map(|item| item.id.as_str()).collect() }
+    #[test]
+    fn undo_non_contiguous_batch_keeps_order() {
+        let mut index = ShelfIndex { entries: vec![entry("b"), entry("d"), entry("new")] };
+        restore_entries(&mut index, &[(0, entry("a")), (2, entry("c"))]);
+        assert_eq!(ids(&index), vec!["a", "b", "c", "d", "new"]);
+    }
+    #[test]
+    fn undo_keeps_readded_entry_and_restores_missing_reference() {
+        let mut index = ShelfIndex { entries: vec![entry("a")] };
+        restore_entries(&mut index, &[(0, entry("a")), (5, entry("missing"))]);
+        assert_eq!(ids(&index), vec!["a", "missing"]);
+    }
+    #[test]
+    fn consecutive_undo_restores_original_list() {
+        let mut index = ShelfIndex { entries: vec![] };
+        restore_entries(&mut index, &[(0, entry("b"))]);
+        restore_entries(&mut index, &[(0, entry("a")), (2, entry("c"))]);
+        assert_eq!(ids(&index), vec!["a", "b", "c"]);
+    }
+}
+
+#[tauri::command]
+pub fn undo_shelf_remove(app: AppHandle) -> Result<ShelfSnapshot, String> {
+    let state = app.state::<AppState>();
+    let mut current = state.file_shelf.lock().unwrap_or_else(|e| e.into_inner());
+    let history_state = app.state::<ShelfHistory>();
+    let mut history = history_state.0.lock().unwrap_or_else(|e| e.into_inner());
+    let removed = history.last().ok_or("没有可以撤销的移出操作")?;
+    let mut next = current.clone();
+    restore_entries(&mut next, removed);
+    // 文件失效也恢复引用；列表重新检查可用性。保存成功后才消费撤销记录。
+    state.store.write(INDEX_FILE, &next)?;
+    *current = next;
+    history.pop();
+    let result = snapshot(&current, &history);
+    drop(history);
+    drop(current);
+    let _ = app.emit("file-shelf-changed", ());
+    Ok(result)
 }
 #[tauri::command]
 pub async fn pick_shelf_files(app: AppHandle) -> Result<Option<Vec<String>>, String> {

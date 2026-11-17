@@ -42,10 +42,11 @@ export interface IslandAppearance {
   avoidFullscreen: boolean
   autoCheckUpdates: boolean
   webgl: boolean
+  hideFromCapture: boolean
 }
 
 export function defaultIslandAppearance(): IslandAppearance {
-  return { scale: 100, opacity: 100, tint: '', preset: 'classic', avoidFullscreen: true, autoCheckUpdates: false, webgl: true }
+  return { scale: 100, opacity: 100, tint: '', preset: 'classic', avoidFullscreen: true, autoCheckUpdates: false, webgl: true, hideFromCapture: false }
 }
 
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */
@@ -57,6 +58,8 @@ export interface UiState {
   islandLeaveMs: number
   islandReducedMotion: boolean
   islandAppearance: IslandAppearance
+  islandCaptureError: string | null
+  translationPending: number
   fullscreenSuppressed: boolean
   wechatEnabled: boolean
   wechatStatus: string
@@ -79,6 +82,8 @@ const EMPTY_UI: UiState = {
   islandLeaveMs: 450,
   islandReducedMotion: false,
   islandAppearance: defaultIslandAppearance(),
+  islandCaptureError: null,
+  translationPending: 0,
   fullscreenSuppressed: false,
   wechatEnabled: false,
   wechatStatus: 'off',

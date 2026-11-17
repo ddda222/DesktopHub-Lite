@@ -110,13 +110,22 @@ watch(() => state.ui.settingsOpen, open => {
       </div>
       <label><input v-model="appearance.webgl" type="checkbox" aria-describedby="island-light-help" /> WebGL 边缘光效</label>
       <p id="island-light-help">默认开启，鼠标移动时边缘随光、点击时出现短暂波纹。光效不覆盖正文；开启减少动画或高对比度时停用。修改后点击「应用设置」。</p>
+      <div class="capture-option">
+        <label><input v-model="appearance.hideFromCapture" type="checkbox" :disabled="saving" aria-describedby="island-capture-help island-capture-scope" /> 在截图和屏幕共享中隐藏灵动岛</label>
+        <p id="island-capture-help">默认关闭，与 WebGL 独立。修改后点击「应用设置」，重启后保留。开启后，本机屏幕仍可见，腾讯会议、UU 远程等捕获画面可能看不到灵动岛。</p>
+        <p id="island-capture-scope">仅作用于胶囊、细线和展开面板；设置、独立翻译和钉图窗口仍可见。依赖 Windows 10 2004 及以上的捕获排除支持，不保证所有采集方式都生效，请在共享前实测。</p>
+        <p v-if="appearance.hideFromCapture" class="capture-notice" role="status">通过远程操作时，开启后你自己也可能看不到灵动岛。可从托盘打开设置，取消勾选并应用以恢复。</p>
+        <p v-if="state.ui.islandCaptureError" class="capture-error" role="alert">{{ state.ui.islandCaptureError }}。灵动岛已暂时隐藏，请重试应用设置，或关闭此选项后应用以恢复。</p>
+        <p v-else-if="isDesktop" role="status">当前已应用：{{ state.ui.islandAppearance.hideFromCapture ? '隐藏灵动岛' : '允许捕获灵动岛' }}</p>
+        <p v-else>浏览器预览不执行系统隐藏，需在桌面版应用后验证。</p>
+      </div>
       <div class="actions">
         <label><input v-model="reducedMotion" type="checkbox" /> 减少动画</label>
         <label><input v-model="appearance.avoidFullscreen" type="checkbox" /> 窗口最大化或全屏时收为细线</label>
         <button type="button" @click="restore">恢复默认值</button>
         <button type="button" :disabled="saving || !validTiming || !isDesktop" @click="save">{{ saving ? '保存中…' : '应用设置' }}</button>
       </div>
-      <p>平时显示小胶囊，悬停展开、移开收回。启用避让后，前台窗口最大化或全屏时只显示细线，不响应悬停和展开快捷键；退出后恢复胶囊。</p>
+      <p>平时显示小胶囊，悬停展开、移开收回。启用避让后，前台窗口最大化或全屏时收为细线；鼠标移入立即展开，移开后收回细线，退出最大化或全屏后恢复胶囊。</p>
     </div>
 
     <h4>微信普通提醒</h4>
@@ -151,6 +160,9 @@ watch(() => state.ui.settingsOpen, open => {
 <style scoped>
 .features h4 { margin: 14px 0 7px; font-size: 13px; }
 .appearance-summary { color: var(--text); font-weight: 600; }
+.capture-option { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.capture-notice { color: var(--text); font-weight: 500; }
+.capture-error { color: var(--danger); }
 .box { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; }
 .fields label { display: grid; gap: 3px; }

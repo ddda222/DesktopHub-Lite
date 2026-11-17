@@ -27,7 +27,11 @@ pub async fn open_image_preview(app: AppHandle, source: String, id: String) -> R
                 "webp" => "image/webp", "bmp" => "image/bmp", "ico" => "image/x-icon",
                 _ => return Err("暂不支持这种文件的图片预览".into()),
             };
-            let bytes = std::fs::read(path).map_err(|_| "图片不存在或无法读取")?;
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(path).map_err(|_| "图片不存在或无法读取")?
+                .take(crate::file_preview::IMAGE_LIMIT + 1).read_to_end(&mut bytes).map_err(|_| "图片无法读取")?;
+            if bytes.len() as u64 > crate::file_preview::IMAGE_LIMIT { return Err("图片超过 8 MiB，请在所在位置查看".into()); }
             Preview { data_uri: format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
                 name: path.file_name().unwrap_or_default().to_string_lossy().into_owned() }
         },

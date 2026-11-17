@@ -7,6 +7,7 @@ export type IconName =
   | 'trash'
   | 'copy'
   | 'image'
+  | 'pin'
   | 'text'
   | 'more'
   | 'pause'
@@ -42,6 +43,7 @@ export const iconPaths: Record<IconName, string> = {
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   image:
     '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  pin: '<path d="m16 3 5 5-4 1-3 3 1 3-1 1-6-6 1-1 3 1 3-3zM10 14l-7 7"/>',
   text: '<path d="M17 6H3M21 12H3M17 18H3"/>',
   more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
   pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',

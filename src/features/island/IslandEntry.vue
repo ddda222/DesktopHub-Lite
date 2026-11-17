@@ -5,12 +5,14 @@ import GlassLight from '@/components/GlassLight.vue'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
-import { addShelfFiles, shelf } from '@/features/files/shelf'
+import { addShelfFiles, shelf, subscribeShelf } from '@/features/files/shelf'
+import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
 import { pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
 
+const props = defineProps<{ previewFeedback?: { kind: string; sequence: number }; previewKeepOpen?: boolean }>()
 const element = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
 const windowDrag = useWindowDrag(viewport, {
@@ -33,7 +35,9 @@ const dark = ref(document.documentElement.dataset.theme === 'dark')
 const hostExpanded = computed(() => state.ui.islandExpanded)
 const suppressed = computed(() => state.ui.fullscreenSuppressed)
 const hoverClosing = ref(false)
-const expanded = computed(() => hostExpanded.value && !hoverClosing.value && !suppressed.value)
+const expanded = computed(() => hostExpanded.value && !hoverClosing.value)
+// 避让只决定收起形态；细线也能悬停展开。
+const tucked = computed(() => suppressed.value && !expanded.value)
 const expandMs = 260
 const collapseMs = 200
 const geometryMoving = ref(false)
@@ -42,18 +46,29 @@ const reducedMotion = ref(systemMotion.matches)
 const glassAvailable = ref(true)
 const clockText = ref(formatTime())
 const feedbackText = ref('')
-const capsuleText = computed(() => feedbackText.value || clockText.value)
+const capsuleStatus = computed<{ text: string; icon: IconName | null; kind: string }>(() => {
+  if (receivingFiles.value) return { text: '松开暂存', icon: 'folder', kind: 'working' }
+  if (shelf.busy) return { text: shelf.activity || '文件处理中', icon: 'folder', kind: 'working' }
+  const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
+  if (pending) return { text: pending > 1 ? `翻译中 · ${pending}` : '翻译中', icon: 'translate', kind: 'working' }
+  if (feedbackText.value) return { text: feedbackText.value, icon: feedbackText.value === '翻译失败' ? 'info' : 'check', kind: 'feedback' }
+  if (state.ui.paused) return { text: '记录已暂停', icon: 'pause', kind: 'paused' }
+  if (shelf.entries.length) return { text: `暂存 ${shelf.entries.length > 999 ? '999+' : shelf.entries.length} 项`, icon: 'folder', kind: 'files' }
+  return { text: clockText.value, icon: null, kind: 'idle' }
+})
+const taskSignal = computed(() => capsuleStatus.value.kind === 'idle' ? 'idle' : `${capsuleStatus.value.kind}:${capsuleStatus.value.text}`)
 const hovering = ref(false)
 const composing = ref(false)
 const pressed = ref(false)
 const receivingFiles = ref(false)
 let stopFileDrop: (() => void) | undefined
+let stopShelf: (() => void) | undefined
 const content = ref<HTMLElement | null>(null)
 const chrome = ref<HTMLElement | null>(null)
 const contentHeight = ref(330)
 const chromeHeight = ref(56)
 const availableWidth = ref(window.screen.availWidth)
-const revealed = computed(() => !suppressed.value)
+const revealed = computed(() => !tucked.value)
 const page = computed(() => state.ui.islandPage)
 const appearance = computed(() => state.ui.islandAppearance)
 const scale = computed(() => appearance.value.scale / 100)
@@ -63,7 +78,7 @@ const tuckedWidth = computed(() => 80 * scale.value)
 const visibleWidth = computed(() => {
   if (expanded.value) return expandedWidth.value - 24
   if (suppressed.value) return tuckedWidth.value
-  return 128 * scale.value
+  return (capsuleStatus.value.kind === 'idle' ? 128 : 168) * scale.value
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
 const visibleHeight = computed(() => expanded.value
@@ -121,11 +136,17 @@ function updateClock(): void {
   clockTimer = setTimeout(updateClock, 60000 - Date.now() % 60000 + 20)
 }
 function showFeedback(kind: string): void {
-  if (suppressed.value || (kind !== 'copied' && kind !== 'translated')) return
+  if (tucked.value || !['copied', 'translated', 'translation-error'].includes(kind)) return
   clearTimeout(feedbackTimer)
-  feedbackText.value = kind === 'copied' ? '已复制' : '翻译完成'
+  feedbackText.value = kind === 'copied' ? '已复制' : kind === 'translated' ? '翻译完成' : '翻译失败'
   feedbackTimer = setTimeout(() => { feedbackText.value = '' }, 2600)
 }
+watch(() => props.previewFeedback, value => {
+  if (isDesktop || !value) return
+  clearTimeout(feedbackTimer)
+  feedbackText.value = ''
+  if (value.kind) showFeedback(value.kind)
+})
 function updateTheme(): void {
   dark.value = state.settings.theme === 'system' ? systemDark.matches : state.settings.theme === 'dark'
 }
@@ -136,7 +157,7 @@ watch(geometryMoving, queueGeometry, { flush: 'post' })
 function reserveGeometry(): void {
   clearTimeout(geometryTimer)
   const target = bounds.value
-  if ((isDesktop && suppressed.value) || state.ui.islandReducedMotion || reducedMotion.value) {
+  if ((isDesktop && tucked.value) || state.ui.islandReducedMotion || reducedMotion.value) {
     geometryMoving.value = false
     viewportSize.value = { ...target }
     queueGeometry()
@@ -165,7 +186,6 @@ function cancelHoverClose(): void {
 }
 
 function expand(value: boolean, focus = false): void {
-  if (value && suppressed.value) return
   if (value) {
     closeCommitted = false
     reenterAfterClose = false
@@ -179,7 +199,7 @@ function expand(value: boolean, focus = false): void {
   cancelHover()
   clearTimeout(leaveTimer)
   visibilityIntent = visibilityIntent.catch(() => {}).then(async () => {
-    if (disposed || (value && suppressed.value)) return
+    if (disposed) return
     if (!isDesktop) { state.ui.islandExpanded = value; return }
     await invokeHost('set_island_expanded', { expanded: value, focus })
   }).catch(error => {
@@ -212,13 +232,13 @@ function startHoverClose(): void {
 }
 
 function scheduleHoverOpen(): void {
+  if (tucked.value) { expand(true); return }
   hoverTimer = setTimeout(() => {
-    if (hovering.value && !pressed.value && !state.ui.fullscreenSuppressed) expand(true)
+    if (hovering.value && !pressed.value) expand(true)
   }, state.ui.islandHoverMs)
 }
 
 function enter(): void {
-  if (suppressed.value) return
   hovering.value = true
   availableWidth.value = window.screen.availWidth
   cancelHover()
@@ -233,8 +253,9 @@ function enter(): void {
 }
 
 function editing(): boolean {
+  if (!isDesktop && props.previewKeepOpen) return true
   const active = document.activeElement
-  return composing.value || pressed.value || receivingFiles.value || shelf.busy ||
+  return composing.value || pressed.value || receivingFiles.value || shelf.busy || !!shelf.previewItem ||
     (active instanceof HTMLElement && !!element.value?.contains(active) &&
       (active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement ||
        active.isContentEditable ||
@@ -246,7 +267,6 @@ function leave(): void {
   reenterAfterClose = false
   cancelHover()
   clearTimeout(leaveTimer)
-  if (suppressed.value) return
   leaveTimer = setTimeout(() => {
     if (hovering.value || editing()) return
     startHoverClose()
@@ -282,6 +302,7 @@ watch(hostExpanded, value => {
 watch(page, () => {
   if (!closeCommitted) cancelHoverClose()
 })
+watch(() => props.previewKeepOpen, value => { if (!value && !hovering.value) leave() })
 watch(() => state.ui.islandAnchor, () => { if (!isDesktop) windowDrag.reset() })
 watch(() => shelf.busy, busy => {
   if (!busy) {
@@ -304,7 +325,6 @@ watch(suppressed, () => {
 })
 
 async function selectPage(value: typeof page.value): Promise<void> {
-  if (suppressed.value) return
   if (!isDesktop) {
     state.ui.islandPage = value
     state.ui.panel = value === 'applications' ? null : value
@@ -378,7 +398,7 @@ function queueGeometry(): void {
     if (geometryMoving.value) {
       // 仅在这块小浮窗内临时预留动画空间；不逐帧调用 SetWindowRgn，避免裁切追帧。
       regions.push({ x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height), radius: 0 })
-    } else if (!suppressed.value) {
+    } else if (!tucked.value) {
       for (const surface of [panel.value]) {
         if (!surface) continue
         const box = surface.getBoundingClientRect()
@@ -419,9 +439,11 @@ function measureContent(): void {
 }
 
 onMounted(() => {
+  void subscribeShelf().then(off => { if (disposed) off(); else stopShelf = off })
+    .catch(() => { shelf.error = '暂时无法同步中转文件状态' })
   if (isDesktop) {
     void getCurrentWebview().onDragDropEvent(async ({ payload }) => {
-      if (suppressed.value || shelf.busy) return
+      if (shelf.busy) return
       if (payload.type === 'enter' || payload.type === 'over') {
         if (receivingFiles.value) return
         receivingFiles.value = true
@@ -468,6 +490,7 @@ onBeforeUnmount(() => {
   clearTimeout(feedbackTimer)
   stopFeedback?.()
   stopFileDrop?.()
+  stopShelf?.()
   document.removeEventListener('visibilitychange', updateClock)
   clearTimeout(closeTimer)
   clearTimeout(geometryTimer)
@@ -481,24 +504,26 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" class="island-viewport" :class="`anchor-${state.ui.islandAnchor}`" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
-    :class="{ expanded, moving: geometryMoving, desktop: isDesktop, dark, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: state.ui.fullscreenSuppressed }"
-    :style="rootStyle" aria-label="顶部灵动岛" :inert="state.ui.fullscreenSuppressed"
+    :class="{ expanded, moving: geometryMoving, desktop: isDesktop, dark, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed }"
+    :style="rootStyle" aria-label="顶部灵动岛"
     @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
     <div ref="panel" class="island solid-surface" :class="{ expanded, tucked: !revealed }"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
-      <GlassLight v-if="appearance.webgl !== false && glassAvailable && !suppressed && !state.ui.islandReducedMotion && !reducedMotion"
-        :light-surface="!dark" @unavailable="glassAvailable = false" />
-      <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !suppressed" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
-      <button class="capsule" :class="{ 'has-feedback': feedbackText }" type="button" :aria-expanded="expanded"
-        :aria-label="expanded ? '收起面板' : `${clockText}，展开面板`"
+      <GlassLight v-if="appearance.webgl !== false && glassAvailable && !tucked && !state.ui.islandReducedMotion && !reducedMotion"
+        :light-surface="!dark" :signal="taskSignal" @unavailable="glassAvailable = false" />
+      <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
+      <button class="capsule" :class="{ 'has-feedback': capsuleStatus.kind !== 'idle' }" type="button" :aria-expanded="expanded"
+        :aria-label="`${capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
         :inert="!revealed" aria-description="按住拖动位置，单击展开或收起"
         @pointerdown.stop="windowDrag.begin" @click="activateCapsule">
-        <span class="capsule-text" :class="{ feedback: feedbackText }" aria-hidden="true">{{ capsuleText }}</span>
+        <span class="capsule-text" :class="{ feedback: capsuleStatus.kind !== 'idle' }" aria-hidden="true">
+          <Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}
+        </span>
         <span class="grip" aria-hidden="true" />
       </button>
-      <span class="capsule-announcement" role="status">{{ feedbackText }}</span>
+      <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && capsuleStatus.kind !== 'idle' ? capsuleStatus.text : '' }}</span>
       <div class="expanded-content" :class="{ 'fixed-search': page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
         <div ref="chrome" class="island-chrome">
           <header class="toolbar">
@@ -567,9 +592,11 @@ onBeforeUnmount(() => {
 }
 .island-hit-area.dark { --island-shadow: rgb(0 0 0 / .5); --island-outline: rgb(255 255 255 / .14); }
 .island-hit-area.expanded { --surface-inset: 12px; }
+/* 从细线展开时顶边不下移，避免窗口裁切热区后把原位置的鼠标判为移出。 */
+.island-hit-area.desktop.avoiding { --surface-inset: 0px; }
 .island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: cubic-bezier(.22, .7, .3, 1); }
 .island-hit-area.reduced { --geometry-time: 0ms; transition: none; }
-.island-hit-area.suppressed { --surface-inset: 0px; pointer-events: none; }
+.island-hit-area.suppressed { --surface-inset: 0px; }
 .island-hit-area.desktop.suppressed { --geometry-time: 0ms; }
 /* 预览的三种形态保持同一顶部位置，避免变形时整体上下漂移。 */
 .island-hit-area:not(.desktop) { --surface-inset: 2px; }
@@ -599,7 +626,7 @@ onBeforeUnmount(() => {
   opacity: 0;
   transition: opacity 85ms ease-out;
 }
-.capsule-text { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: .6px; font-variant-numeric: tabular-nums; }
+.capsule-text { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: .6px; font-variant-numeric: tabular-nums; }
 .capsule-text { transition: opacity 90ms ease-out 100ms; }
 .expanded .capsule-text:not(.feedback) { opacity: 0; transition: opacity 55ms ease-out; }
 .capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }

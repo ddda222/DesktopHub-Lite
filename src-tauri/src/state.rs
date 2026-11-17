@@ -34,6 +34,11 @@ pub struct UiState {
     pub wechat_attention: bool,
     pub wechat_event: u32,
     pub island_appearance: IslandAppearance,
+    /// 仅运行时使用，不把失败状态写入偏好文件。
+    pub island_capture_error: Option<String>,
+    /// 正在执行的翻译请求数，只在运行期广播。
+    #[serde(default)]
+    pub translation_pending: usize,
     pub fullscreen_suppressed: bool,
     /// 当前打开的弹层：clipboard / translation / category / overflow / null
     pub panel: Option<String>,
@@ -60,6 +65,8 @@ impl Default for UiState {
             wechat_attention: false,
             wechat_event: 0,
             island_appearance: IslandAppearance::default(),
+            island_capture_error: None,
+            translation_pending: 0,
             fullscreen_suppressed: false,
             panel: None,
             settings_open: false,

@@ -1,12 +1,18 @@
-//! 翻译（阶段 4 落地）。
-//!
-//! 阶段 1 只定义设置与结果的形状；`translate_text` 返回 provider_error，
-//! 明确告诉界面「还没有接真实服务」，而不是返回一段假译文。
+//! 翻译请求：按窗口取消，广播运行期任务数量，仅对仍有效的请求发送结果提示。
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use crate::AppState;
+
+pub struct PendingTranslation { pub id: u64, pub sender: tokio::sync::oneshot::Sender<()> }
+static NEXT_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+// 调用者持有请求表锁，广播与增删保持同一顺序；旧请求结束不能清除替代它的新请求。
+fn publish_pending(app: &AppHandle, count: usize) {
+    app.state::<AppState>().ui.update(|ui| ui.translation_pending = count);
+    crate::broadcast_ui(app);
+}
 
 pub const SETTINGS_FILE: &str = "translation.json";
 
@@ -71,14 +77,17 @@ pub fn delete_translation_secret(app: AppHandle) -> Result<(), String> {
     match credential(&settings)?.delete_credential() { Ok(()) | Err(keyring::Error::NoEntry) => {}, Err(_) => return Err("删除密钥失败".into()) }
     drop(settings); settings_changed(&app); Ok(())
 }
-pub fn cancel_for_window(state: &AppState, label: &str) {
-    if let Some(sender) = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).remove(label) {
-        let _ = sender.send(());
+pub fn cancel_for_window(app: &AppHandle, label: &str) {
+    let state = app.state::<AppState>();
+    let mut current = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pending) = current.remove(label) {
+        let _ = pending.sender.send(());
+        publish_pending(app, current.len());
     }
 }
 #[tauri::command]
-pub fn cancel_translation(state: State<'_, AppState>, window: tauri::WebviewWindow) {
-    cancel_for_window(&state, window.label());
+pub fn cancel_translation(app: AppHandle, window: tauri::WebviewWindow) {
+    cancel_for_window(&app, window.label());
 }
 #[tauri::command]
 pub async fn translate_text(app: AppHandle, window: tauri::WebviewWindow, text: String, direction: String) -> Result<TranslationResult, String> {
@@ -97,10 +106,12 @@ pub async fn translate_text(app: AppHandle, window: tauri::WebviewWindow, text: 
     let endpoint = if settings.base_url.trim_end_matches('/').ends_with("/chat/completions") { settings.base_url.trim_end_matches('/').to_string() } else { format!("{}/chat/completions", settings.base_url.trim_end_matches('/')) };
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(45)).redirect(reqwest::redirect::Policy::none()).build().map_err(|_| "无法创建翻译请求")?;
     let (sender, mut cancelled) = tokio::sync::oneshot::channel();
+    let request_id = NEXT_REQUEST.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     {
         let state = app.state::<AppState>();
         let mut current = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(previous) = current.insert(window.label().to_string(), sender) { let _ = previous.send(()); }
+        if let Some(previous) = current.insert(window.label().to_string(), PendingTranslation { id: request_id, sender }) { let _ = previous.sender.send(()); }
+        publish_pending(&app, current.len());
     }
     let start = std::time::Instant::now();
     let request = async {
@@ -123,8 +134,21 @@ pub async fn translate_text(app: AppHandle, window: tauri::WebviewWindow, text: 
         _ = &mut cancelled => Err("翻译已取消".into()),
         result = request => result,
     };
+    let is_current = {
+        let state = app.state::<AppState>();
+        let mut current = state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner());
+        let is_current = current.get(window.label()).is_some_and(|pending| pending.id == request_id);
+        if is_current {
+            current.remove(window.label());
+            publish_pending(&app, current.len());
+        }
+        is_current
+    };
+    if !is_current { return Err("翻译已取消".into()); }
     if result.is_ok() {
         let _ = app.emit_to(crate::windows::BAR, "island-feedback", "translated");
+    } else {
+        let _ = app.emit_to(crate::windows::BAR, "island-feedback", "translation-error");
     }
     result
 }
