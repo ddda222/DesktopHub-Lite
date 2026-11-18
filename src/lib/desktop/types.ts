@@ -138,3 +138,32 @@ export interface SnippetDraft {
   group: string
   pinned: boolean
 }
+
+export interface AudioDevice {
+  id: string
+  name: string
+}
+
+export interface AudioSession {
+  id: string
+  name: string
+  deviceId: string
+  deviceName: string
+  appKey: string | null
+  pid: number
+  volume: number
+  muted: boolean
+  active: boolean
+}
+
+export interface AudioSnapshot {
+  devices: AudioDevice[]
+  sessions: AudioSession[]
+  warnings: string[]
+}
+
+/** 各映射只包含手动隐藏的项，保留名称以便离线时恢复。 */
+export interface MixerVisibility {
+  devices: Record<string, string>
+  apps: Record<string, string>
+}

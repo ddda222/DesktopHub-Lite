@@ -21,9 +21,7 @@ import {
   submitTranslation
 } from '@/store'
 import { findProvider } from '@/lib/desktop/providers'
-import type { TranslateDirection } from '@/lib/desktop/types'
 
-/** 方向三段式：自动判断 / 中→英 / 英→中 */
 const props = defineProps<{ standalone?: boolean }>()
 function dismiss(): void {
   if (props.standalone) {
@@ -32,11 +30,17 @@ function dismiss(): void {
   } else closePanel()
 }
 
-const directions: ReadonlyArray<{ value: TranslateDirection; label: string }> = [
-  { value: 'auto', label: '自动判断' },
-  { value: 'zh-en', label: '中→英' },
-  { value: 'en-zh', label: '英→中' }
-]
+const sourceLanguage = computed(() => state.translation.direction === 'auto' ? 'auto' : state.translation.direction === 'en-zh' ? 'en' : 'zh')
+const targetLanguage = computed(() => state.translation.direction === 'auto' ? 'auto' : state.translation.direction === 'en-zh' ? 'zh' : 'en')
+function chooseLanguage(event: Event, source: boolean) {
+  const language = (event.target as HTMLSelectElement).value
+  if (language === 'auto') setTranslationDirection('auto')
+  else setTranslationDirection((language === 'zh') === source ? 'zh-en' : 'en-zh')
+}
+function swapLanguages() {
+  const direction = state.translation.direction === 'auto' ? state.translation.result?.direction : state.translation.direction
+  setTranslationDirection(direction === 'en-zh' ? 'zh-en' : 'en-zh')
+}
 
 /** 与 store 的截断长度保持一致：setTranslationSource 按 5000 截断 */
 const MAX_CHARS = 5000
@@ -142,18 +146,17 @@ function onPanelKeydown(event: KeyboardEvent): void {
 
     <div class="content">
       <!-- 方向 -->
-      <div class="seg" role="group" aria-label="翻译方向">
-        <button
-          v-for="item in directions"
-          :key="item.value"
-          class="seg-btn"
-          :class="{ 'is-active': state.translation.direction === item.value }"
-          type="button"
-          :aria-pressed="state.translation.direction === item.value"
-          @click="setTranslationDirection(item.value)"
-        >
-          {{ item.label }}
+      <div class="languages" role="group" aria-label="翻译方向">
+        <select aria-label="原文语言" :value="sourceLanguage" @change="chooseLanguage($event, true)">
+          <option value="zh">中文</option><option value="en">英语</option><option value="auto">自动检测</option>
+        </select>
+        <button class="swap" type="button" title="交换翻译方向" aria-label="交换翻译方向" @click="swapLanguages">
+          <Icon name="swap" :size="16" :class="{ reversed: sourceLanguage === 'en' }" />
         </button>
+        <select aria-label="译文语言" :value="targetLanguage" @change="chooseLanguage($event, false)">
+          <option v-if="targetLanguage === 'auto'" value="auto" disabled>自动匹配</option>
+          <option value="en">英语</option><option value="zh">中文</option>
+        </select>
       </div>
 
       <!-- 原文 -->
@@ -203,7 +206,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
         <Icon class="notice-icon" name="info" :size="13" />
         <div class="notice-body">
           <p class="notice-main">
-            原文会发送到 <strong>{{ provider.name }}</strong>（{{ provider.baseUrl }}）处理，不是在本机翻译。
+            原文发送到 <strong>{{ provider.name }}</strong> · {{ provider.baseUrl }}
           </p>
           <p class="notice-sub">
             <i class="state-dot" :class="{ 'is-on': hasSecret }" aria-hidden="true" />
@@ -212,8 +215,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
         </div>
       </div>
 
-      <!-- 结果：四种状态共用同一高度，切换不跳版 -->
-      <div class="result">
+      <div v-if="status !== 'idle'" class="result">
         <div class="result-head">
           <span class="label">译文</span>
           <span
@@ -223,25 +225,19 @@ function onPanelKeydown(event: KeyboardEvent): void {
           >
             样稿模拟结果
           </span>
+          <span v-if="status === 'done'" class="meta" :title="resultMeta">{{ resultMeta }}</span>
+          <button v-if="status === 'done'" class="ghost copy" type="button" @click="onCopy">
+            <Icon name="copy" :size="13" />复制译文
+          </button>
         </div>
 
         <div class="result-body">
-          <p v-if="status === 'idle'" class="placeholder">译文会显示在这里</p>
-          <p v-else-if="status === 'loading'" class="placeholder">正在翻译，请稍候…</p>
+          <p v-if="status === 'loading'" class="placeholder">正在翻译，请稍候…</p>
           <div v-else-if="status === 'error'" class="error">
             <p class="error-text">{{ state.translation.error }}</p>
             <button class="ghost" type="button" @click="onRetry">重试</button>
           </div>
-          <p v-else class="result-text">{{ resultText }}</p>
-        </div>
-
-        <!-- 底栏始终占位：从 idle / loading 切到 done 时不会把面板顶高 -->
-        <div class="result-foot" :class="{ 'is-ghost': status !== 'done' }">
-          <span class="meta">{{ status === 'done' ? resultMeta : '' }}</span>
-          <button v-if="status === 'done'" class="ghost copy" type="button" @click="onCopy">
-            <Icon name="copy" :size="12" />
-            复制译文
-          </button>
+          <p v-else class="result-text model-response" tabindex="0" aria-label="译文内容">{{ resultText }}</p>
         </div>
       </div>
     </div>
@@ -313,7 +309,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .content {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   min-height: 0;
   padding: var(--space-3) var(--space-4);
   overflow-y: auto;
@@ -335,43 +331,27 @@ function onPanelKeydown(event: KeyboardEvent): void {
   background: transparent;
 }
 
-/* 方向 */
-.seg {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
+.languages {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
   padding: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-card);
   background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-chip);
 }
-
-.seg-btn {
-  height: 26px;
-  border-radius: 6px;
-  color: var(--text-2);
-  font-size: var(--text-sm);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+.languages select, .swap {
+  height: 28px; color: var(--text); background: transparent; border: 0;
+  border-radius: var(--r-chip); font: inherit; font-size: var(--text-sm); cursor: pointer;
 }
-
-.seg-btn:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-
-.seg-btn:active {
-  background: var(--active);
-}
-
-.seg-btn.is-active {
-  background: var(--accent-weak);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.seg-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+.languages select { width: 6.8em; padding-inline: 6px; font-weight: 600; }
+.languages select option { color: var(--text); background: var(--surface); }
+.swap { width: 30px; display: grid; place-items: center; color: var(--accent); touch-action: manipulation; }
+.languages :is(select, .swap):hover { background: var(--hover); }
+.languages :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.swap .reversed { transform: rotate(180deg); }
+@media (prefers-reduced-motion: no-preference) {
+  .swap svg { transition: transform var(--dur) var(--ease); }
 }
 
 /* 原文 */
@@ -445,7 +425,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .textarea {
   display: block;
   width: 100%;
-  height: 84px;
+  height: 68px;
   padding: 9px 10px 24px;
   color: var(--text);
   font: inherit;
@@ -558,7 +538,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   font-size: var(--text-xs);
 }
 
-/* 克制的加载指示：170ms 一轮，只在按钮内 */
+/* 请求期间缓慢明暗变化。 */
 .pulse {
   display: inline-flex;
   align-items: center;
@@ -571,15 +551,15 @@ function onPanelKeydown(event: KeyboardEvent): void {
   height: 3px;
   background: currentColor;
   border-radius: 50%;
-  animation: dot-pulse var(--dur) var(--ease) infinite;
+  animation: dot-pulse 1.2s ease-in-out infinite;
 }
 
 .pulse-dot:nth-child(2) {
-  animation-delay: 55ms;
+  animation-delay: 120ms;
 }
 
 .pulse-dot:nth-child(3) {
-  animation-delay: 110ms;
+  animation-delay: 240ms;
 }
 
 @keyframes dot-pulse {
@@ -671,9 +651,9 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .result-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
 }
+.result-head .label { flex: none; color: var(--text); font-weight: 600; }
 
 .badge {
   display: inline-flex;
@@ -689,22 +669,17 @@ function onPanelKeydown(event: KeyboardEvent): void {
   border-radius: 9px;
 }
 
-.result-body {
-  min-height: 60px;
-}
-
 .placeholder {
   display: flex;
   align-items: center;
-  min-height: 60px;
+  min-height: 22px;
   margin: 0;
   color: var(--text-3);
   font-size: var(--text-sm);
 }
 
 .result-text {
-  min-height: 60px;
-  max-height: 132px;
+  max-height: 5.8em;
   margin: 0;
   overflow-y: auto;
   color: var(--text);
@@ -732,7 +707,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
   align-items: flex-start;
   justify-content: center;
   gap: 7px;
-  min-height: 60px;
+  min-height: 28px;
 }
 
 .error-text {
@@ -742,22 +717,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   line-height: 1.6;
 }
 
-.result-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-height: 25px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-
-/* 非 done 时底栏只占高度不显示内容，避免状态切换时结果区跳版 */
-.result-foot.is-ghost {
-  border-top-color: transparent;
-}
-
 .meta {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--text-3);
@@ -797,6 +758,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 
 .ghost.copy {
+  flex: none;
   color: var(--accent);
   font-weight: 600;
   background: var(--accent-weak);

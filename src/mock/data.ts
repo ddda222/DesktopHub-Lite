@@ -227,7 +227,7 @@ export const defaultTranslationSettings: TranslationSettings = {
   providerId: 'deepseek',
   model: 'deepseek-chat',
   baseUrl: 'https://api.deepseek.com/v1',
-  direction: 'auto',
+  direction: 'zh-en',
   hasSecret: true
 }
 

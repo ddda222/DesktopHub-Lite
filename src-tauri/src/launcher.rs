@@ -40,6 +40,7 @@ impl TargetKind {
 
 pub fn kind_of(target: &str) -> TargetKind {
     let trimmed = target.trim();
+    if crate::system_apps::is_target(trimmed) { return TargetKind::Shortcut; }
     let lowered = trimmed.to_ascii_lowercase();
     if lowered.starts_with("http://")
         || lowered.starts_with("https://")
@@ -66,6 +67,7 @@ pub fn kind_of(target: &str) -> TargetKind {
 
 /// 目标是否真实存在（网址一律视为可交给系统）。
 pub fn exists(target: &str) -> bool {
+    if crate::system_apps::is_target(target.trim()) { return crate::system_apps::Item::resolve(target.trim()).is_ok(); }
     match kind_of(target) {
         TargetKind::Url => true,
         _ => Path::new(target.trim()).exists(),
@@ -75,6 +77,7 @@ pub fn exists(target: &str) -> bool {
 /// 交给系统启动。`Ok(())` 只表示系统接受了请求。
 pub fn launch(target: &str) -> Result<(), String> {
     let trimmed = target.trim();
+    if crate::system_apps::is_target(trimmed) { return crate::system_apps::Item::resolve(trimmed)?.open(); }
     if trimmed.is_empty() {
         return Err("目标为空".into());
     }

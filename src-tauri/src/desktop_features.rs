@@ -211,9 +211,9 @@ pub fn start_fullscreen_watch(app: AppHandle) {
                     let state = handle.state::<AppState>();
                     state.ui.update(|ui| {
                         ui.fullscreen_suppressed = next;
-                        // 自动避让后恢复胶囊，不自动打开之前的大面板或抢焦点。
-                        // 保留页签、panel 和进行中的翻译；用户手动关闭仍走原取消流程。
-                        ui.island_expanded = false;
+                        let reading = ui.island_page == crate::state::PANEL_TRANSLATION ||
+                            (ui.island_page == crate::state::PANEL_CLIPBOARD && state.island_reading_explanation.load(Ordering::Relaxed));
+                        if !reading { ui.island_expanded = false; }
                     });
                     if let Some(bar) = handle.get_webview_window(windows::BAR) {
                         // 细线保留小范围鼠标热区，悬停展开不设置焦点。

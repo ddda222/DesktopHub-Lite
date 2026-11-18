@@ -14,6 +14,7 @@ import {
   dismissSettings,
   describeTarget,
   importDesktopShortcuts,
+  type ImportShortcutsResult,
   invokeHost,
   isDesktop,
   windowLabel,
@@ -27,6 +28,7 @@ import {
   requestSettings,
   requestTheme,
   requestToast,
+  type SettingsSection,
   type UiState
 } from '@/lib/desktop/desktop'
 import {
@@ -56,7 +58,7 @@ import type {
 } from '@/lib/desktop/types'
 
 export type PanelName = 'clipboard' | 'translation' | 'files' | 'audio' | 'category' | 'overflow' | null
-export type SettingsSection = 'apps' | 'clipboard' | 'translation' | 'general'
+export type { SettingsSection } from '@/lib/desktop/desktop'
 
 export const state = reactive({
   /** 数据是否已经从宿主加载过；false 时界面显示占位而不是假装有数据 */
@@ -80,12 +82,12 @@ export const state = reactive({
     providerId: '',
     model: '',
     baseUrl: '',
-    direction: 'auto',
+    direction: 'zh-en',
     hasSecret: false
   } as TranslationSettings,
   translation: {
     source: '',
-    direction: 'auto' as TranslateDirection,
+    direction: 'zh-en' as TranslateDirection,
     status: 'idle' as 'idle' | 'loading' | 'error' | 'done',
     result: null as TranslationResult | null,
     error: '',
@@ -103,6 +105,7 @@ export const state = reactive({
     islandLeaveMs: 450,
     islandReducedMotion: false,
     islandAppearance: defaultIslandAppearance(),
+    mixerVisibility: { devices: {}, apps: {} } as UiState['mixerVisibility'],
     islandCaptureError: null as string | null,
     translationPending: 0,
     fullscreenSuppressed: false,
@@ -113,7 +116,7 @@ export const state = reactive({
     activeCategoryId: 'all',
     panel: null as PanelName,
     settingsOpen: false,
-    settingsSection: 'apps' as SettingsSection,
+    settingsSection: 'general' as SettingsSection,
     clipboardView: 'history' as 'history' | 'snippets',
     query: '',
     favoritesOnly: false,
@@ -178,7 +181,12 @@ let translationSettingsRefresh = 0
 async function refreshTranslationSettings(): Promise<void> {
   const ticket = ++translationSettingsRefresh
   const settings = await invokeHost<TranslationSettings>('get_translation_settings')
-  if (ticket === translationSettingsRefresh) state.translationSettings = settings
+  if (ticket === translationSettingsRefresh) {
+    if (settings.direction && settings.direction !== state.translationSettings?.direction) {
+      setTranslationDirection(settings.direction)
+    }
+    state.translationSettings = settings
+  }
 }
 
 function applySnippets(payload: SnippetPayload): void {
@@ -261,8 +269,7 @@ export async function bootstrap(): Promise<void> {
     await refreshSnippets()
     state.shortcuts = await invokeHost<typeof state.shortcuts>('get_shortcuts')
     state.settings.clipboardHotkey = state.shortcuts.clipboard
-    const settings = await invokeHost<TranslationSettings>('get_translation_settings')
-    state.translationSettings = { ...settings }
+    await refreshTranslationSettings()
     const ui = await invokeHost<UiState>('ui_state')
     applyUiState(ui)
     state.ready = true
@@ -272,6 +279,7 @@ export async function bootstrap(): Promise<void> {
   }
 }
 
+let lastSettingsRequest = 0
 function applyUiState(ui: UiState): void {
   state.ui.islandExpanded = ui.islandExpanded
   state.ui.islandAnchor = ui.islandAnchor
@@ -280,6 +288,7 @@ function applyUiState(ui: UiState): void {
   state.ui.islandLeaveMs = ui.islandLeaveMs
   state.ui.islandReducedMotion = ui.islandReducedMotion
   state.ui.islandAppearance = ui.islandAppearance
+  state.ui.mixerVisibility = ui.mixerVisibility
   state.ui.islandCaptureError = ui.islandCaptureError ?? null
   state.ui.translationPending = ui.translationPending ?? 0
   state.ui.fullscreenSuppressed = ui.fullscreenSuppressed
@@ -289,6 +298,10 @@ function applyUiState(ui: UiState): void {
   state.ui.wechatEvent = ui.wechatEvent
   state.ui.panel = ['clipboard', 'translation', 'files', 'audio', 'category', 'overflow'].includes(ui.panel ?? '') ? ui.panel : null
   state.ui.settingsOpen = ui.settingsOpen
+  if (ui.settingsOpen && ui.settingsRequest && ui.settingsRequest[0] > lastSettingsRequest) {
+    lastSettingsRequest = ui.settingsRequest[0]
+    state.ui.settingsSection = ui.settingsRequest[1]
+  }
   state.ui.paused = ui.paused
   state.ui.activeCategoryId = ui.activeCategoryId
   state.settings.theme = ui.theme as HubSettings['theme']
@@ -418,10 +431,10 @@ export function closePanel(): void {
   state.ui.panel = null
 }
 
-export function openSettings(section: SettingsSection = 'apps'): void {
+export function openSettings(section: SettingsSection = 'general'): void {
   state.ui.settingsSection = section
   if (isDesktop) {
-    void requestSettings()
+    void requestSettings(section)
     return
   }
   state.ui.settingsOpen = true
@@ -717,7 +730,12 @@ export async function deleteApp(id: string): Promise<boolean> {
   }
 }
 
-/** 从桌面导入快捷方式；返回数量供界面提示。 */
+export async function importSelectedSystemApps(categoryId: string, targets: string[]) {
+  const result = await invokeHost<ImportShortcutsResult>('import_system_apps', { categoryId, targets })
+  applyApps(result.config)
+  return result
+}
+
 export async function importShortcuts(categoryId?: string): Promise<void> {
   if (!isDesktop) {
     pushToast('导入只在桌面版可用', 'info')
@@ -869,8 +887,12 @@ export function setTranslationSource(value: string): void {
 }
 
 export function setTranslationDirection(direction: TranslateDirection): void {
+  if (state.translation.direction === direction) return
   cancelTranslation()
   state.translation.direction = direction
+  state.translation.status = 'idle'
+  state.translation.result = null
+  state.translation.error = ''
 }
 
 export async function submitTranslation(): Promise<void> {
@@ -959,7 +981,7 @@ export async function saveTranslationSettings(settings: TranslationSettings = st
   if (!isDesktop) return false
   try {
     state.translationSettings = await invokeHost<TranslationSettings>('save_translation_settings', { settings: { ...settings } })
-    state.translation.direction = state.translationSettings.direction
+    setTranslationDirection(state.translationSettings.direction)
     pushToast('翻译设置已保存', 'success')
     return true
   } catch (error) { pushToast(String(error), 'error'); return false }

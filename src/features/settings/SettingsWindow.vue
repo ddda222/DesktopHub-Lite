@@ -4,6 +4,9 @@ import { version as appVersion } from '../../../package.json'
 import Icon from '@/components/Icon.vue'
 import DesktopFeatures from './DesktopFeatures.vue'
 import AppManagement from './AppManagement.vue'
+import MixerSettings from './MixerSettings.vue'
+import MailSettings from './MailSettings.vue'
+import ApprovalSettings from './ApprovalSettings.vue'
 import ConfigBackup from './ConfigBackup.vue'
 import './settings.css'
 import {
@@ -46,10 +49,13 @@ const windowDrag = useWindowDrag(windowEl, {
 type SettingsSection = typeof state.ui.settingsSection
 
 const sections: { id: SettingsSection; label: string }[] = [
+  { id: 'general', label: '通用' },
   { id: 'apps', label: '应用管理' },
   { id: 'clipboard', label: '剪贴板' },
   { id: 'translation', label: '翻译' },
-  { id: 'general', label: '通用' }
+  { id: 'audio', label: '调音台' },
+  { id: 'mail', label: '邮箱通知' },
+  { id: 'approvals', label: '智能体连接' }
 ]
 
 const themeOptions: { value: ThemeMode; label: string }[] = [
@@ -63,7 +69,6 @@ const themeOptions: { value: ThemeMode; label: string }[] = [
 ]
 
 const directionOptions: { value: TranslateDirection; label: string }[] = [
-  { value: 'auto', label: '自动判断' },
   { value: 'zh-en', label: '中 → 英' },
   { value: 'en-zh', label: '英 → 中' }
 ]
@@ -76,8 +81,8 @@ const currentSectionLabel = computed(
 
 function pickSection(id: SettingsSection): void {
   state.ui.settingsSection = id
-  void nextTick(() => contentEl.value?.scrollTo({ top: 0 }))
 }
+watch(() => state.ui.settingsSection, () => { void nextTick(() => contentEl.value?.scrollTo({ top: 0 })) })
 
 /* ---------- 剪贴板 ---------- */
 
@@ -336,6 +341,9 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
 
         <section ref="contentEl" class="content scroll-y" :aria-label="currentSectionLabel">
           <AppManagement v-show="state.ui.settingsSection === 'apps'" @dirty-change="appsDraftPending = $event" />
+          <MixerSettings v-if="state.ui.settingsSection === 'audio' && state.ui.settingsOpen" />
+          <MailSettings v-if="state.ui.settingsSection === 'mail' && state.ui.settingsOpen" />
+          <KeepAlive><ApprovalSettings v-if="state.ui.settingsSection === 'approvals' && state.ui.settingsOpen" /></KeepAlive>
 
           <!-- 剪贴板 -->
           <div v-show="state.ui.settingsSection === 'clipboard'" class="panel">
@@ -577,37 +585,36 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
 
           <!-- 通用 -->
           <div v-show="state.ui.settingsSection === 'general'" class="panel">
-            <h3 class="panel-title">通用</h3><p class="page-description">设置外观、灵动岛与日常操作习惯。</p><h4 class="sub-title">显示主题 <span class="save-mode">即时生效</span></h4>
-
-            <div class="card">
-              <div class="set-row set-row-stack">
-                <span class="set-text">
-                  <span class="set-label">主题</span>
-                  <span class="set-desc">立即应用到设置、小胶囊和展开面板；不同器物主题拥有独立的轮廓结构与控件形态。</span>
-                </span>
-                <span class="seg" role="radiogroup" aria-label="主题">
-                  <label
-                    v-for="opt in themeOptions"
-                    :key="opt.value"
-                    class="seg-item"
-                    :class="{ 'is-on': state.settings.theme === opt.value }"
-                  >
-                    <input
-                      class="sr-only"
-                      type="radio"
-                      name="settings-theme"
-                      :value="opt.value"
-                      :checked="state.settings.theme === opt.value"
-                      @change="onThemeChange(opt.value)"
-                    />
-                    <span>{{ opt.label }}</span>
-                  </label>
-                </span>
+            <h3 class="panel-title">通用</h3>
+            <DesktopFeatures @dirty-change="islandDraftPending = $event">
+              <h4 class="sub-title">显示主题 <span class="save-mode">即时生效</span></h4>
+              <div class="card">
+                <div class="set-row set-row-stack">
+                  <span class="set-text">
+                    <span class="set-label">主题</span>
+                    <span class="set-desc">立即应用到设置、小胶囊和展开面板；不同器物主题拥有独立的轮廓结构与控件形态。</span>
+                  </span>
+                  <span class="seg" role="radiogroup" aria-label="主题">
+                    <label
+                      v-for="opt in themeOptions"
+                      :key="opt.value"
+                      class="seg-item"
+                      :class="{ 'is-on': state.settings.theme === opt.value }"
+                    >
+                      <input
+                        class="sr-only"
+                        type="radio"
+                        name="settings-theme"
+                        :value="opt.value"
+                        :checked="state.settings.theme === opt.value"
+                        @change="onThemeChange(opt.value)"
+                      />
+                      <span>{{ opt.label }}</span>
+                    </label>
+                  </span>
+                </div>
               </div>
-
-            </div>
-
-            <DesktopFeatures @dirty-change="islandDraftPending = $event" />
+            </DesktopFeatures>
             <ConfigBackup :blocked="islandDraftPending || appsDraftPending" />
             <h4 class="sub-title">全局快捷键</h4><div class="shortcut-fields">
               <label class="field"><span class="field-label">唤出图标条</span><input v-model="shortcutDraft.bar" class="control" /></label>

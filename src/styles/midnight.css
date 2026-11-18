@@ -267,17 +267,9 @@
   box-shadow: inset 0 1px 0 var(--island-top-sheen), var(--pop-shadow);
 }
 
-:root[data-theme='midnight'] .translation-panel .seg {
+:root[data-theme='midnight'] .translation-panel .languages {
   border-radius: 7px;
   border-color: rgba(109, 182, 255, 0.22);
-}
-
-:root[data-theme='midnight'] .translation-panel .seg-btn {
-  border-radius: 5px;
-}
-
-:root[data-theme='midnight'] .translation-panel .seg-btn.is-active {
-  box-shadow: inset 0 -2px 0 var(--accent), inset 0 0 0 1px rgba(109, 182, 255, 0.34);
 }
 
 :root[data-theme='midnight'] .translation-panel .textarea {

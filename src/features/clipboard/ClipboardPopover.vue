@@ -5,6 +5,7 @@ import Icon from '@/components/Icon.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
 import type { ClipItem, SnippetDraft, SnippetItem } from '@/lib/desktop/types'
 import { formatJson } from './format-json'
+import { useErrorExplanation } from './error-explanation'
 import {
   activeClip,
   assignClipGroup,
@@ -23,6 +24,7 @@ import {
   moveActive,
   moveSnippetActive,
   openDetail,
+  openSettings,
   openTranslation,
   pushToast,
   renderSnippetPreview,
@@ -47,6 +49,30 @@ const snippetBodyEl = ref<HTMLTextAreaElement | null>(null)
 
 const isHistoryView = computed(() => state.ui.clipboardView === 'history')
 const detailClip = computed(() => (isHistoryView.value ? activeClip.value : null))
+const { explanation, start: explainError, submit: submitExplanation, close: closeExplanation } = useErrorExplanation()
+const emit = defineEmits<{ 'reading-explanation': [active: boolean] }>()
+watch(() => !!explanation.value, active => emit('reading-explanation', active), { flush: 'sync' })
+const explanationHeading = ref<HTMLElement | null>(null)
+const explanationButton = ref<HTMLButtonElement | null>(null)
+const followUpHeading = ref<HTMLElement | null>(null)
+
+function explainClip(clip: ClipItem) {
+  if (!isDesktop || clip.kind !== 'text' || !clip.text?.trim()) return
+  openDetail(clip.id)
+  void explainError(clip.id)
+  void nextTick(() => explanationHeading.value?.focus())
+}
+function returnToOriginal() {
+  closeExplanation()
+  void nextTick(() => explanationButton.value?.focus())
+}
+watch(() => explanation.value?.answer, answer => {
+  if (answer) void nextTick(() => followUpHeading.value?.focus())
+})
+watch(() => detailClip.value?.id, id => {
+  if (id !== explanation.value?.id) closeExplanation()
+}, { flush: 'sync' })
+onBeforeUnmount(() => { closeExplanation(); emit('reading-explanation', false) })
 
 /* ---------- 历史记录详情与批量操作 ---------- */
 
@@ -492,6 +518,7 @@ function onKeydown(event: KeyboardEvent): void {
 
   if (event.key === 'Escape') {
     event.stopPropagation()
+    if (explanation.value) { returnToOriginal(); return }
     if (deletePrompt.value) {
       deletePrompt.value = null
       return
@@ -569,6 +596,7 @@ const emptySnippetHint = computed(() =>
 )
 
 const footerHint = computed(() => {
+  if (explanation.value) return 'Esc 返回原文'
   if (detailClip.value?.kind === 'text') return '格式化仅改变预览，原文始终保留'
   if (detailClip.value) return 'Esc 返回列表'
   if (editingSnippet.value) return '支持 {{date}} / {{time}} / {{clipboard}} · Esc 取消编辑'
@@ -730,7 +758,30 @@ const footerHint = computed(() => {
         </button>
       </div>
 
-      <section v-if="detailClip" class="detail" aria-label="记录详情">
+      <section v-if="detailClip && explanation" class="detail explanation" aria-label="AI 解读">
+        <div class="detail-head">
+          <h3 ref="explanationHeading" tabindex="-1">AI 解读</h3>
+          <button class="back" type="button" @click="returnToOriginal"><Icon name="back" :size="14" />返回原文</button>
+        </div>
+        <div class="detail-body scroll-y explanation-body" tabindex="0" aria-label="解释内容">
+          <p v-if="explanation.result" class="model-response" role="status">{{ explanation.result }}</p>
+          <div v-if="explanation.answer" class="follow-up model-response">
+            <h4 ref="followUpHeading" tabindex="-1">{{ explanation.question }}</h4>
+            <p>{{ explanation.answer }}</p>
+          </div>
+          <p v-if="explanation.busy" class="reading-status" role="status">{{ explanation.result ? '正在回答追问…' : '正在解读这段文字…' }}</p>
+          <p v-if="explanation.error" class="format-error" role="alert">{{ explanation.error }}</p>
+          <div v-if="explanation.error" class="detail-actions">
+            <button v-if="!explanation.result" class="chip" type="button" @click="submitExplanation">重试</button>
+            <button class="chip" type="button" @click="openSettings('translation')">打开模型设置</button>
+          </div>
+        </div>
+        <form v-if="explanation.result && !explanation.answer" class="management" @submit.prevent="submitExplanation">
+          <input v-model="explanation.draft" aria-label="针对这段内容追问" placeholder="针对这段内容追问一句" :disabled="explanation.busy" />
+          <button class="chip" type="submit" :disabled="explanation.busy || !explanation.draft.trim()">发送追问</button>
+        </form>
+      </section>
+      <section v-else-if="detailClip" class="detail" aria-label="记录详情">
         <div class="detail-head">
           <button class="back" type="button" @click="closeDetail()">
             <Icon name="back" :size="14" />
@@ -762,6 +813,8 @@ const footerHint = computed(() => {
               JSON 格式化
             </button>
           </div>
+          <button ref="explanationButton" class="chip" type="button" :disabled="!isDesktop || !detailClip.text?.trim()"
+            title="用已配置的模型解读这段文字" @click="explainClip(detailClip)">AI 解读</button>
           <label><input v-model="showLineNumbers" type="checkbox" />行号</label>
           <label><input v-model="wrapLines" type="checkbox" />自动换行</label>
         </div>
@@ -943,6 +996,8 @@ const footerHint = computed(() => {
             </div>
 
             <div v-if="!selecting" class="row-actions">
+              <button v-if="clip.kind === 'text'" class="chip" type="button" :disabled="!isDesktop || !clip.text?.trim()"
+                title="用已配置的模型解读这段文字" @click.stop="explainClip(clip)">AI 解读</button>
               <button
                 v-if="clip.kind === 'image'"
                 class="icon-btn"
@@ -1848,6 +1903,18 @@ const footerHint = computed(() => {
   gap: var(--space-2);
   padding-bottom: 8px;
 }
+
+.explanation .detail-head { justify-content: space-between; }
+.explanation h3 { margin: 0; font-size: var(--text-md); font-weight: 600; }
+.explanation-body { max-height: 260px; overflow-wrap: anywhere; line-height: 1.65; user-select: text; }
+.explanation-body :is(p, h4) { white-space: pre-wrap; }
+.explanation-body p { margin: 0; }
+.follow-up { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--line-strong); }
+.follow-up h4 { margin: 0 0 var(--space-1); color: var(--text); font-size: var(--text-base); }
+.reading-status { display: flex; align-items: center; gap: var(--space-2); color: var(--text-2); }
+.reading-status::before { content: ''; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.explanation .management { padding: var(--space-2) 0 0; }
+.explanation-body p + p { margin-top: 8px; }
 
 .back {
   display: flex;

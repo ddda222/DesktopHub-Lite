@@ -1,0 +1,11 @@
+{
+  "name": "dsh-desktophub-approvals",
+  "version": "0.1.2",
+  "description": "在 DesktopHub 灵动岛接收 DSH 的提问与工具审批",
+  "type": "module",
+  "main": "./index.js",
+  "exports": { ".": "./index.js", "./package.json": "./package.json" },
+  "engines": { "node": ">=22", "dsh": "0.2.2-rc.3" },
+  "files": ["index.js", "questions.js", "cordis.patch.yml", "executable.json"],
+  "dsh": { "manifestVersion": 1, "bundle": { "patch": "./cordis.patch.yml" } }
+}

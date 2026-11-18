@@ -118,6 +118,15 @@ watch(() => state.ui.settingsOpen, open => {
 </script>
 
 <template>
+  <div class="save-row general-actions" role="group" aria-label="灵动岛设置操作">
+    <p role="status" :class="{ error: failed }">{{ dirty ? '灵动岛设置有尚未应用的修改' : feedback || '灵动岛设置' }}<span v-if="dirty && failed"> · {{ feedback }}</span><span v-if="!isDesktop"> · 桌面版可应用</span></p>
+    <div class="actions">
+      <button v-if="dirty" type="button" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button>
+      <button type="button" class="btn" :disabled="saving" @click="restore">恢复默认值</button>
+      <button type="button" class="btn btn-primary" :disabled="saving || !validSettings || !isDesktop" @click="save">{{ saving ? '应用中…' : '应用设置' }}</button>
+    </div>
+  </div>
+  <slot />
   <section class="features" aria-label="灵动岛与系统">
     <h4 class="sub-title">灵动岛 <span class="save-mode">手动应用</span></h4>
     <div class="field-grid">
@@ -163,11 +172,6 @@ watch(() => state.ui.settingsOpen, open => {
     </details>
     <p v-if="!validTiming" class="inline-feedback error" role="alert">展开延时需为 100–2000 毫秒，收起延时需为 100–4000 毫秒，大小需为 75%–125%。</p>
     <p v-if="!validTelemetry" class="inline-feedback error" role="alert">开启胶囊微读数时，请至少勾选一项系统指标。</p>
-    <div class="save-row">
-      <p role="status" :class="{ error: failed }">{{ dirty ? '有尚未应用的修改' : feedback || '更改后点击应用' }}<span v-if="dirty && failed"> · {{ feedback }}</span><span v-if="!isDesktop"> · 桌面版可应用</span></p>
-      <div class="actions"><button v-if="dirty" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button><button class="btn" :disabled="saving" @click="restore">恢复默认值</button><button class="btn btn-primary" :disabled="saving || !validSettings || !isDesktop" @click="save">{{ saving ? '应用中…' : '应用设置' }}</button></div>
-    </div>
-
     <h4 class="sub-title">提醒与启动 <span class="save-mode">即时生效</span></h4>
     <div class="set-row">
       <span class="set-text"><span class="set-label">微信普通提醒</span><span class="set-desc" role="status">{{ isDesktop ? wechatStatus : '桌面版可用' }}。只接收关注提醒，不读取聊天内容。</span></span>
@@ -189,6 +193,7 @@ watch(() => state.ui.settingsOpen, open => {
 </template>
 
 <style scoped>
+.settings-ui .general-actions { position: sticky; top: 0; z-index: 1; margin: 8px 0 16px; padding: 12px 0; background: var(--surface); border-bottom: 1px solid var(--line); }
 .telemetry-config { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .telemetry-hint { margin: 2px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

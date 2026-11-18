@@ -25,12 +25,12 @@ pub const ICON_DIR: &str = "icons";
 pub const ICON_SIZE: u32 = 48;
 
 /// 保证当前线程有 COM 公寓；已经初始化过（包括被别处以其它模式初始化）就不重复初始化。
-struct ComGuard {
+pub(crate) struct ComGuard {
     owns: bool,
 }
 
 impl ComGuard {
-    fn new() -> Result<Self, String> {
+    pub(crate) fn new() -> Result<Self, String> {
         unsafe {
             let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             if hr.is_ok() {
@@ -84,7 +84,7 @@ pub fn icon_data_uri(cache_root: &Path, target: &str, size: u32) -> Result<Strin
     if is_remote_target(target) {
         return Err("网址没有本地图标".into());
     }
-    if !Path::new(target).exists() {
+    if !crate::system_apps::is_target(target) && !Path::new(target).exists() {
         return Err(format!("目标不存在：{target}"));
     }
 

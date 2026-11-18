@@ -11,7 +11,7 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen as tauriListen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import type { AppConfig } from '@/lib/desktop/types'
+import type { AppConfig, MixerVisibility } from '@/lib/desktop/types'
 
 /** 是否运行在 Tauri 桌面外壳里；false 表示浏览器里的交互样稿。 */
 export const isDesktop: boolean =
@@ -67,6 +67,8 @@ export function defaultIslandAppearance(): IslandAppearance {
 }
 
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */
+export type SettingsSection = 'general' | 'apps' | 'clipboard' | 'translation' | 'audio' | 'mail' | 'approvals'
+
 export interface UiState {
   islandExpanded: boolean
   islandAnchor: string
@@ -75,6 +77,7 @@ export interface UiState {
   islandLeaveMs: number
   islandReducedMotion: boolean
   islandAppearance: IslandAppearance
+  mixerVisibility: MixerVisibility
   islandCaptureError: string | null
   translationPending: number
   fullscreenSuppressed: boolean
@@ -84,6 +87,7 @@ export interface UiState {
   wechatEvent: number
   panel: 'clipboard' | 'translation' | 'files' | 'audio' | 'category' | 'overflow' | null
   settingsOpen: boolean
+  settingsRequest: [number, SettingsSection] | null
   paused: boolean
   /** 图标条当前分类；弹层窗口也按这个分类展示 */
   activeCategoryId: string
@@ -99,6 +103,7 @@ const EMPTY_UI: UiState = {
   islandLeaveMs: 450,
   islandReducedMotion: false,
   islandAppearance: defaultIslandAppearance(),
+  mixerVisibility: { devices: {}, apps: {} },
   islandCaptureError: null,
   translationPending: 0,
   fullscreenSuppressed: false,
@@ -108,6 +113,7 @@ const EMPTY_UI: UiState = {
   wechatEvent: 0,
   panel: null,
   settingsOpen: false,
+  settingsRequest: null,
   paused: false,
   activeCategoryId: 'all',
   theme: 'dark',
@@ -139,9 +145,9 @@ export async function dismissPanel(): Promise<void> {
   await invokeHost('close_panel')
 }
 
-export async function requestSettings(): Promise<void> {
+export async function requestSettings(section: SettingsSection = 'general'): Promise<void> {
   if (!isDesktop) return
-  await invokeHost('open_settings')
+  await invokeHost('open_settings', { section })
 }
 
 export async function dismissSettings(): Promise<void> {

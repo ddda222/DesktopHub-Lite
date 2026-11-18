@@ -41,6 +41,7 @@ try {
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\WebView2Loader.dll" -Destination $packageDirectory
     New-Item -ItemType File -Path (Join-Path $packageDirectory 'portable.flag') | Out-Null
     Copy-Item -LiteralPath (Join-Path $projectRoot 'PORTABLE.md') -Destination (Join-Path $packageDirectory '使用说明.md')
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'integrations') -Destination $packageDirectory -Recurse
     $releaseNotes = if ($ReleaseNotesFile) { $ReleaseNotesFile } else { Join-Path (Split-Path -Parent $projectRoot) "docs\releases\lite-v$version.md" }
     if (Test-Path -LiteralPath $releaseNotes) { Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $packageDirectory '更新说明.md') }
     $sourceCommit = & git -C $projectRoot rev-parse HEAD

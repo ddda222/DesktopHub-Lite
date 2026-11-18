@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
+import type { AudioSession as Session, AudioSnapshot as Snapshot } from '@/lib/desktop/types'
+import { state } from '@/store'
 import { mockProfiles, mockSessions } from './mock'
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
-interface Session { id: string; name: string; deviceId: string; deviceName: string; appKey: string | null; pid: number; volume: number; muted: boolean; active: boolean }
 interface Setting { appKey: string; deviceId: string; volume: number; muted: boolean }
 interface Profile { name: string; settings: Setting[] }
-interface Snapshot { sessions: Session[]; warnings: string[] }
 const sessions = ref<Session[]>(isDesktop ? [] : mockSessions)
+const visibleSessions = computed(() => {
+  const hidden = state.ui.mixerVisibility
+  return sessions.value.filter(row => !Object.hasOwn(hidden.devices, row.deviceId) &&
+    (row.appKey === null || !Object.hasOwn(hidden.apps, row.appKey)))
+})
 const profiles = ref<Profile[]>(isDesktop ? [] : mockProfiles)
 const profileName = ref('')
 const notice = ref(isDesktop ? '应用播放声音后会出现在这里。配置只在点击时应用。' : '合成会话，可体验独立音量与静音。')
@@ -22,6 +27,12 @@ const queuedUpdates = new Map<string, { volume?: number; muted?: boolean; revisi
 let writingSession = false
 let disposed = false, sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
+watch(visibleSessions, rows => {
+  // 在另一个窗口隐藏正拖动的行时，滑块可能收不到 change，释放草稿以继续轮询。
+  for (const id of Object.keys(drafts.value)) {
+    if (!rows.some(row => row.id === id)) delete drafts.value[id]
+  }
+})
 const activeProfile = computed(() => profiles.value.find(p => p.settings.length && p.settings.every(s => { const rows = sessions.value.filter(row => row.appKey === s.appKey && row.deviceId === s.deviceId); return rows.length && rows.every(row => Math.abs(row.volume - s.volume) <= 1 && row.muted === s.muted) }))?.name)
 function draftVolume(id: string, event: Event): void { sequence++; draftVersions[id] = (draftVersions[id] ?? 0) + 1; drafts.value[id] = Number((event.target as HTMLInputElement).value) }
 function displayedVolume(session: Session): number { return Math.round(Math.max(0, Math.min(100, drafts.value[session.id] ?? session.volume))) }
@@ -115,7 +126,8 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
     <div class="mixer-heading"><span>应用声音</span><button v-if="isDesktop" :disabled="busy" @click="refresh">刷新会话</button><span class="simulation">{{ isDesktop ? 'Windows 实际会话' : '网页模拟' }}</span></div>
     <div class="sound-profiles" aria-label="声音配置"><button v-for="(profile, i) in profiles" :key="profile.name" :disabled="busy" :aria-pressed="activeProfile === profile.name" @click="apply(i)">{{ profile.name }}</button></div>
     <p v-if="!sessions.length" class="mixer-notice">{{ readError ? '暂时无法取得会话，请重试。' : '暂时没有音频会话。先让应用播放声音，再刷新。' }}</p>
-    <div v-for="session in sessions" :key="session.id" class="sound-channel" :class="{ muted: session.muted }">
+    <p v-else-if="!visibleSessions.length" class="mixer-notice">当前声音条目均已隐藏，可在「设置 → 调音台」中重新显示。</p>
+    <div v-for="session in visibleSessions" :key="session.id" class="sound-channel" :class="{ muted: session.muted }">
       <span class="sound-icon" aria-hidden="true">♫</span>
       <div class="sound-body">
         <div class="channel-heading"><strong :title="session.name">{{ session.name }}</strong><span v-if="session.muted" class="mute-status">已静音</span></div>
@@ -130,7 +142,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
     <form class="save-profile" @submit.prevent="save"><input v-model="profileName" maxlength="20" placeholder="如：开会、游戏（同名覆盖）" aria-label="声音配置名称" /><button type="submit" :disabled="busy || !sessions.length">保存配置</button></form>
     <p v-if="error" class="mixer-error" role="alert">{{ error }}</p><p v-if="readError" class="mixer-error" role="alert">{{ readError }}</p><p v-for="warning in warnings" :key="warning" class="mixer-notice">{{ warning }}</p>
     <p class="mixer-notice" role="status">{{ notice }}</p>
-    <p class="mixer-boundary">{{ isDesktop ? '配置匹配同一应用与输出设备，未运行的应用会跳过。不会调整系统总音量。' : '合成会话 · 配置仅保留在当前页面 · 不控制 Windows 音量' }}</p>
+    <p class="mixer-boundary">{{ isDesktop ? '声音配置按应用和输出设备匹配，包含隐藏条目，跳过未运行的应用。不会调整系统总音量。' : '合成会话 · 配置仅保留在当前页面 · 不控制 Windows 音量' }}</p>
   </section>
 </template>
 

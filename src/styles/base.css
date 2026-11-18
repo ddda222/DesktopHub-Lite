@@ -187,6 +187,15 @@ textarea::placeholder {
   border: 0;
 }
 
+/* 译文、解读和追问共用相同的入场反馈，整段立即可读。 */
+@media (prefers-reduced-motion: no-preference) {
+  .model-response { animation: model-response-in var(--dur-fast) var(--ease); }
+  @keyframes model-response-in {
+    from { opacity: .6; transform: translateY(2px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

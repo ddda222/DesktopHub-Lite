@@ -8,6 +8,7 @@
 //! 剪贴板与翻译只登记契约，不读写真实数据、不发真实请求（阶段 3 / 4）。
 
 mod applications;
+mod approvals;
 mod clipboard;
 mod clipboard_service;
 mod capture_privacy;
@@ -21,9 +22,11 @@ mod config_format;
 mod config_transfer;
 mod launcher;
 mod logging;
+mod mail;
 mod snippets;
 mod state;
 mod storage;
+mod system_apps;
 mod telemetry;
 mod translation;
 mod file_preview;
@@ -60,6 +63,7 @@ pub const UI_PREFS_FILE: &str = "ui-preferences.json";
 
 /// 应用运行期共享状态。
 pub struct AppState {
+    island_reading_explanation: AtomicBool,
     store: Store,
     configuration_gate: Mutex<()>,
     apps: Mutex<AppConfig>,
@@ -102,6 +106,7 @@ fn broadcast_apps(app: &AppHandle, config: &AppConfig) {
 fn hide_window(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         if window.hide().is_ok() && label == windows::BAR {
+            approvals::visibility(app, false);
             let _ = window.emit_to(label, "island-visibility", false);
         }
     }
@@ -123,7 +128,10 @@ fn display_window(window: &WebviewWindow) -> tauri::Result<()> {
             }
         })?;
     }
-    if bar { let _ = window.emit_to(windows::BAR, "island-visibility", true); }
+    if bar {
+        approvals::visibility(window.app_handle(), true);
+        let _ = window.emit_to(windows::BAR, "island-visibility", true);
+    }
     Ok(())
 }
 
@@ -137,7 +145,7 @@ fn reveal_bar(app: &AppHandle) {
 
 fn show_window(app: &AppHandle, label: &str) {
     if label == windows::BAR && !capture_privacy::prepare_to_show(app) {
-        let _ = open_settings(app.clone());
+        let _ = open_settings(app.clone(), None);
         return;
     }
     if let Some(window) = app.get_webview_window(label) {
@@ -179,6 +187,11 @@ fn app_info(state: State<'_, AppState>) -> AppInfo {
 #[tauri::command]
 fn ui_state(state: State<'_, AppState>) -> UiState {
     state.ui.snapshot()
+}
+
+#[tauri::command]
+fn set_island_reading_explanation(window: WebviewWindow, state: State<'_, AppState>, active: bool) {
+    if window.label() == windows::BAR { state.island_reading_explanation.store(active, Ordering::Relaxed); }
 }
 
 #[tauri::command]
@@ -300,12 +313,14 @@ fn close_panel(app: AppHandle) -> Result<UiState, String> {
 }
 
 #[tauri::command]
-fn open_settings(app: AppHandle) -> Result<UiState, String> {
+fn open_settings(app: AppHandle, section: Option<String>) -> Result<UiState, String> {
     windows::ensure_settings(&app)?;
     let state = app.state::<AppState>();
     let next = state.ui.update(|ui| {
         ui.panel = None;
         ui.settings_open = true;
+        let next_request = ui.settings_request.as_ref().map_or(1, |(id, _)| id + 1);
+        ui.settings_request = Some((next_request, section.unwrap_or_else(|| "general".into())));
         ui.island_expanded = false;
     });
     hide_window(&app, windows::POP);
@@ -648,8 +663,29 @@ struct ImportResult {
 /// 只读这两个目录，不做全盘扫描；同一个目标已经存在就跳过，不重复添加。
 #[tauri::command]
 fn import_desktop_shortcuts(app: AppHandle, category_id: Option<String>) -> Result<ImportResult, String> {
+    import_application_targets(&app, category_id, applications::desktop_shortcuts())
+}
+
+#[tauri::command]
+async fn list_system_apps() -> Result<Vec<system_apps::SystemApp>, String> {
+    tauri::async_runtime::spawn_blocking(system_apps::list).await.map_err(|_| "系统应用检测中断")?
+}
+
+#[tauri::command]
+async fn import_system_apps(app: AppHandle, category_id: String, targets: Vec<String>) -> Result<ImportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut selected: std::collections::HashSet<_> = targets.into_iter().collect();
+        let found: Vec<_> = system_apps::list()?.into_iter().filter(|a| selected.remove(&a.target))
+            .map(|a| (a.target, a.name)).collect();
+        if !selected.is_empty() {
+            return Err("系统应用列表已变化，请重新打开列表后选择".into());
+        }
+        import_application_targets(&app, Some(category_id), found)
+    }).await.map_err(|_| "系统应用导入中断")?
+}
+
+fn import_application_targets(app: &AppHandle, category_id: Option<String>, found: Vec<(String, String)>) -> Result<ImportResult, String> {
     let state = app.state::<AppState>();
-    let found = applications::desktop_shortcuts();
     let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let total = found.len();
     let fallback_category = category_id.unwrap_or_else(|| "c-common".into());
@@ -672,9 +708,9 @@ fn import_desktop_shortcuts(app: AppHandle, category_id: Option<String>) -> Resu
     };
 
     if added > 0 {
-        broadcast_apps(&app, &snapshot);
+        broadcast_apps(app, &snapshot);
     }
-    log_info!("导入桌面快捷方式：发现 {total}，新增 {added}");
+    log_info!("导入应用：发现 {total}，新增 {added}");
     Ok(ImportResult {
         added,
         skipped: total.saturating_sub(added),
@@ -914,7 +950,7 @@ fn spawn_selftest(app: AppHandle) {
         sleep(300);
 
         log_info!("[自检] 打开设置");
-        if let Err(error) = open_settings(app.clone()) {
+        if let Err(error) = open_settings(app.clone(), None) {
             log_warn!("[自检] 打开设置失败：{error}");
         } else {
             // 先等界面量完尺寸再采样：日志出现时窗口仍然可见，
@@ -956,7 +992,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "show" => show_window(app, windows::BAR),
             "hide" => hide_window(app, windows::BAR),
             "settings" => {
-                if let Err(error) = open_settings(app.clone()) {
+                if let Err(error) = open_settings(app.clone(), None) {
                     crate::log_warn!("打开设置失败：{error}");
                 }
             }
@@ -982,6 +1018,7 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 // ---------------------------------------------------------------- 启动
 
 pub fn run() {
+    if approvals::run_adapter() { return; }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| { show_window(app, windows::BAR); }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -1035,24 +1072,30 @@ pub fn run() {
                 .unwrap_or_default();
             if snippets.schema_version != snippets::SCHEMA_VERSION { return Err("常用短语索引版本不兼容，原文件已保留".into()); }
             snippets.ensure_invariants();
-            let translation: TranslationSettings = store
+            let mut translation: TranslationSettings = store
                 .read(translation::SETTINGS_FILE)
                 .unwrap_or_default();
+            // 旧版初始值是自动判断。保留服务商与密钥绑定，面板默认从中译英开始。
+            if translation.direction == "auto" { translation.direction = "zh-en".into(); }
             let prefs: state::UiPreferences = store.read(UI_PREFS_FILE).unwrap_or_default();
             let file_shelf = store.read(file_shelf::INDEX_FILE).unwrap_or_default();
             let paused = clipboard.paused;
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
             app.manage(image_preview::Previews::default());
+            app.manage(approvals::Approvals::default());
+            app.manage(mail::Mail::load(&store));
             app.manage(audio::AudioState::default());
             app.manage(config_transfer::ConfigurationTransfers::default());
             app.manage(file_shelf::ShelfHistory::default());
             app.manage(AppState {
+                island_reading_explanation: AtomicBool::new(false),
                 store,
                 apps: Mutex::new(config),
                 ui: UiStateHandle::new(UiState {
                     panel: None,
                     settings_open: false,
+                    settings_request: None,
                     island_expanded: false,
                     island_anchor: prefs.island_anchor,
                     island_page: if state::valid_island_page(&prefs.island_page) { prefs.island_page } else { state::PANEL_APPLICATIONS.into() },
@@ -1064,6 +1107,7 @@ pub fn run() {
                     wechat_attention: false,
                     wechat_event: 0,
                     island_appearance: prefs.island_appearance.normalized_on_load(),
+                    mixer_visibility: prefs.mixer_visibility,
                     island_capture_error: None,
                     translation_pending: 0,
                     fullscreen_suppressed: false,
@@ -1094,6 +1138,8 @@ pub fn run() {
             wechat::start(handle.clone());
             desktop_features::start_fullscreen_watch(handle.clone());
             telemetry::start(handle.clone());
+            approvals::start(handle.clone());
+            mail::start(handle.clone());
             if app.state::<AppState>().ui.snapshot().island_appearance.auto_check_updates {
                 let update_app = handle.clone();
                 tauri::async_runtime::spawn(async move {
@@ -1113,7 +1159,7 @@ pub fn run() {
             if capture_privacy::prepare_to_show(&handle) {
                 reveal_bar(&handle);
             } else {
-                let _ = open_settings(handle.clone());
+                let _ = open_settings(handle.clone(), None);
             }
 
             // 无人值守自检：设置 DESKTOPHUB_LITE_SELFTEST=1 时，
@@ -1202,6 +1248,7 @@ pub fn run() {
             config_transfer::cancel_configuration_import,
             config_transfer::apply_configuration_import,
             audio::list_audio_sessions,
+            audio::set_mixer_item_visible,
             audio::update_audio_session,
             audio::list_audio_profiles,
             audio::save_audio_profile,
@@ -1218,9 +1265,21 @@ pub fn run() {
             image_preview::image_preview_content,
             image_preview::pin_image_preview,
             current_window_label,
+            approvals::approval_snapshot,
+            approvals::answer_approval,
+            approvals::setup::list_approval_agents,
+            approvals::setup::connected_approval_agents,
+            approvals::setup::connect_approval_agent,
+            mail::mail_accounts,
+            mail::open_mail_setup_page,
+            mail::bind_mail_account,
+            mail::unbind_mail_account,
+            mail::mail_notices,
+            mail::mail_action,
             app_info,
             ui_state,
             set_island_expanded,
+            set_island_reading_explanation,
             set_island_anchor,
             select_island_page,
             open_translation_window,
@@ -1255,6 +1314,8 @@ pub fn run() {
             reorder_applications,
             pick_application_target,
             import_desktop_shortcuts,
+            list_system_apps,
+            import_system_apps,
             read_app_icons,
             reveal_application_target,
             describe_target,
@@ -1284,6 +1345,7 @@ pub fn run() {
             get_translation_settings,
             save_translation_settings,
             translation::translate_text,
+            translation::explain_clipboard_error,
             translation::save_translation_secret,
             translation::delete_translation_secret,
             translation::cancel_translation,

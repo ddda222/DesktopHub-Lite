@@ -5,6 +5,7 @@
 
 use crate::desktop_features::IslandAppearance;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 pub const PANEL_APPLICATIONS: &str = "applications";
@@ -37,6 +38,14 @@ pub fn valid_theme(theme: &str) -> bool {
 
 pub const CATEGORY_ALL: &str = "all";
 
+/// 本机调音台只保存手动隐藏的标识和名称，设备离线后仍能在设置中恢复。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MixerVisibility {
+    pub devices: BTreeMap<String, String>,
+    pub apps: BTreeMap<String, String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiState {
@@ -51,6 +60,8 @@ pub struct UiState {
     pub wechat_attention: bool,
     pub wechat_event: u32,
     pub island_appearance: IslandAppearance,
+    #[serde(default)]
+    pub mixer_visibility: MixerVisibility,
     /// 仅运行时使用，不把失败状态写入偏好文件。
     pub island_capture_error: Option<String>,
     /// 正在执行的翻译请求数，只在运行期广播。
@@ -60,6 +71,7 @@ pub struct UiState {
     /// 当前打开的弹层：clipboard / translation / category / overflow / null
     pub panel: Option<String>,
     pub settings_open: bool,
+    pub settings_request: Option<(u64, String)>,
     /// 暂停记录剪贴板（阶段 1 只保存开关，不监听系统剪贴板）
     pub paused: bool,
     /// 图标条当前分类，弹层窗口也要按同一分类展示
@@ -82,11 +94,13 @@ impl Default for UiState {
             wechat_attention: false,
             wechat_event: 0,
             island_appearance: IslandAppearance::default(),
+            mixer_visibility: MixerVisibility::default(),
             island_capture_error: None,
             translation_pending: 0,
             fullscreen_suppressed: false,
             panel: None,
             settings_open: false,
+            settings_request: None,
             paused: false,
             active_category_id: CATEGORY_ALL.to_string(),
             theme: THEME_DARK.to_string(),
@@ -135,6 +149,8 @@ pub struct UiPreferences {
     pub wechat_enabled: bool,
     #[serde(default)]
     pub island_appearance: IslandAppearance,
+    #[serde(default)]
+    pub mixer_visibility: MixerVisibility,
     pub active_category_id: String,
     pub theme: String,
 }
@@ -149,6 +165,7 @@ impl Default for UiPreferences {
             island_reduced_motion: false,
             wechat_enabled: false,
             island_appearance: IslandAppearance::default(),
+            mixer_visibility: MixerVisibility::default(),
             active_category_id: CATEGORY_ALL.to_string(),
             theme: THEME_DARK.to_string(),
         }
@@ -165,6 +182,7 @@ impl UiPreferences {
             island_reduced_motion: state.island_reduced_motion,
             wechat_enabled: state.wechat_enabled,
             island_appearance: state.island_appearance.clone(),
+            mixer_visibility: state.mixer_visibility.clone(),
             active_category_id: state.active_category_id.clone(),
             theme: state.theme.clone(),
         }

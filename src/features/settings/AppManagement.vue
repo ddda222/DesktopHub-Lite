@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
+import SystemAppPicker from './SystemAppPicker.vue'
 import { isDesktop } from '@/lib/desktop/desktop'
 import type { HubApp } from '@/lib/desktop/types'
 import { addAppByTarget, addAppFromPicker, deleteApp, iconFor, importShortcuts, reorderVisibleApps,
@@ -35,6 +36,17 @@ const busy = ref(false)
 const feedback = ref('')
 const failed = ref(false)
 const adding = ref(false)
+const showSystemApps = ref(false)
+const systemAppsTrigger = ref<HTMLButtonElement | null>(null)
+watch(adding, open => { if (!open) showSystemApps.value = false })
+function closeSystemApps() {
+  showSystemApps.value = false
+  void nextTick(() => systemAppsTrigger.value?.focus({ preventScroll: true }))
+}
+function systemAppsSaved(added: number, skipped: number) {
+  closeSystemApps()
+  notify(true, `已导入 ${added} 个系统应用${skipped ? `，跳过 ${skipped} 个已添加项` : ''}`)
+}
 const managing = ref(false)
 const linkName = ref('')
 const linkTarget = ref('')
@@ -152,7 +164,7 @@ async function removeApp(id: string): Promise<void> {
   <div ref="root" class="panel app-management">
     <header class="page-heading">
       <div><h3 class="panel-title">应用管理</h3><p class="page-description">按分类整理，快速找到每个应用。</p></div>
-      <button class="btn btn-primary" :aria-expanded="adding" aria-controls="add-app-options" @click="adding = !adding">{{ adding ? '收起添加' : '＋ 添加应用' }}</button>
+      <button class="btn btn-primary" :disabled="busy" :aria-expanded="adding" aria-controls="add-app-options" @click="adding = !adding">{{ adding ? '收起添加' : '＋ 添加应用' }}</button>
     </header>
     <div class="app-tools">
       <label class="field search-field" for="app-search"><span class="field-label">搜索应用</span><span class="search-control"><Icon name="search" :size="16" /><input id="app-search" v-model="query" class="control" type="search" placeholder="名称、目标或分类" /></span></label>
@@ -160,7 +172,10 @@ async function removeApp(id: string): Promise<void> {
     </div>
     <section v-if="adding" id="add-app-options" class="disclosure-body" aria-label="添加应用">
       <p class="hint">添加到「{{ categoryName(filter ?? 'all') }}」<span v-if="!isDesktop"> · 文件选择与桌面导入在桌面版可用</span></p>
-      <div class="actions"><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('file')">选择文件</button><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('folder')">选择文件夹</button><button class="btn" :disabled="busy || !isDesktop" @click="importApps">导入桌面快捷方式</button></div>
+      <div class="actions"><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('file')">选择文件</button><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('folder')">选择文件夹</button><button class="btn" :disabled="busy || !isDesktop" @click="importApps">导入桌面快捷方式</button>
+        <button ref="systemAppsTrigger" class="btn" :aria-expanded="showSystemApps" :aria-controls="showSystemApps ? 'system-app-picker' : undefined" :disabled="busy || !isDesktop" @click="showSystemApps = !showSystemApps">导入系统应用</button>
+      </div>
+      <SystemAppPicker v-if="showSystemApps" :category-id="filter ?? 'all'" @saving="busy = $event" @saved="systemAppsSaved" @close="closeSystemApps" />
       <form class="link-form" @submit.prevent="addLink">
         <label class="field"><span class="field-label">网址</span><input v-model="linkTarget" class="control" type="url" required placeholder="https://example.com" /></label>
         <label class="field"><span class="field-label">显示名称（可选）</span><input v-model="linkName" class="control" /></label>

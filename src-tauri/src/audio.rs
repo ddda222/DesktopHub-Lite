@@ -16,7 +16,16 @@ pub struct Session {
     pub app_key: Option<String>, pub pid: u32, pub volume: f32, pub muted: bool, pub active: bool,
 }
 #[derive(Serialize)]
-pub struct Snapshot { pub sessions: Vec<Session>, pub warnings: Vec<String> }
+pub struct OutputDevice {
+    id: String,
+    name: String,
+}
+#[derive(Serialize)]
+pub struct Snapshot {
+    pub devices: Vec<OutputDevice>,
+    pub sessions: Vec<Session>,
+    pub warnings: Vec<String>,
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Setting { pub app_key: String, pub device_id: String, pub volume: f32, pub muted: bool }
@@ -51,6 +60,36 @@ async fn run<T: Send + 'static>(job: impl FnOnce() -> Result<T, String> + Send +
 pub async fn list_audio_sessions(state: State<'_, AudioState>) -> Result<Snapshot, String> {
     let _guard = state.operations.lock().await;
     run(platform::snapshot).await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MixerItemKind {
+    Device,
+    App,
+}
+
+#[tauri::command]
+pub fn set_mixer_item_visible(
+    app: AppHandle,
+    kind: MixerItemKind,
+    id: String,
+    name: String,
+    visible: bool,
+) -> Result<crate::state::MixerVisibility, String> {
+    let next = crate::update_ui_preferences(&app, |ui| {
+        let hidden = match kind {
+            MixerItemKind::Device => &mut ui.mixer_visibility.devices,
+            MixerItemKind::App => &mut ui.mixer_visibility.apps,
+        };
+        if visible {
+            hidden.remove(&id);
+        } else {
+            hidden.insert(id, name);
+        }
+    })?;
+    crate::broadcast_ui(&app);
+    Ok(next.mixer_visibility)
 }
 #[tauri::command]
 pub async fn update_audio_session(state: State<'_, AudioState>, id: String, volume: Option<f32>, muted: Option<bool>) -> Result<Session, String> {
@@ -101,7 +140,7 @@ pub async fn apply_audio_profile(app: AppHandle, audio: State<'_, AudioState>, n
             }
         }
         // 写入后即使刷新失败，也保留已执行的结果，不能把部分操作描述成未执行。
-        let snapshot = platform::snapshot().unwrap_or_else(|error| Snapshot { sessions: vec![], warnings: vec![format!("操作后刷新失败：{error}")] });
+        let snapshot = platform::snapshot().unwrap_or_else(|error| Snapshot { devices: vec![], sessions: vec![], warnings: vec![format!("操作后刷新失败：{error}")] });
         Ok(ApplyResult { applied, skipped, failed, snapshot })
     }).await
 }
@@ -148,21 +187,28 @@ mod platform {
         format!("播放设备 {}", index + 1)
     }
     struct Entry { info: Session, volume: ISimpleAudioVolume }
-    fn entries() -> Result<(Vec<Entry>, Vec<String>), String> {
+    #[derive(Default)]
+    struct AudioEnumeration {
+        devices: Vec<OutputDevice>,
+        entries: Vec<Entry>,
+        warnings: Vec<String>,
+    }
+    fn enumerate() -> Result<AudioEnumeration, String> {
         unsafe {
             let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|_| "Windows 音频服务不可用")?;
             let devices = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE).map_err(|_| "无法枚举播放设备")?;
             let count = devices.GetCount().map_err(|_| "无法读取播放设备数量")?;
-            let mut entries = Vec::new(); let mut warnings = Vec::new();
+            let mut result = AudioEnumeration::default();
             for index in 0..count {
-                let result = (|| -> windows::core::Result<()> {
+                let device_result = (|| -> windows::core::Result<()> {
                     let device = devices.Item(index)?;
                     let device_id = owned_string(device.GetId()?);
                     let device_name = device_name(&device, index);
+                    result.devices.push(OutputDevice { id: device_id.clone(), name: device_name.clone() });
                     let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)?;
                     let sessions = manager.GetSessionEnumerator()?;
                     for number in 0..sessions.GetCount()? {
-                        let result = (|| -> windows::core::Result<Option<Entry>> {
+                        let session_result = (|| -> windows::core::Result<Option<Entry>> {
                             let control = sessions.GetSession(number)?;
                             let status = control.GetState()?;
                             if status == AudioSessionStateExpired { return Ok(None); }
@@ -181,21 +227,32 @@ mod platform {
                             Ok(Some(Entry { info: Session { id, name, device_id: device_id.clone(), device_name: device_name.clone(), app_key: key, pid,
                                 volume: (volume.GetMasterVolume()? * 100.0).round(), muted: volume.GetMute()?.as_bool(), active: status == AudioSessionStateActive }, volume }))
                         })();
-                        match result { Ok(Some(entry)) => entries.push(entry), Ok(None) => {}, Err(_) => warnings.push(format!("{device_name}：部分会话已退出或无法访问")) }
+                        match session_result {
+                            Ok(Some(entry)) => result.entries.push(entry),
+                            Ok(None) => {},
+                            Err(_) => result.warnings.push(format!("{device_name}：部分会话已退出或无法访问")),
+                        }
                     }
                     Ok(())
                 })();
-                if result.is_err() { warnings.push(format!("播放设备 {} 暂时不可用，请刷新", index + 1)); }
+                if device_result.is_err() { result.warnings.push(format!("播放设备 {} 暂时不可用，请刷新", index + 1)); }
             }
-            if count == 0 { warnings.push("没有可用的播放设备".into()); }
-            warnings.sort(); warnings.dedup();
-            Ok((entries, warnings))
+            if count == 0 { result.warnings.push("没有可用的播放设备".into()); }
+            result.warnings.sort(); result.warnings.dedup();
+            Ok(result)
         }
     }
-    pub fn snapshot() -> Result<Snapshot, String> { let (entries, warnings) = entries()?; Ok(Snapshot { sessions: entries.into_iter().map(|e| e.info).collect(), warnings }) }
+    pub fn snapshot() -> Result<Snapshot, String> {
+        let result = enumerate()?;
+        Ok(Snapshot {
+            devices: result.devices,
+            sessions: result.entries.into_iter().map(|e| e.info).collect(),
+            warnings: result.warnings,
+        })
+    }
     pub fn update(id: &str, volume: Option<f32>, muted: Option<bool>) -> Result<Session, String> {
-        let (entries, _) = entries()?;
-        let mut entry = entries.into_iter().find(|e| e.info.id == id).ok_or("会话已退出或设备已变化，请刷新")?;
+        let entry = enumerate()?.entries.into_iter().find(|e| e.info.id == id);
+        let mut entry = entry.ok_or("会话已退出或设备已变化，请刷新")?;
         unsafe {
             if let Some(value) = volume { entry.volume.SetMasterVolume(value / 100.0, std::ptr::null()).map_err(|_| "音量设置失败，请刷新实际状态")?; }
             if let Some(value) = muted { entry.volume.SetMute(value, std::ptr::null()).map_err(|_| "静音设置失败；音量可能已更新，请刷新")?; }

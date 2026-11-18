@@ -4,6 +4,10 @@ import Icon from '@/components/Icon.vue'
 import GlassLight from '@/components/GlassLight.vue'
 import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
 import IslandParticles from './motion/IslandParticles.vue'
+import ApprovalPrompt from './ApprovalPrompt.vue'
+import MailNotices from '@/features/mail/MailNotices.vue'
+import { providerName, useMailList, type MailNotice } from '@/features/mail/mail'
+import { useApprovals } from './useApprovals'
 import { useIslandEffects, type IslandCue } from './motion/useIslandEffects'
 import {
   buildTelemetryReadout,
@@ -65,9 +69,26 @@ const glassPalette = computed<'cool' | 'amber' | 'vermilion' | 'lime'>(() => {
 })
 const scanSeq = ref(0)
 const hostExpanded = computed(() => state.ui.islandExpanded)
+const mailNotices = useMailList<MailNotice>('bar', 'mail_notices', 'mail-notices-changed', message => pushToast(message, 'error'))
+const mailSelected = ref(false)
+const viewingMail = computed(() => mailSelected.value && mailNotices.value.length > 0)
+const seenMail = ref<string[]>([])
+const newMail = computed(() => mailNotices.value.filter(item => !seenMail.value.includes(item.id)))
+const mailSummary = computed(() => {
+  const [first] = newMail.value
+  if (!first) return ''
+  if (newMail.value.length > 1) return `${newMail.value.length} 封新邮件`
+  return `${providerName[first.provider]} · ${first.code ? '验证码' : '新邮件'}`
+})
+const { current: approval, count: approvalCount, busy: answering, answer: answerApproval } =
+  useApprovals(message => pushToast(message, 'error'))
 const suppressed = computed(() => state.ui.fullscreenSuppressed)
 const hoverClosing = ref(false)
-const expanded = computed(() => hostExpanded.value && !hoverClosing.value)
+const expanded = computed(() => !!approval.value || (hostExpanded.value && !hoverClosing.value))
+watch([mailNotices, viewingMail, expanded, approval], ([items, selected, open, prompt]) => {
+  const ids = items.map(item => item.id)
+  seenMail.value = selected && open && !prompt ? ids : seenMail.value.filter(id => ids.includes(id))
+})
 // 避让只决定收起形态；细线也能悬停展开。
 const tucked = computed(() => suppressed.value && !expanded.value)
 const expandMs = 340
@@ -116,11 +137,13 @@ const telemetryReadout = computed(() =>
   telemetryActive.value ? buildTelemetryReadout(telemetrySample.value, telemetryPrefs.value) : null
 )
 const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: string; icon: IconName | null; kind: string }>(() => {
+  if (approval.value) return { text: approval.value.kind === 'approval' ? '待审批' : '有提问', ariaText: approval.value.title, icon: 'info', kind: 'approval' }
   if (receivingFiles.value) return { text: '松开暂存', icon: 'folder', kind: 'working' }
   if (shelf.busy) return { text: shelf.activity || '文件处理中', icon: 'folder', kind: 'working' }
   const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
   if (pending) return { text: pending > 1 ? `翻译中 · ${pending}` : '翻译中', icon: 'translate', kind: 'working' }
   if (feedbackText.value) return { text: feedbackText.value, icon: feedbackText.value === '翻译失败' ? 'info' : 'check', kind: 'feedback' }
+  if (mailSummary.value) return { text: mailSummary.value, icon: 'mail', kind: 'mail' }
   if (state.ui.paused) return { text: '记录已暂停', icon: 'pause', kind: 'paused' }
   if (telemetryReadout.value) {
     return {
@@ -154,6 +177,16 @@ const chromeHeight = ref(56)
 const availableWidth = ref(window.screen.availWidth)
 const revealed = computed(() => !tucked.value)
 const page = computed(() => state.ui.islandPage)
+const readingExplanation = ref(false)
+let readingSync = Promise.resolve()
+function setReadingExplanation(active: boolean) {
+  if (readingExplanation.value === active) return
+  readingExplanation.value = active
+  if (isDesktop) readingSync = readingSync.then(() => invokeHost<void>('set_island_reading_explanation', { active }))
+    .catch(() => pushToast('无法同步灵动岛的展开状态', 'error'))
+}
+const keepTaskOpen = computed(() => !viewingMail.value &&
+  (page.value === 'translation' || (page.value === 'clipboard' && readingExplanation.value)))
 const appearance = computed(() => state.ui.islandAppearance)
 const materialAllowed = computed(() => materialRequested.value && !motionReduced.value && !plainMaterial.value)
 const materialReady = ref(false)
@@ -190,7 +223,7 @@ const visibleWidth = computed(() => {
 const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, scroll: 9, pixel: 9 }
 const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, scroll: 34, pixel: 36 }
 const visibleHeight = computed(() => expanded.value
-  ? Math.min(44 + chromeHeight.value + (page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value), window.screen.availHeight - 60)
+  ? Math.min(44 + (approval.value ? 0 : chromeHeight.value) + (!approval.value && !viewingMail.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value), window.screen.availHeight - 60)
   : (suppressed.value ? lineHeights[variant.value] : compactHeights[variant.value]) * scale.value)
 const cornerRadius = computed(() => {
   if (variant.value === 'mecha' || variant.value === 'scroll' || variant.value === 'pixel') return 4
@@ -326,8 +359,23 @@ function cancelHoverClose(): void {
   hoverClosing.value = false
 }
 
+watch(keepTaskOpen, keep => {
+  if (keep) {
+    clearTimeout(leaveTimer)
+    if (!closeCommitted) cancelHoverClose()
+  } else if (hostExpanded.value && !hovering.value) leave()
+}, { flush: 'sync' })
+
+watch(() => approval.value?.id, id => {
+  if (!id) return
+  cancelHover()
+  clearTimeout(leaveTimer)
+  cancelHoverClose()
+})
+
 function expand(value: boolean, focus = false): void {
   if (value) {
+    if (!hostExpanded.value) mailSelected.value = newMail.value.length > 0
     closeCommitted = false
     reenterAfterClose = false
     cancelHoverClose()
@@ -353,11 +401,12 @@ function expand(value: boolean, focus = false): void {
 
 function activateCapsule(event: MouseEvent): void {
   if (windowDrag.consumeClick(event)) return
+  if (approval.value) return
   expand(!expanded.value, true)
 }
 
 function startHoverClose(): void {
-  if (!hostExpanded.value || hoverClosing.value) return
+  if (!hostExpanded.value || hoverClosing.value || editing()) return
   if (state.ui.islandReducedMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     expand(false)
     return
@@ -384,6 +433,7 @@ function enter(): void {
   availableWidth.value = window.screen.availWidth
   cancelHover()
   clearTimeout(leaveTimer)
+  if (approval.value) return
   if (closeCommitted) {
     // 提交关闭后已经无法撤回，请等宿主确认再按正常悬停处理。
     reenterAfterClose = true
@@ -394,6 +444,7 @@ function enter(): void {
 }
 
 function editing(): boolean {
+  if (approval.value || keepTaskOpen.value) return true
   if (!isDesktop && props.previewKeepOpen) return true
   const active = document.activeElement
   return composing.value || pressed.value || receivingFiles.value || shelf.busy || !!shelf.previewItem ||
@@ -432,6 +483,7 @@ watch(hostExpanded, value => {
   reenterAfterClose = false
   cancelHoverClose()
   if (!value) {
+    mailSelected.value = false
     cancelHover()
     clearTimeout(leaveTimer)
     composing.value = false
@@ -441,6 +493,7 @@ watch(hostExpanded, value => {
 })
 
 watch(page, () => {
+  mailSelected.value = false
   if (!closeCommitted) cancelHoverClose()
 })
 watch(() => props.previewKeepOpen, value => { if (!value && !hovering.value) leave() })
@@ -466,6 +519,7 @@ watch(suppressed, () => {
 })
 
 async function selectPage(value: typeof page.value): Promise<void> {
+  mailSelected.value = false
   if (!isDesktop) {
     state.ui.islandPage = value
     state.ui.panel = value === 'applications' ? null : value
@@ -495,6 +549,7 @@ async function launch(id: string): Promise<void> {
 }
 
 function keydown(event: KeyboardEvent): void {
+  if (approval.value) return
   if (event.isComposing || event.keyCode === 229) return
   if (event.key === 'Escape') { event.stopPropagation(); expand(false) }
 }
@@ -585,10 +640,11 @@ onMounted(() => {
     .catch(() => { shelf.error = '暂时无法同步中转文件状态' })
   if (isDesktop) {
     void getCurrentWebview().onDragDropEvent(async ({ payload }) => {
-      if (shelf.busy) return
+      if (shelf.busy || approval.value) return
       if (payload.type === 'enter' || payload.type === 'over') {
         if (receivingFiles.value) return
         receivingFiles.value = true
+        mailSelected.value = false
         cancelHover(); clearTimeout(leaveTimer); cancelHoverClose()
         try { await invokeHost('select_island_page', { page: 'files', focus: false }) }
         catch (error) { receivingFiles.value = false; pushToast(String(error), 'error') }
@@ -667,7 +723,7 @@ onBeforeUnmount(() => {
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
       <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
         :title="!expanded && capsuleStatus.tooltip ? capsuleStatus.tooltip : undefined"
-        :aria-label="`${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
+        :aria-label="approval ? approval.title : `${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
         :inert="!revealed" aria-description="按住拖动位置，单击展开或收起"
         @pointerdown.stop="windowDrag.begin" @click="activateCapsule">
         <span class="capsule-text" :class="{ feedback: isNoticeStatus }" aria-hidden="true">
@@ -693,19 +749,20 @@ onBeforeUnmount(() => {
         <span class="grip" aria-hidden="true" />
       </button>
       <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && isNoticeStatus ? capsuleStatus.text : '' }}</span>
-      <div class="expanded-content" :class="{ 'fixed-search': page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
-        <div ref="chrome" class="island-chrome">
+      <div class="expanded-content" :class="{ 'fixed-search': !approval && !viewingMail && page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
+        <div ref="chrome" v-show="!approval" class="island-chrome">
           <header class="toolbar">
             <nav ref="modeNav" class="mode-nav" aria-label="灵动岛功能">
-              <span class="mode-selection" aria-hidden="true" />
+              <span v-show="!viewingMail" class="mode-selection" aria-hidden="true" />
               <button v-for="section in sections" :key="section.value" type="button"
-                :title="section.label" :aria-label="section.label" :aria-pressed="page === section.value"
-                :class="{ selected: page === section.value }" @click="selectPage(section.value)">
+                :title="section.label" :aria-label="section.label" :aria-pressed="!viewingMail && page === section.value"
+                :class="{ selected: !viewingMail && page === section.value }" @click="selectPage(section.value)">
                 <Icon :name="section.icon" :size="22" :stroke="1.65" />
               </button>
             </nav>
             <div class="tools">
-              <button v-if="page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="19" /></button>
+              <button v-if="mailNotices.length" class="round-action" type="button" :title="mailSummary || '最近邮件'" :aria-label="mailSummary || '最近邮件'" :aria-pressed="viewingMail" @click="mailSelected = !viewingMail"><Icon name="mail" :size="19" /></button>
+              <button v-if="!viewingMail && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="19" /></button>
               <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="21" /></button>
               <button class="round-action collapse-action" type="button" title="收起" aria-label="收起灵动岛" @click="expand(false)"><Icon name="chevron-down" :size="20" /></button>
             </div>
@@ -717,6 +774,9 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div ref="content" class="island-content">
+          <ApprovalPrompt v-if="approval" :key="approval.id" :card="approval" :count="approvalCount" :busy="answering" @answer="answerApproval" />
+          <MailNotices v-if="!approval && viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
+          <div v-show="!approval && !viewingMail" class="ordinary-pane">
           <Transition name="island-pane" mode="out-in" @enter="measureContent" @after-enter="measureContent">
             <div v-if="page === 'applications'" :key="'applications'" class="applications">
               <nav class="categories" aria-label="应用分类">
@@ -733,12 +793,13 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-else :key="page" class="feature-pane scroll-y">
-              <ClipboardPopover v-if="page === 'clipboard'" />
+              <ClipboardPopover v-if="page === 'clipboard'" @reading-explanation="setReadingExplanation" />
               <TranslationPanel v-else-if="page === 'translation'" />
               <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
               <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
             </div>
           </Transition>
+          </div>
         </div>
       </div>
     </div>
@@ -832,6 +893,7 @@ onBeforeUnmount(() => {
 .moving .expanded-content { overflow-y: hidden; }
 .island-chrome { display: flow-root; }
 .island-content { width: 100%; }
+.ordinary-pane { display: contents; }
 .island-pane-enter-active { transition: opacity 150ms cubic-bezier(.2, .9, .25, 1), transform 160ms cubic-bezier(.2, .9, .25, 1); }
 .island-pane-leave-active { transition: opacity 85ms ease-out, transform 85ms ease-out; }
 .island-pane-enter-from { opacity: 0; transform: translateY(5px); }
@@ -1225,7 +1287,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 }
 .variant-pixel .feature-pane :deep(.row.is-active *) { color: #0f0d1a; }
 
-.reduced *, .reduced *::before, .reduced *::after { transition: none !important; animation:none !important; }
+.reduced :deep(*), .reduced :deep(*::before), .reduced :deep(*::after) { transition: none !important; animation: none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation:none !important; } }
 @media (prefers-contrast: more) {
   .mode-selection, .categories .selected { box-shadow: inset 0 0 0 2px var(--accent); }

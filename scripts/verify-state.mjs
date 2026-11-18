@@ -124,4 +124,128 @@ await test('胶囊微读数按勾选指标数量格式化单行文案且诚实�
   const unavailable=api.buildTelemetryReadout({netState:'unavailable',downBps:null,upBps:null,cpuPercent:null,memoryPercent:null},{telemetryMode:'always',telemetryNet:true,telemetryCpu:false,telemetryMemory:false})
   assert.equal(unavailable.text,'网速 未知')
 })
+await test('普通设置入口打开通用，应用管理入口打开指定页', () => {
+  const requested = []
+  const api = subject(['openSettings'], { state: { ui: {} }, requestSettings: section => requested.push(section) })
+  api.openSettings()
+  api.openSettings('apps')
+  assert.deepEqual(requested, ['general', 'apps'])
+})
+await test('切换标签后，重复的宿主状态不会把用户带回默认页', () => {
+  const state = { ui: {}, settings: {} }
+  const api = subject(['applyUiState'], { state }, 'let lastSettingsRequest = 0')
+  const first = { settingsOpen: true, settingsRequest: [1, 'general'] }
+  api.applyUiState(first)
+  assert.equal(state.ui.settingsSection, 'general')
+  state.ui.settingsSection = 'approvals'
+  api.applyUiState(first)
+  assert.equal(state.ui.settingsSection, 'approvals')
+  api.applyUiState({ settingsOpen: true, settingsRequest: [2, 'apps'] })
+  assert.equal(state.ui.settingsSection, 'apps')
+})
+await test('恢复灵动岛默认值只更新草稿，点应用后才提交', async () => {
+  const component = fs.readFileSync(new URL('../src/features/settings/DesktopFeatures.vue', import.meta.url), 'utf8')
+  const script = component.split('<script setup lang="ts">')[1].split('</script>')[0]
+  const field = value => ({ value })
+  const calls = []
+  const inputs = {
+    appearance: field({ scale: 120 }), anchor: field('left'), hoverMs: field(800),
+    leaveMs: field(900), reducedMotion: field(true), saving: field(false),
+    validSettings: field(true), applied: field(''), failed: field(false), feedback: field(''),
+    signature: () => 'defaults', defaultIslandAppearance: () => ({ scale: 100 }),
+    invokeHost: async (command, args) => { calls.push({ command, args }) },
+  }
+  const api = subject(['restore', 'save'], inputs, '', script)
+  api.restore()
+  assert.equal(inputs.appearance.value.scale, 100)
+  assert.equal(calls.length, 0)
+  await api.save()
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].command, 'save_island_appearance')
+  assert.equal(calls[0].args.appearance.scale, 100)
+  assert.equal(calls[0].args.anchor, 'center')
+})
+const explanationSource = fs.readFileSync(new URL('../src/features/clipboard/error-explanation.ts', import.meta.url), 'utf8')
+function explanationUi(invokeHost, isDesktop = true) {
+  const api = subject(['useErrorExplanation'], { ref: require('vue').ref, invokeHost, isDesktop }, '', explanationSource)
+  return api.useErrorExplanation()
+}
+await test('解释入口只打开所点的文字记录，图片和空文本不发起解释', () => {
+  const calls = []
+  const popover = fs.readFileSync(new URL('../src/features/clipboard/ClipboardPopover.vue', import.meta.url), 'utf8')
+  const source = popover.split('<script setup lang="ts">')[1].split('</script>')[0]
+  const api = subject(['explainClip'], {
+    openDetail: id => calls.push(['detail', id]),
+    explainError: id => calls.push(['explain', id]),
+    nextTick: fn => fn(), explanationHeading: { value: null },
+  }, '', source)
+  api.explainClip({ id: 'image', kind: 'image' })
+  api.explainClip({ id: 'blank', kind: 'text', text: '   ' })
+  assert.deepEqual(calls, [])
+  api.explainClip({ id: 'selected', kind: 'text', text: 'TypeError', note: '私人备注' })
+  assert.deepEqual(calls, [['detail', 'selected'], ['explain', 'selected']])
+})
+await test('只在点击解释时提交选中记录，连点不会重复发送', async () => {
+  const calls = [], reply = deferred()
+  const ui = explanationUi((command, args) => { calls.push({ command, args }); return reply.promise })
+  assert.equal(calls.length, 0)
+  const pending = ui.start('selected')
+  await ui.start('selected')
+  await ui.submit()
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].command, 'explain_clipboard_error')
+  assert.deepEqual({ ...calls[0].args }, { id: 'selected', followUp: null })
+  reply.resolve('第 12 行在读取空值')
+  await pending
+  assert.equal(ui.explanation.value.result, '第 12 行在读取空值')
+})
+await test('追问携带本条解释，失败后保留问题并允许重试', async () => {
+  const calls = []
+  const ui = explanationUi(async (_command, args) => {
+    calls.push(args)
+    if (calls.length === 2) throw new Error('请求超时')
+    return calls.length === 1 ? '变量为空' : '先检查初始化步骤'
+  })
+  await ui.start('one')
+  await ui.submit()
+  assert.equal(calls.length, 1)
+  ui.explanation.value.draft = ' 哪一步？ '
+  await ui.submit()
+  assert.match(ui.explanation.value.error, /请求超时/)
+  assert.equal(ui.explanation.value.result, '变量为空')
+  await ui.submit()
+  assert.equal(calls[2].id, 'one')
+  assert.deepEqual({ ...calls[2].followUp }, { explanation: '变量为空', question: '哪一步？' })
+  assert.equal(ui.explanation.value.question, '哪一步？')
+  assert.equal(ui.explanation.value.answer, '先检查初始化步骤')
+  await ui.submit()
+  assert.equal(calls.length, 3)
+})
+await test('退出解释并切换记录后，迟到的回复不会出现在新记录上', async () => {
+  const first = deferred(), second = deferred()
+  const ui = explanationUi((_command, args) => args.id === 'old' ? first.promise : second.promise)
+  const oldRequest = ui.start('old')
+  ui.close()
+  const newRequest = ui.start('new')
+  first.resolve('旧解释')
+  await oldRequest
+  assert.equal(ui.explanation.value.id, 'new')
+  assert.equal(ui.explanation.value.result, '')
+  assert.equal(ui.explanation.value.busy, true)
+  second.resolve('新解释')
+  await newRequest
+  assert.equal(ui.explanation.value.result, '新解释')
+})
+await test('首次解释失败可重试，网页预览不会调用模型', async () => {
+  let calls = 0
+  const service = async () => { if (++calls === 1) throw new Error('请先配置模型'); return '解释成功' }
+  const preview = explanationUi(service, false)
+  await preview.start('one')
+  assert.equal(calls, 0)
+  const ui = explanationUi(service)
+  await ui.start('one')
+  assert.match(ui.explanation.value.error, /请先配置模型/)
+  await ui.submit()
+  assert.equal(ui.explanation.value.result, '解释成功')
+})
 if(failed)process.exitCode=1
