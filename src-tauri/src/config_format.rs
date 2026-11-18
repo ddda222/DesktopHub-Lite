@@ -17,6 +17,13 @@ impl PendingConfiguration {
         Ok(())
     }
 }
+fn default_telemetry_mode() -> String {
+    "smart".into()
+}
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct PortablePreferences {
@@ -29,10 +36,32 @@ pub struct PortablePreferences {
     pub island_reduced_motion: bool,
     pub scale: u32,
     pub webgl: bool,
+    #[serde(default = "default_telemetry_mode")]
+    pub telemetry_mode: String,
+    #[serde(default = "default_true")]
+    pub telemetry_net: bool,
+    #[serde(default = "default_true")]
+    pub telemetry_cpu: bool,
+    #[serde(default = "default_true")]
+    pub telemetry_memory: bool,
 }
 impl PortablePreferences {
     pub fn capture(ui: &UiState) -> Self {
-        Self { theme: ui.theme.clone(), active_category_id: ui.active_category_id.clone(), island_anchor: ui.island_anchor.clone(), island_page: if crate::state::valid_island_page(&ui.island_page) { ui.island_page.clone() } else { crate::state::PANEL_APPLICATIONS.into() }, island_hover_ms: ui.island_hover_ms, island_leave_ms: ui.island_leave_ms, island_reduced_motion: ui.island_reduced_motion, scale: ui.island_appearance.scale, webgl: ui.island_appearance.webgl }
+        Self {
+            theme: ui.theme.clone(),
+            active_category_id: ui.active_category_id.clone(),
+            island_anchor: ui.island_anchor.clone(),
+            island_page: if crate::state::valid_island_page(&ui.island_page) { ui.island_page.clone() } else { crate::state::PANEL_APPLICATIONS.into() },
+            island_hover_ms: ui.island_hover_ms,
+            island_leave_ms: ui.island_leave_ms,
+            island_reduced_motion: ui.island_reduced_motion,
+            scale: ui.island_appearance.scale,
+            webgl: ui.island_appearance.webgl,
+            telemetry_mode: ui.island_appearance.telemetry_mode.clone(),
+            telemetry_net: ui.island_appearance.telemetry_net,
+            telemetry_cpu: ui.island_appearance.telemetry_cpu,
+            telemetry_memory: ui.island_appearance.telemetry_memory,
+        }
     }
     pub fn apply(&self, ui: &mut UiState) {
         ui.theme = self.theme.clone(); ui.active_category_id = self.active_category_id.clone();
@@ -40,6 +69,10 @@ impl PortablePreferences {
         ui.island_hover_ms = self.island_hover_ms; ui.island_leave_ms = self.island_leave_ms;
         ui.island_reduced_motion = self.island_reduced_motion;
         ui.island_appearance.scale = self.scale; ui.island_appearance.webgl = self.webgl;
+        ui.island_appearance.telemetry_mode = self.telemetry_mode.clone();
+        ui.island_appearance.telemetry_net = self.telemetry_net;
+        ui.island_appearance.telemetry_cpu = self.telemetry_cpu;
+        ui.island_appearance.telemetry_memory = self.telemetry_memory;
         if ui.island_expanded { ui.panel = if self.island_page == "applications" { None } else { Some(self.island_page.clone()) }; }
     }
 }
@@ -111,7 +144,18 @@ pub fn validate(backup: &ConfigurationBackup) -> Result<(), String> {
         if !matches!(app.color.len(), 4 | 7 | 9) || !app.color.starts_with('#') || !app.color[1..].chars().all(|c| c.is_ascii_hexdigit()) { return Err(format!("应用颜色无效：{}", app.name)); }
     }
     let p = &backup.preferences;
-    if !crate::state::valid_theme(&p.theme) || !matches!(p.island_anchor.as_str(), "left" | "center" | "right") || !crate::state::valid_island_page(&p.island_page) || !(75..=125).contains(&p.scale) || !(100..=2000).contains(&p.island_hover_ms) || !(100..=4000).contains(&p.island_leave_ms) || !categories.contains(p.active_category_id.as_str()) { return Err("显示偏好包含无效主题、页面、分类、比例或延时".into()); }
+    if !crate::state::valid_theme(&p.theme)
+        || !matches!(p.island_anchor.as_str(), "left" | "center" | "right")
+        || !crate::state::valid_island_page(&p.island_page)
+        || !(75..=125).contains(&p.scale)
+        || !(100..=2000).contains(&p.island_hover_ms)
+        || !(100..=4000).contains(&p.island_leave_ms)
+        || !categories.contains(p.active_category_id.as_str())
+        || !crate::desktop_features::IslandAppearance::valid_telemetry_mode(&p.telemetry_mode)
+        || (p.telemetry_mode != "off" && !p.telemetry_net && !p.telemetry_cpu && !p.telemetry_memory)
+    {
+        return Err("显示偏好包含无效主题、页面、分类、比例、延时或胶囊微读数设置".into());
+    }
     Ok(())
 }
 
@@ -146,7 +190,7 @@ pub fn describe(before: &ConfigurationBackup, after: &ConfigurationBackup) -> Ch
     let categories=counts(&before.applications.categories,&after.applications.categories,|v| &v.id);
     let mut preferences=Vec::new();
     let a=serde_json::to_value(&before.preferences).unwrap_or_default();let b=serde_json::to_value(&after.preferences).unwrap_or_default();
-    for (key,label) in [("theme","显示主题"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效")] {
+    for (key,label) in [("theme","显示主题"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryMemory","微读数·内存")] {
         if a[key]!=b[key] { preferences.push(PreferenceChange{label:label.into(),before:a[key].as_str().map(str::to_owned).unwrap_or_else(||a[key].to_string()),after:b[key].as_str().map(str::to_owned).unwrap_or_else(||b[key].to_string())}); }
     }
     let mut app_details=Vec::new();
@@ -244,5 +288,33 @@ mod tests {
         let mut backup=sample();let original=backup.applications.apps[0].target.clone();
         let warnings=mark_targets(&mut backup,|_|false);assert_eq!(warnings.len(),1);assert_eq!(backup.applications.apps[0].target,original);assert_eq!(backup.applications.apps[0].broken,Some(true));
         backup.applications.apps[0].target="\\\\server\\share\\example.exe".into();mark_targets(&mut backup,|_|panic!("network path must not be probed"));
+    }
+    #[test] fn legacy_backups_without_telemetry_fields_default_cleanly_and_invalid_combinations_fail() {
+        let mut value=serde_json::to_value(sample()).unwrap();
+        let prefs=value["preferences"].as_object_mut().unwrap();
+        prefs.remove("telemetryMode");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryMemory");
+        let restored=parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(restored.preferences.telemetry_mode,"smart");
+        assert!(restored.preferences.telemetry_net && restored.preferences.telemetry_cpu && restored.preferences.telemetry_memory);
+
+        let mut custom=sample();
+        custom.preferences.telemetry_mode="always".into();
+        custom.preferences.telemetry_net=true;
+        custom.preferences.telemetry_cpu=false;
+        custom.preferences.telemetry_memory=false;
+        let round=parse(&bytes(&custom)).unwrap();
+        assert_eq!(round.preferences.telemetry_mode,"always");
+        assert!(round.preferences.telemetry_net && !round.preferences.telemetry_cpu && !round.preferences.telemetry_memory);
+
+        let mut empty_metrics=custom.clone();
+        empty_metrics.preferences.telemetry_net=false;
+        assert!(parse(&bytes(&empty_metrics)).is_err());
+
+        empty_metrics.preferences.telemetry_mode="off".into();
+        assert!(parse(&bytes(&empty_metrics)).is_ok());
+
+        let mut bad_mode=sample();
+        bad_mode.preferences.telemetry_mode="floating".into();
+        assert!(parse(&bytes(&bad_mode)).is_err());
     }
 }

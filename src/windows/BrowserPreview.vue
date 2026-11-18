@@ -3,6 +3,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import IslandEntry from '@/features/island/IslandEntry.vue'
+import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
 import SettingsWindow from '@/features/settings/SettingsWindow.vue'
 import ImagePreviewWindow from './ImagePreviewWindow.vue'
 import { browserImagePreview } from '@/mock/image-preview'
@@ -17,6 +18,7 @@ const settingsStandalone = previewMode === 'settings-window'
 const scene = ref('normal')
 const keepOpen = ref(false)
 const feedback = ref({ kind: '', sequence: 0 })
+const telemetryDemoSample = ref<TelemetrySnapshot | null>(null)
 const demoNote = ref('先试任务胶囊，再载入文件体验预览与撤销。')
 const imageDialog = ref<HTMLDialogElement | null>(null)
 const imageDemoHeader = ref<HTMLElement | null>(null)
@@ -53,10 +55,12 @@ function clearTask(): void {
   state.ui.paused = false
   state.settings.recordClipboard = true
   shelf.busy = false; shelf.activity = ''
+  telemetryDemoSample.value = null
   feedback.value = { kind: '', sequence: feedback.value.sequence + 1 }
 }
 async function capsuleDemo(kind: string): Promise<void> {
   const wasPaused = state.ui.paused
+  const wasTelemetry = telemetryDemoSample.value !== null
   clearTask(); closeShelfPreview(); closeSettings()
   keepOpen.value = false; scene.value = 'normal'
   await nextTick()
@@ -68,6 +72,13 @@ async function capsuleDemo(kind: string): Promise<void> {
     state.ui.paused = !wasPaused
     state.settings.recordClipboard = wasPaused
     demoNote.value = state.ui.paused ? '模拟暂停记录；再次点击可恢复。' : '已恢复演示记录状态。'
+  } else if (kind === 'telemetry') {
+    if (!wasTelemetry) {
+      telemetryDemoSample.value = { netState: 'ready', downBps: 12_980_000, upBps: 368_000, cpuPercent: 42, memoryPercent: 68 }
+      demoNote.value = '正在演示合成微读数样本（非真实系统数据）；再次点击或点结束任务可关闭。'
+    } else {
+      demoNote.value = '已关闭合成微读数演示，胶囊恢复时间显示。'
+    }
   } else if (kind) {
     feedback.value = { kind, sequence: feedback.value.sequence + 1 }
     demoNote.value = '结果提示保持约 2.6 秒，随后恢复暂存数量或时间。'
@@ -135,11 +146,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
     </header>
     <div class="preview-workbench">
     <main class="preview-stage">
-      <IslandEntry :preview-feedback="feedback" :preview-keep-open="keepOpen" />
+      <IslandEntry :preview-feedback="feedback" :preview-keep-open="keepOpen" :preview-telemetry="telemetryDemoSample" />
     </main>
     <aside class="preview-lab" aria-label="效果测试">
       <header><div><span class="lab-eyebrow">交互演示</span><h1>点一下，看效果</h1></div><button type="button" class="reset-demo" @click="resetDemo">重置演示</button></header>
       <fieldset><legend>任务胶囊</legend><div class="demo-buttons">
+        <button type="button" :aria-pressed="telemetryDemoSample !== null" @click="capsuleDemo('telemetry')">模拟微读数</button>
         <button type="button" :aria-pressed="state.ui.translationPending > 0" @click="capsuleDemo('working')">翻译中</button>
         <button type="button" @click="capsuleDemo('translated')">翻译完成</button>
         <button type="button" @click="capsuleDemo('translation-error')">翻译失败</button>

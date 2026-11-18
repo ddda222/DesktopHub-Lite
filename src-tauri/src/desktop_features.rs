@@ -24,6 +24,10 @@ pub struct IslandAppearance {
     pub auto_check_updates: bool,
     pub webgl: bool,
     pub hide_from_capture: bool,
+    pub telemetry_mode: String,
+    pub telemetry_net: bool,
+    pub telemetry_cpu: bool,
+    pub telemetry_memory: bool,
 }
 impl Default for IslandAppearance {
     fn default() -> Self {
@@ -36,6 +40,10 @@ impl Default for IslandAppearance {
             auto_check_updates: false,
             webgl: true,
             hide_from_capture: false,
+            telemetry_mode: "smart".into(),
+            telemetry_net: true,
+            telemetry_cpu: true,
+            telemetry_memory: true,
         }
     }
 }
@@ -46,6 +54,25 @@ impl IslandAppearance {
         self.preset = "classic".into();
         self.opacity = 100;
         self.tint.clear();
+        self
+    }
+
+    pub fn valid_telemetry_mode(mode: &str) -> bool {
+        matches!(mode, "off" | "smart" | "always")
+    }
+
+    pub fn has_any_telemetry_metric(&self) -> bool {
+        self.telemetry_net || self.telemetry_cpu || self.telemetry_memory
+    }
+
+    pub fn normalized_on_load(mut self) -> Self {
+        self = self.solid();
+        if !Self::valid_telemetry_mode(&self.telemetry_mode) {
+            self.telemetry_mode = "smart".into();
+        }
+        if self.telemetry_mode != "off" && !self.has_any_telemetry_metric() {
+            self.telemetry_mode = "off".into();
+        }
         self
     }
 }
@@ -67,6 +94,12 @@ pub fn save_island_appearance(
         || !matches!(anchor.as_str(), "left" | "center" | "right")
     {
         return Err("无效的外观参数".into());
+    }
+    if !IslandAppearance::valid_telemetry_mode(&appearance.telemetry_mode) {
+        return Err("无效的胶囊微读数模式".into());
+    }
+    if appearance.telemetry_mode != "off" && !appearance.has_any_telemetry_metric() {
+        return Err("开启胶囊微读数时，请至少勾选一项系统指标".into());
     }
     let state = app.state::<AppState>();
     let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;

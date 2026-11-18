@@ -87,4 +87,41 @@ await test('常用短语前端预览单趟替换变量且保留未知语法',()=
   const fixed=new Date(2026,10,18,14,5,9)
   assert.equal(api.renderSnippetPreview('[{{date}} {{time}}] {{clipboard}} {{ user.id }}','含 {{date}} 原文',fixed),'[2026-11-18 14:05:09] 含 {{date}} 原文 {{ user.id }}')
 })
+const telemetrySource=fs.readFileSync(new URL('../src/features/island/telemetryReadout.ts',import.meta.url),'utf8')
+await test('胶囊微读数智能浮现具备进入与回落回差及 3 秒最短保持期',()=> {
+  const mod=ts.transpileModule(telemetrySource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
+  const ctx={exports:{}};vm.runInNewContext(mod,ctx);const api=ctx.exports
+  const prefs={telemetryMode:'smart',telemetryNet:true,telemetryCpu:true,telemetryMemory:true}
+  // 闲置低水位不唤醒
+  let step=api.stepSmartTelemetry({netState:'ready',downBps:8192,upBps:2048,cpuPercent:12,memoryPercent:55},prefs,0)
+  assert.deepEqual({...step},{active:false,nextHold:0})
+  // 下载达到 120 KB/s（>=64 KB/s）立即唤醒并置 3 秒保持
+  step=api.stepSmartTelemetry({netState:'ready',downBps:120*1024,upBps:1024,cpuPercent:10,memoryPercent:55},prefs,step.nextHold)
+  assert.deepEqual({...step},{active:true,nextHold:3})
+  // 回落到 45 KB/s（处于 32~64 KB/s 回差区间）继续稳定保持，不减计数
+  step=api.stepSmartTelemetry({netState:'ready',downBps:45*1024,upBps:1024,cpuPercent:10,memoryPercent:55},prefs,step.nextHold)
+  assert.deepEqual({...step},{active:true,nextHold:3})
+  // 完全跌回 0 B/s 后保持 2 拍可见，第 3 拍才平滑收回，不每秒闪烁
+  const calm={netState:'ready',downBps:0,upBps:0,cpuPercent:8,memoryPercent:55}
+  step=api.stepSmartTelemetry(calm,prefs,step.nextHold);assert.deepEqual({...step},{active:true,nextHold:2})
+  step=api.stepSmartTelemetry(calm,prefs,step.nextHold);assert.deepEqual({...step},{active:true,nextHold:1})
+  step=api.stepSmartTelemetry(calm,prefs,step.nextHold);assert.deepEqual({...step},{active:false,nextHold:0})
+  // 常驻模式即使 0 流量也保持可见，关闭模式始终隐藏
+  assert.equal(api.stepSmartTelemetry(calm,{...prefs,telemetryMode:'always'},0).active,true)
+  assert.equal(api.stepSmartTelemetry(calm,{...prefs,telemetryMode:'off'},3).active,false)
+})
+await test('胶囊微读数按勾选指标数量格式化单行文案且诚实反馈未知状态',()=> {
+  const mod=ts.transpileModule(telemetrySource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
+  const ctx={exports:{}};vm.runInNewContext(mod,ctx);const api=ctx.exports
+  const full=api.buildTelemetryReadout({netState:'ready',downBps:12.4*1024*1024,upBps:200*1024,cpuPercent:42,memoryPercent:68},{telemetryMode:'smart',telemetryNet:true,telemetryCpu:true,telemetryMemory:true})
+  assert.equal(full.metricCount,3)
+  assert.equal(full.text,'↓ 12.4M · CPU 42% · 内存 68%')
+  // 上传占主导时切换 ↑ 指示，单指标使用完整 MB/s 单位
+  const upOnly=api.buildTelemetryReadout({netState:'ready',downBps:10*1024,upBps:3.5*1024*1024,cpuPercent:90,memoryPercent:70},{telemetryMode:'always',telemetryNet:true,telemetryCpu:false,telemetryMemory:false})
+  assert.equal(upOnly.metricCount,1)
+  assert.equal(upOnly.text,'↑ 3.5 MB/s')
+  // 网卡不可用时诚实显示未知，不伪造 0 KB/s
+  const unavailable=api.buildTelemetryReadout({netState:'unavailable',downBps:null,upBps:null,cpuPercent:null,memoryPercent:null},{telemetryMode:'always',telemetryNet:true,telemetryCpu:false,telemetryMemory:false})
+  assert.equal(unavailable.text,'网速 未知')
+})
 if(failed)process.exitCode=1

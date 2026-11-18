@@ -1,4 +1,4 @@
-# 隔离验证持久化和配置格式；只使用 D 盘临时样例，不启动桌面程序。
+﻿# 隔离验证持久化和配置格式；只使用 D 盘临时样例，不启动桌面程序。
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
 $target = 'D:\codex\DesktopHub-work\core-check'
@@ -18,7 +18,10 @@ if (Test-Path (Join-Path $project 'src-tauri\src\config_format.rs')) {
     $source += "mod desktop_features { use serde::{Deserialize, Serialize};`n" + (Section $appearance '#[derive(Clone, Debug, Deserialize, Serialize)]' '#[tauri::command]') + "`n}`n"
     Copy-Item (Join-Path $project 'src-tauri\src\state.rs') (Join-Path $target 'src\state.rs')
     Copy-Item (Join-Path $project 'src-tauri\src\config_format.rs') (Join-Path $target 'src\config_format.rs')
-    $source += "mod state; mod config_format;`n"
+    $telemetry = Get-Content (Join-Path $project 'src-tauri\src\telemetry.rs') -Raw
+    $telemetryCheck = (Section $telemetry 'use serde' '/// 启动后台每秒按需遥测线程') + "`n" + (Section $telemetry '#[cfg(test)]' '')
+    $telemetryCheck | Set-Content (Join-Path $target 'src\telemetry.rs') -Encoding utf8
+    $source += "mod state; mod config_format; mod telemetry;`n"
 }
 $source | Set-Content (Join-Path $target 'src\lib.rs') -Encoding utf8
 @'
@@ -34,11 +37,23 @@ sha2 = "0.10"
 $env:CARGO_HOME = 'D:\codex\DesktopHub-work\rust\cargo'
 $env:RUSTUP_HOME = 'D:\codex\DesktopHub-work\rust\rustup'
 $env:CARGO_TARGET_DIR = 'D:\codex\DesktopHub-work\rust\target'
-$env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-gnu'
 $env:HUB_LITE_TEST_ROOT = Join-Path $target 'fixtures'
+$gnuBin = Join-Path $env:RUSTUP_HOME 'toolchains\stable-x86_64-pc-windows-gnu\bin'
+$msvcBin = Join-Path $env:RUSTUP_HOME 'toolchains\stable-x86_64-pc-windows-msvc\bin'
 $nativeLinker = 'D:\codex\DesktopHub-work\build-tools\llvm-mingw-20261104-msvcrt-x86_64\bin'
-$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = Join-Path $nativeLinker 'x86_64-w64-mingw32-gcc.exe'
-$env:RUSTFLAGS = '-C link-self-contained=yes'
-$env:PATH = "$env:CARGO_HOME\bin;$nativeLinker;$env:PATH"
-& "$env:CARGO_HOME\bin\cargo.exe" test --offline --manifest-path (Join-Path $target 'Cargo.toml')
+if ((Test-Path (Join-Path $gnuBin 'rustc.exe')) -and (Test-Path (Join-Path $nativeLinker 'x86_64-w64-mingw32-gcc.exe'))) {
+    $env:RUSTC = Join-Path $gnuBin 'rustc.exe'
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = Join-Path $nativeLinker 'x86_64-w64-mingw32-gcc.exe'
+    $env:RUSTFLAGS = '-C link-self-contained=yes'
+    $env:PATH = "$gnuBin;$nativeLinker;$env:PATH"
+    $cargoExe = Join-Path $gnuBin 'cargo.exe'
+} elseif (Test-Path (Join-Path $msvcBin 'rustc.exe')) {
+    $env:RUSTC = Join-Path $msvcBin 'rustc.exe'
+    $env:PATH = "$msvcBin;$env:PATH"
+    $cargoExe = Join-Path $msvcBin 'cargo.exe'
+} else {
+    $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
+    $cargoExe = Join-Path $env:CARGO_HOME 'bin\cargo.exe'
+}
+& $cargoExe test --offline --manifest-path (Join-Path $target 'Cargo.toml')
 exit $LASTEXITCODE

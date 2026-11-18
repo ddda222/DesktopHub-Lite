@@ -5,6 +5,13 @@ import GlassLight from '@/components/GlassLight.vue'
 import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
 import IslandParticles from './motion/IslandParticles.vue'
 import { useIslandEffects, type IslandCue } from './motion/useIslandEffects'
+import {
+  buildTelemetryReadout,
+  countTelemetryMetrics,
+  normalizeTelemetryPrefs,
+  stepSmartTelemetry,
+  type TelemetrySnapshot
+} from './telemetryReadout'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
@@ -16,7 +23,12 @@ import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
 import { isDarkTheme, pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
 
-const props = defineProps<{ previewFeedback?: { kind: string; sequence: number }; previewKeepOpen?: boolean; previewCue?: IslandCue }>()
+const props = defineProps<{
+  previewFeedback?: { kind: string; sequence: number }
+  previewKeepOpen?: boolean
+  previewCue?: IslandCue
+  previewTelemetry?: TelemetrySnapshot | null
+}>()
 const element = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
 const windowDrag = useWindowDrag(viewport, {
@@ -73,17 +85,61 @@ const shape = computed(() => tucked.value ? 'line' : expanded.value ? 'expanded'
 const glassAvailable = ref(true)
 const clockText = ref(formatTime())
 const feedbackText = ref('')
-const capsuleStatus = computed<{ text: string; icon: IconName | null; kind: string }>(() => {
+const telemetrySample = ref<TelemetrySnapshot | null>(null)
+const telemetryHold = ref(0)
+const telemetryActive = ref(false)
+const telemetryPrefs = computed(() => normalizeTelemetryPrefs(state.ui.islandAppearance))
+function applyTelemetrySample(sample: TelemetrySnapshot | null): void {
+  telemetrySample.value = sample
+  const next = stepSmartTelemetry(sample, telemetryPrefs.value, telemetryHold.value)
+  telemetryHold.value = next.nextHold
+  telemetryActive.value = next.active
+}
+watch(telemetryPrefs, prefs => {
+  if (prefs.telemetryMode === 'off' || countTelemetryMetrics(prefs) === 0) {
+    telemetrySample.value = null
+    telemetryHold.value = 0
+    telemetryActive.value = false
+    return
+  }
+  const next = stepSmartTelemetry(telemetrySample.value, prefs, telemetryHold.value)
+  telemetryHold.value = next.nextHold
+  telemetryActive.value = next.active
+})
+watch(tucked, value => {
+  if (value) {
+    telemetryHold.value = 0
+    telemetryActive.value = false
+  }
+})
+const telemetryReadout = computed(() =>
+  telemetryActive.value ? buildTelemetryReadout(telemetrySample.value, telemetryPrefs.value) : null
+)
+const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: string; icon: IconName | null; kind: string }>(() => {
   if (receivingFiles.value) return { text: '松开暂存', icon: 'folder', kind: 'working' }
   if (shelf.busy) return { text: shelf.activity || '文件处理中', icon: 'folder', kind: 'working' }
   const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
   if (pending) return { text: pending > 1 ? `翻译中 · ${pending}` : '翻译中', icon: 'translate', kind: 'working' }
   if (feedbackText.value) return { text: feedbackText.value, icon: feedbackText.value === '翻译失败' ? 'info' : 'check', kind: 'feedback' }
   if (state.ui.paused) return { text: '记录已暂停', icon: 'pause', kind: 'paused' }
+  if (telemetryReadout.value) {
+    return {
+      text: telemetryReadout.value.text,
+      ariaText: telemetryReadout.value.ariaText,
+      tooltip: telemetryReadout.value.tooltip,
+      icon: null,
+      kind: 'telemetry'
+    }
+  }
   if (shelf.entries.length) return { text: `暂存 ${shelf.entries.length > 999 ? '999+' : shelf.entries.length} 项`, icon: 'folder', kind: 'files' }
   return { text: clockText.value, icon: null, kind: 'idle' }
 })
-const taskSignal = computed(() => capsuleStatus.value.kind === 'idle' ? 'idle' : `${capsuleStatus.value.kind}:${capsuleStatus.value.text}`)
+const isNoticeStatus = computed(() => capsuleStatus.value.kind !== 'idle' && capsuleStatus.value.kind !== 'telemetry')
+const taskSignal = computed(() => {
+  if (capsuleStatus.value.kind === 'idle') return 'idle'
+  if (capsuleStatus.value.kind === 'telemetry') return 'telemetry'
+  return `${capsuleStatus.value.kind}:${capsuleStatus.value.text}`
+})
 const hovering = ref(false)
 const composing = ref(false)
 const pressed = ref(false)
@@ -112,6 +168,18 @@ const tuckedWidth = computed(() => variant.value !== 'standard' ? Math.min(134, 
 const visibleWidth = computed(() => {
   if (expanded.value) return expandedWidth.value - 24
   if (suppressed.value) return tuckedWidth.value
+  if (capsuleStatus.value.kind === 'telemetry' && telemetryReadout.value) {
+    const count = telemetryReadout.value.metricCount
+    const table: Record<IslandVariant, [number, number][]> = {
+      standard: [[140, 118], [188, 168], [240, 218]],
+      telemetry: [[158, 136], [204, 184], [256, 234]],
+      scroll: [[178, 156], [226, 206], [278, 256]],
+      mecha: [[190, 168], [240, 220], [292, 270]],
+      pixel: [[204, 182], [258, 238], [312, 290]]
+    }
+    const [base, floor] = table[variant.value][Math.min(2, Math.max(0, count - 1))]
+    return Math.min(availableWidth.value - 24, Math.max(floor, Math.round(base * scale.value)))
+  }
   const idle = capsuleStatus.value.kind === 'idle'
   if (variant.value === 'telemetry') return (idle ? 148 : 186) * scale.value
   if (variant.value === 'mecha' || variant.value === 'pixel') return (idle ? 176 : 208) * scale.value
@@ -175,6 +243,7 @@ let reenterAfterClose = false
 let clockTimer: ReturnType<typeof setTimeout> | undefined
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
 let stopFeedback: (() => void) | undefined
+let stopTelemetry: (() => void) | undefined
 let geometryTimer: ReturnType<typeof setTimeout> | undefined
 let observer: ResizeObserver | undefined
 let contentObserver: ResizeObserver | undefined
@@ -209,6 +278,9 @@ watch(() => props.previewFeedback, value => {
 watch(() => props.previewCue, value => {
   if (!isDesktop && value) signal(value.kind)
 }, { flush: 'post' })
+watch(() => props.previewTelemetry, value => {
+  if (!isDesktop) applyTelemetrySample(value ?? null)
+}, { immediate: true })
 watch(() => capsuleStatus.value.kind === 'working', (working, before) => {
   if (working && !before) signal('loading')
 })
@@ -536,6 +608,10 @@ onMounted(() => {
     if (disposed) off()
     else stopFeedback = off
   }).catch(() => pushToast('胶囊操作提示暂不可用', 'error'))
+  void listenHost<TelemetrySnapshot>('island-telemetry', applyTelemetrySample).then(off => {
+    if (disposed) off()
+    else stopTelemetry = off
+  }).catch(() => {})
   observer = new ResizeObserver(queueGeometry)
   contentObserver = new ResizeObserver(measureContent)
   if (viewport.value) observer.observe(viewport.value)
@@ -559,6 +635,7 @@ onBeforeUnmount(() => {
   clearTimeout(clockTimer)
   clearTimeout(feedbackTimer)
   stopFeedback?.()
+  stopTelemetry?.()
   stopFileDrop?.()
   stopShelf?.()
   document.removeEventListener('visibilitychange', updateClock)
@@ -588,23 +665,34 @@ onBeforeUnmount(() => {
         :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" />
       <span v-if="(telemetry || variant === 'mecha') && scanSeq && expanded && !motionReduced" :key="scanSeq" class="telemetry-scan" aria-hidden="true" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
-      <button class="capsule" :class="{ 'has-feedback': capsuleStatus.kind !== 'idle' }" type="button" :aria-expanded="expanded"
-        :aria-label="`${capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
+      <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
+        :title="!expanded && capsuleStatus.tooltip ? capsuleStatus.tooltip : undefined"
+        :aria-label="`${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
         :inert="!revealed" aria-description="按住拖动位置，单击展开或收起"
         @pointerdown.stop="windowDrag.begin" @click="activateCapsule">
-        <span class="capsule-text" :class="{ feedback: capsuleStatus.kind !== 'idle' }" aria-hidden="true">
+        <span class="capsule-text" :class="{ feedback: isNoticeStatus }" aria-hidden="true">
           <span v-if="telemetry && !expanded" class="telemetry-led" :class="capsuleStatus.kind" />
           <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
-          <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : '安' }}</span>
+          <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : capsuleStatus.kind === 'telemetry' ? '巡' : '安' }}</span>
           <span v-else-if="variant === 'pixel' && !expanded" class="pixel-hp">♥HP</span>
-          <span class="capsule-label"><Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}</span>
+          <span class="capsule-label" :class="{ 'is-telemetry': capsuleStatus.kind === 'telemetry' }">
+            <template v-if="capsuleStatus.kind === 'telemetry' && telemetryReadout">
+              <template v-for="(seg, idx) in telemetryReadout.segments" :key="idx">
+                <i v-if="idx > 0" class="tel-sep">·</i>
+                <span class="tel-seg"><em class="tel-pre" :class="{ accent: seg.accent }">{{ seg.prefix }}</em>{{ seg.value }}</span>
+              </template>
+            </template>
+            <template v-else>
+              <Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}
+            </template>
+          </span>
           <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
           <span v-else-if="variant === 'scroll' && !expanded" class="scroll-knot" />
           <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
         </span>
         <span class="grip" aria-hidden="true" />
       </button>
-      <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && capsuleStatus.kind !== 'idle' ? capsuleStatus.text : '' }}</span>
+      <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && isNoticeStatus ? capsuleStatus.text : '' }}</span>
       <div class="expanded-content" :class="{ 'fixed-search': page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
         <div ref="chrome" class="island-chrome">
           <header class="toolbar">
@@ -863,6 +951,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   animation: telemetryPulse 2.2s ease-in-out infinite;
 }
 .telemetry-led.working { background: #7de2ff; box-shadow: 0 0 10px #7de2ff; animation-duration: .95s; }
+.telemetry-led.telemetry { background: var(--accent); box-shadow: 0 0 9px var(--accent); animation-duration: 1.5s; }
 .telemetry-led.feedback { background: var(--success); box-shadow: 0 0 8px var(--success); animation: none; }
 .telemetry-led.paused { background: var(--text-3); box-shadow: none; animation: none; opacity: .75; }
 .telemetry-scan {
@@ -937,6 +1026,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   box-shadow: 0 0 12px rgba(109, 182, 255, .14);
 }
 .capsule-label { display: inline-flex; align-items: center; gap: 5px; }
+.capsule-label.is-telemetry { gap: 4px; font-size: 12px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.tel-sep { font-style: normal; opacity: .4; margin: 0 1px; }
+.tel-seg { display: inline-flex; align-items: baseline; gap: 2.5px; }
+.tel-pre { font-style: normal; font-size: 11px; font-weight: 600; color: var(--text-2); }
+.tel-pre.accent { color: var(--accent); font-weight: 700; }
+.variant-scroll:not(.expanded) .capsule-label.is-telemetry { font-family: var(--font-sans); letter-spacing: 0; }
+.variant-pixel:not(.expanded) .capsule-label.is-telemetry { padding: 1px 6px; font-size: 11.5px; }
+.variant-pixel:not(.expanded) .tel-pre { color: #86efac; }
+.variant-pixel:not(.expanded) .tel-pre.accent { color: #facc15; }
 
 /* ==================== 琥珀重工（variant-mecha：45° 倒角装甲与液压导轨） ==================== */
 .island.variant-mecha {

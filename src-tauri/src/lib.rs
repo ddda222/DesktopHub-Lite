@@ -24,6 +24,7 @@ mod logging;
 mod snippets;
 mod state;
 mod storage;
+mod telemetry;
 mod translation;
 mod file_preview;
 mod windows;
@@ -1062,7 +1063,7 @@ pub fn run() {
                     wechat_status: if prefs.wechat_enabled { "starting" } else { "off" }.into(),
                     wechat_attention: false,
                     wechat_event: 0,
-                    island_appearance: prefs.island_appearance.solid(),
+                    island_appearance: prefs.island_appearance.normalized_on_load(),
                     island_capture_error: None,
                     translation_pending: 0,
                     fullscreen_suppressed: false,
@@ -1092,6 +1093,7 @@ pub fn run() {
             clipboard_service::start(handle.clone());
             wechat::start(handle.clone());
             desktop_features::start_fullscreen_watch(handle.clone());
+            telemetry::start(handle.clone());
             if app.state::<AppState>().ui.snapshot().island_appearance.auto_check_updates {
                 let update_app = handle.clone();
                 tauri::async_runtime::spawn(async move {

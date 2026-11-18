@@ -38,6 +38,11 @@ const wechatStatus = computed(() => {
 })
 const validTiming = computed(() => Number.isInteger(hoverMs.value) && appearance.value.scale >= 75 && appearance.value.scale <= 125 && hoverMs.value >= 100 && hoverMs.value <= 2000 &&
   Number.isInteger(leaveMs.value) && leaveMs.value >= 100 && leaveMs.value <= 4000)
+const validTelemetry = computed(() =>
+  ['off', 'smart', 'always'].includes(appearance.value.telemetryMode) &&
+  (appearance.value.telemetryMode === 'off' || appearance.value.telemetryNet || appearance.value.telemetryCpu || appearance.value.telemetryMemory)
+)
+const validSettings = computed(() => validTiming.value && validTelemetry.value)
 
 function restore(): void {
   appearance.value = defaultIslandAppearance()
@@ -48,7 +53,7 @@ function restore(): void {
 }
 
 async function save(): Promise<void> {
-  if (saving.value || !isDesktop || !validTiming.value) return
+  if (saving.value || !isDesktop || !validSettings.value) return
   saving.value = true
   const submitted = signature()
   try {
@@ -118,6 +123,24 @@ watch(() => state.ui.settingsOpen, open => {
     <div class="field-grid">
       <label class="field"><span class="field-label">停靠位置</span><select v-model="anchor" class="control"><option value="left">左上</option><option value="center">顶部居中</option><option value="right">右上</option></select></label>
       <label class="field"><span class="field-label">显示大小 <output>{{ appearance.scale }}%</output></span><input v-model.number="appearance.scale" class="size-slider" type="range" min="75" max="125" step="5" aria-label="灵动岛显示大小" :aria-valuetext="`${appearance.scale}%`" /></label>
+      <label class="field field-wide">
+        <span class="field-label">胶囊微读数</span>
+        <select v-model="appearance.telemetryMode" class="control" aria-label="胶囊微读数显示模式">
+          <option value="smart">智能浮现（流量或高占用时显示）</option>
+          <option value="always">常驻显示（替代时间）</option>
+          <option value="off">关闭</option>
+        </select>
+      </label>
+    </div>
+    <div v-if="appearance.telemetryMode !== 'off'" class="telemetry-config">
+      <div class="seg" role="group" aria-label="微读数指标">
+        <label class="seg-item" :class="{ 'is-on': appearance.telemetryNet }"><input v-model="appearance.telemetryNet" class="sr-only" type="checkbox" />实时网速</label>
+        <label class="seg-item" :class="{ 'is-on': appearance.telemetryCpu }"><input v-model="appearance.telemetryCpu" class="sr-only" type="checkbox" />处理器占用</label>
+        <label class="seg-item" :class="{ 'is-on': appearance.telemetryMemory }"><input v-model="appearance.telemetryMemory" class="sr-only" type="checkbox" />内存占用</label>
+      </div>
+      <p class="hint telemetry-hint">{{ appearance.telemetryMode === 'smart'
+        ? '平时保持简洁时间；当网速 ≥ 64 KB/s、处理器 ≥ 35% 或内存 ≥ 80% 时自动切为读数，回落后保持 3 秒平滑收回。仅统计活动物理以太网与 Wi-Fi。'
+        : '胶囊收起时常驻显示所选指标；最大化或全屏收为细线时自动休眠停止采集。' }}</p>
     </div>
     <div class="feature-options">
       <label class="check-row"><span><strong>光轨舱门</strong><small>沿边缘巡光，展开时向两侧分流。正文保持实底。</small></span><input v-model="appearance.webgl" type="checkbox" /></label>
@@ -139,9 +162,10 @@ watch(() => state.ui.settingsOpen, open => {
       <p v-if="isDesktop" class="hint">当前已应用：{{ state.ui.islandAppearance.hideFromCapture ? '隐藏灵动岛' : '允许捕获灵动岛' }}</p>
     </details>
     <p v-if="!validTiming" class="inline-feedback error" role="alert">展开延时需为 100–2000 毫秒，收起延时需为 100–4000 毫秒，大小需为 75%–125%。</p>
+    <p v-if="!validTelemetry" class="inline-feedback error" role="alert">开启胶囊微读数时，请至少勾选一项系统指标。</p>
     <div class="save-row">
       <p role="status" :class="{ error: failed }">{{ dirty ? '有尚未应用的修改' : feedback || '更改后点击应用' }}<span v-if="dirty && failed"> · {{ feedback }}</span><span v-if="!isDesktop"> · 桌面版可应用</span></p>
-      <div class="actions"><button v-if="dirty" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button><button class="btn" :disabled="saving" @click="restore">恢复默认值</button><button class="btn btn-primary" :disabled="saving || !validTiming || !isDesktop" @click="save">{{ saving ? '应用中…' : '应用设置' }}</button></div>
+      <div class="actions"><button v-if="dirty" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button><button class="btn" :disabled="saving" @click="restore">恢复默认值</button><button class="btn btn-primary" :disabled="saving || !validSettings || !isDesktop" @click="save">{{ saving ? '应用中…' : '应用设置' }}</button></div>
     </div>
 
     <h4 class="sub-title">提醒与启动 <span class="save-mode">即时生效</span></h4>
@@ -165,6 +189,9 @@ watch(() => state.ui.settingsOpen, open => {
 </template>
 
 <style scoped>
+.telemetry-config { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.telemetry-hint { margin: 2px 0 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .feature-options { margin-top: 16px; }
 .check-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
 .check-row > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }

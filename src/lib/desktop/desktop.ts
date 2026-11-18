@@ -43,10 +43,27 @@ export interface IslandAppearance {
   autoCheckUpdates: boolean
   webgl: boolean
   hideFromCapture: boolean
+  telemetryMode: 'off' | 'smart' | 'always'
+  telemetryNet: boolean
+  telemetryCpu: boolean
+  telemetryMemory: boolean
 }
 
 export function defaultIslandAppearance(): IslandAppearance {
-  return { scale: 100, opacity: 100, tint: '', preset: 'classic', avoidFullscreen: true, autoCheckUpdates: false, webgl: true, hideFromCapture: false }
+  return {
+    scale: 100,
+    opacity: 100,
+    tint: '',
+    preset: 'classic',
+    avoidFullscreen: true,
+    autoCheckUpdates: false,
+    webgl: true,
+    hideFromCapture: false,
+    telemetryMode: 'smart',
+    telemetryNet: true,
+    telemetryCpu: true,
+    telemetryMemory: true
+  }
 }
 
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */
