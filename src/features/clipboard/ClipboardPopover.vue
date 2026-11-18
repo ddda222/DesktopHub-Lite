@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
-import { pushToast } from '@/store'
 import Icon from '@/components/Icon.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
-import type { ClipItem } from '@/lib/desktop/types'
+import type { ClipItem, SnippetDraft, SnippetItem } from '@/lib/desktop/types'
 import { formatJson } from './format-json'
 import {
   activeClip,
@@ -12,31 +11,55 @@ import {
   closeDetail,
   closePanel,
   copyClip,
+  copySnippet,
   deleteClip,
   deleteSelectedClips,
+  deleteSnippet,
   editClip,
   filteredClips,
+  filteredSnippets,
   groupFilters,
+  hasSnippetVariables,
   moveActive,
+  moveSnippetActive,
   openDetail,
   openTranslation,
+  pushToast,
+  renderSnippetPreview,
+  reorderVisibleSnippets,
+  saveClipAsSnippet,
+  saveSnippet,
+  setClipboardView,
   setGroup,
   setPaused,
   setQuery,
+  setSnippetGroup,
+  setSnippetQuery,
+  snippetGroupFilters,
   state
 } from '@/store'
 
 const searchEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
+const snippetListEl = ref<HTMLElement | null>(null)
+const snippetTitleEl = ref<HTMLInputElement | null>(null)
+const snippetBodyEl = ref<HTMLTextAreaElement | null>(null)
 
-const detailClip = computed(() => activeClip.value)
+const isHistoryView = computed(() => state.ui.clipboardView === 'history')
+const detailClip = computed(() => (isHistoryView.value ? activeClip.value : null))
+
+/* ---------- 历史记录详情与批量操作 ---------- */
+
 const formattedText = ref<string | null>(null)
 const formattedView = ref(false)
 const formatError = ref('')
 const showLineNumbers = ref(true)
 const wrapLines = ref(true)
-const previewText = computed(() => formattedView.value && formattedText.value !== null
-  ? formattedText.value : detailClip.value?.text ?? '')
+const previewText = computed(() =>
+  formattedView.value && formattedText.value !== null
+    ? formattedText.value
+    : detailClip.value?.text ?? ''
+)
 const previewLines = computed(() => previewText.value.split(/\r\n|\r|\n/))
 
 function showOriginal(): void {
@@ -58,25 +81,35 @@ function showFormattedJson(): void {
 }
 
 async function previewImage(id: string): Promise<void> {
-  if (!isDesktop) { pushToast('请在桌面版预览和钉图', 'info'); return }
-  try { await invokeHost('open_image_preview', { source: 'clipboard', id }) }
-  catch (error) { pushToast(String(error), 'error') }
+  if (!isDesktop) {
+    pushToast('请在桌面版预览和钉图', 'info')
+    return
+  }
+  try {
+    await invokeHost('open_image_preview', { source: 'clipboard', id })
+  } catch (error) {
+    pushToast(String(error), 'error')
+  }
 }
 
 function onCopyFormatted(): void {
-  if (detailClip.value && formattedText.value !== null) void copyClip(detailClip.value, formattedText.value)
+  if (detailClip.value && formattedText.value !== null) {
+    void copyClip(detailClip.value, formattedText.value)
+  }
 }
 
 watch([() => detailClip.value?.id, () => detailClip.value?.text], () => {
   formattedText.value = null
   showOriginal()
 })
+
 const noteDraft = ref('')
 const savingNote = ref(false)
 const selecting = ref(false)
 const selectedIds = ref(new Set<string>())
 const deletePrompt = ref<{ ids: string[]; favorites: number } | null>(null)
 const deleting = ref(false)
+const savingClipSnippetId = ref<string | null>(null)
 
 function toggleSelected(id: string): void {
   deletePrompt.value = null
@@ -116,17 +149,38 @@ async function confirmDeletion(): Promise<void> {
       if (state.ui.detailId && pending.ids.includes(state.ui.detailId)) closeDetail()
       stopSelecting()
     } else deletePrompt.value = null
-  } finally { deleting.value = false }
+  } finally {
+    deleting.value = false
+  }
 }
 
 async function saveNote(clip: ClipItem, favorite = clip.favorite ?? false): Promise<void> {
   if (savingNote.value) return
   savingNote.value = true
-  try { await editClip(clip, favorite, noteDraft.value) }
-  finally { savingNote.value = false }
+  try {
+    await editClip(clip, favorite, noteDraft.value)
+  } finally {
+    savingNote.value = false
+  }
 }
 
-watch(() => detailClip.value?.id, () => { noteDraft.value = detailClip.value?.note ?? '' }, { immediate: true })
+async function onSaveAsSnippet(clip: ClipItem | null): Promise<void> {
+  if (!clip || clip.kind !== 'text' || savingClipSnippetId.value) return
+  savingClipSnippetId.value = clip.id
+  try {
+    await saveClipAsSnippet(clip)
+  } finally {
+    savingClipSnippetId.value = null
+  }
+}
+
+watch(
+  () => detailClip.value?.id,
+  () => {
+    noteDraft.value = detailClip.value?.note ?? ''
+  },
+  { immediate: true }
+)
 
 /** 文件缺失或没有可用地址时都不渲染 <img>，避免出现破图 */
 function isImageBroken(clip: ClipItem | null): boolean {
@@ -136,11 +190,14 @@ function isImageBroken(clip: ClipItem | null): boolean {
 
 function onInput(event: Event): void {
   const target = event.target as HTMLInputElement | null
-  if (target) setQuery(target.value)
+  if (!target) return
+  if (isHistoryView.value) setQuery(target.value)
+  else setSnippetQuery(target.value)
 }
 
 function onClear(): void {
-  setQuery('')
+  if (isHistoryView.value) setQuery('')
+  else setSnippetQuery('')
   searchEl.value?.focus()
 }
 
@@ -168,7 +225,10 @@ function onCopy(clip: ClipItem | null): void {
 
 function onDelete(clip: ClipItem | null): void {
   if (!clip) return
-  if (clip.favorite) { prepareDeletion([clip.id]); return }
+  if (clip.favorite) {
+    prepareDeletion([clip.id])
+    return
+  }
   void deleteClip(clip).then(clampActive)
 }
 
@@ -177,11 +237,253 @@ function onTranslate(clip: ClipItem | null): void {
   openTranslation(clip.text ?? '', true)
 }
 
+/* ---------- 常用短语列表、动态变量与内联编辑 ---------- */
+
+const variablePresets = [
+  { token: '{{date}}', label: '日期', title: '插入当前日期（YYYY-MM-DD）' },
+  { token: '{{time}}', label: '时间', title: '插入当前时间（HH:MM:SS）' },
+  { token: '{{datetime}}', label: '完整时间', title: '插入日期与时间' },
+  { token: '{{weekday}}', label: '星期', title: '插入星期几（如 周三）' },
+  { token: '{{clipboard}}', label: '剪贴板', title: '复制时嵌入当前系统剪贴板文本' }
+] as const
+
+const editingSnippet = ref<SnippetDraft | null>(null)
+const customGroupMode = ref(false)
+const customGroupName = ref('')
+const savingSnippet = ref(false)
+const snippetDeletePrompt = ref<SnippetItem | null>(null)
+const deletingSnippet = ref(false)
+const previewNow = ref(new Date())
+let previewTickTimer: number | null = null
+
+function startPreviewClock(): void {
+  stopPreviewClock()
+  previewNow.value = new Date()
+  previewTickTimer = window.setInterval(() => {
+    previewNow.value = new Date()
+  }, 1000)
+}
+
+function stopPreviewClock(): void {
+  if (previewTickTimer !== null) {
+    window.clearInterval(previewTickTimer)
+    previewTickTimer = null
+  }
+}
+
+onBeforeUnmount(stopPreviewClock)
+
+const editingOriginal = computed(() =>
+  editingSnippet.value?.id
+    ? state.snippets.find((item) => item.id === editingSnippet.value?.id) ?? null
+    : null
+)
+
+const draftHasVariables = computed(() =>
+  editingSnippet.value ? hasSnippetVariables(editingSnippet.value.content) : false
+)
+
+const draftPreviewText = computed(() => {
+  if (!editingSnippet.value || !draftHasVariables.value) return ''
+  const rendered = renderSnippetPreview(
+    editingSnippet.value.content,
+    '「当前剪贴板文本」',
+    previewNow.value
+  )
+  const chars = [...rendered]
+  return chars.length > 180 ? `${chars.slice(0, 180).join('')}…` : rendered
+})
+
+function snippetSummary(content: string): string {
+  const flat = content.replace(/\s+/g, ' ').trim()
+  if (!flat) return '（空内容）'
+  const chars = [...flat]
+  return chars.length > 56 ? `${chars.slice(0, 56).join('')}…` : flat
+}
+
+function switchView(view: 'history' | 'snippets'): void {
+  if (state.ui.clipboardView === view) return
+  stopSelecting()
+  snippetDeletePrompt.value = null
+  editingSnippet.value = null
+  stopPreviewClock()
+  setClipboardView(view)
+  void nextTick(() => searchEl.value?.focus())
+}
+
+function openCreateSnippet(): void {
+  snippetDeletePrompt.value = null
+  customGroupMode.value = false
+  customGroupName.value = ''
+  const defaultGroup =
+    state.ui.snippetGroup !== '全部' && state.snippetGroups.includes(state.ui.snippetGroup)
+      ? state.ui.snippetGroup
+      : state.snippetGroups[0] ?? '未分组'
+  editingSnippet.value = {
+    title: '',
+    content: '',
+    group: defaultGroup,
+    pinned: false
+  }
+  startPreviewClock()
+  void nextTick(() => snippetTitleEl.value?.focus())
+}
+
+function openEditSnippet(snippet: SnippetItem): void {
+  snippetDeletePrompt.value = null
+  customGroupMode.value = false
+  customGroupName.value = ''
+  editingSnippet.value = {
+    id: snippet.id,
+    title: snippet.title,
+    content: snippet.content,
+    group: snippet.group,
+    pinned: snippet.pinned
+  }
+  startPreviewClock()
+  void nextTick(() => snippetTitleEl.value?.focus())
+}
+
+function cancelEditSnippet(): void {
+  editingSnippet.value = null
+  customGroupMode.value = false
+  customGroupName.value = ''
+  stopPreviewClock()
+  void nextTick(() => searchEl.value?.focus())
+}
+
+function insertVariable(token: string): void {
+  const draft = editingSnippet.value
+  if (!draft) return
+  const area = snippetBodyEl.value
+  if (!area) {
+    draft.content += token
+    return
+  }
+  const start = area.selectionStart ?? draft.content.length
+  const end = area.selectionEnd ?? start
+  draft.content = draft.content.slice(0, start) + token + draft.content.slice(end)
+  const cursor = start + token.length
+  void nextTick(() => {
+    area.focus()
+    area.setSelectionRange(cursor, cursor)
+  })
+}
+
+async function submitSnippet(): Promise<void> {
+  const draft = editingSnippet.value
+  if (!draft || savingSnippet.value) return
+  const targetGroup = customGroupMode.value ? customGroupName.value.trim() : draft.group
+  if (customGroupMode.value && !targetGroup) {
+    pushToast('请填写新分组名称，或切回已有分组', 'error')
+    return
+  }
+  savingSnippet.value = true
+  try {
+    if (await saveSnippet({ ...draft, group: targetGroup || '未分组' })) {
+      cancelEditSnippet()
+      clampSnippetActive()
+    }
+  } finally {
+    savingSnippet.value = false
+  }
+}
+
+function clampSnippetActive(): void {
+  const total = filteredSnippets.value.length
+  if (state.ui.snippetActiveIndex > total - 1) {
+    state.ui.snippetActiveIndex = Math.max(0, total - 1)
+  }
+}
+
+function onCopySnippet(snippet: SnippetItem | null, raw = false): void {
+  if (!snippet) return
+  void copySnippet(snippet, raw)
+  if (!editingSnippet.value) searchEl.value?.focus()
+}
+
+async function onTogglePin(snippet: SnippetItem): Promise<void> {
+  await saveSnippet({
+    id: snippet.id,
+    title: snippet.title,
+    content: snippet.content,
+    group: snippet.group,
+    pinned: !snippet.pinned
+  })
+  clampSnippetActive()
+}
+
+function onRequestDeleteSnippet(snippet: SnippetItem): void {
+  if (snippet.pinned) {
+    snippetDeletePrompt.value = snippet
+    return
+  }
+  void performDeleteSnippet(snippet.id)
+}
+
+async function performDeleteSnippet(id: string): Promise<void> {
+  if (deletingSnippet.value) return
+  deletingSnippet.value = true
+  try {
+    if (await deleteSnippet(id)) {
+      if (editingSnippet.value?.id === id) cancelEditSnippet()
+      snippetDeletePrompt.value = null
+      clampSnippetActive()
+    }
+  } finally {
+    deletingSnippet.value = false
+  }
+}
+
+function samePartitionList(snippet: SnippetItem): SnippetItem[] {
+  const source = editingSnippet.value ? state.snippets : filteredSnippets.value
+  return source.filter((item) => item.pinned === snippet.pinned)
+}
+
+function canMoveSnippet(snippet: SnippetItem | null, delta: -1 | 1): boolean {
+  if (!snippet) return false
+  const partition = samePartitionList(snippet)
+  const index = partition.findIndex((item) => item.id === snippet.id)
+  return index >= 0 && index + delta >= 0 && index + delta < partition.length
+}
+
+async function moveSnippetOrder(snippet: SnippetItem | null, delta: -1 | 1): Promise<void> {
+  if (!snippet) return
+  const partition = samePartitionList(snippet)
+  const index = partition.findIndex((item) => item.id === snippet.id)
+  const target = partition[index + delta]
+  if (!target) return
+  const visibleIds = (editingSnippet.value ? state.snippets : filteredSnippets.value).map(
+    (item) => item.id
+  )
+  if (await reorderVisibleSnippets(visibleIds, snippet.id, target.id)) {
+    if (!editingSnippet.value) {
+      const nextIdx = filteredSnippets.value.findIndex((item) => item.id === snippet.id)
+      if (nextIdx >= 0) state.ui.snippetActiveIndex = nextIdx
+      await nextTick()
+      snippetListEl.value
+        ?.querySelector<HTMLElement>(`[data-index="${state.ui.snippetActiveIndex}"]`)
+        ?.scrollIntoView({ block: 'nearest' })
+    }
+  }
+}
+
+/* ---------- 键盘导航 ---------- */
+
 async function moveAndReveal(delta: number): Promise<void> {
-  moveActive(delta)
-  await nextTick()
-  const row = listEl.value?.querySelector<HTMLElement>(`[data-index="${state.ui.activeIndex}"]`)
-  row?.scrollIntoView({ block: 'nearest' })
+  if (isHistoryView.value) {
+    moveActive(delta)
+    await nextTick()
+    const row = listEl.value?.querySelector<HTMLElement>(`[data-index="${state.ui.activeIndex}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+  } else {
+    moveSnippetActive(delta)
+    await nextTick()
+    const row = snippetListEl.value?.querySelector<HTMLElement>(
+      `[data-index="${state.ui.snippetActiveIndex}"]`
+    )
+    row?.scrollIntoView({ block: 'nearest' })
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -190,14 +492,37 @@ function onKeydown(event: KeyboardEvent): void {
 
   if (event.key === 'Escape') {
     event.stopPropagation()
-    if (deletePrompt.value) { deletePrompt.value = null; return }
-    if (selecting.value) { stopSelecting(); return }
+    if (deletePrompt.value) {
+      deletePrompt.value = null
+      return
+    }
+    if (snippetDeletePrompt.value) {
+      snippetDeletePrompt.value = null
+      return
+    }
+    if (editingSnippet.value) {
+      cancelEditSnippet()
+      return
+    }
+    if (selecting.value) {
+      stopSelecting()
+      return
+    }
     closePanel()
     return
   }
 
-  // 详情视图内由详情自己的按钮负责操作，方向键与 Enter 不再作用于列表
-  if (state.ui.detailId || selecting.value) return
+  // 详情视图或短语编辑视图内由表单自身处理按键
+  if (state.ui.detailId || editingSnippet.value || selecting.value) return
+
+  if (!isHistoryView.value && event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+    const current = filteredSnippets.value[state.ui.snippetActiveIndex] ?? null
+    if (current) {
+      event.preventDefault()
+      void moveSnippetOrder(current, event.key === 'ArrowUp' ? -1 : 1)
+    }
+    return
+  }
 
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault()
@@ -206,13 +531,19 @@ function onKeydown(event: KeyboardEvent): void {
   }
 
   if (event.key === 'Enter') {
-    // 焦点在按钮上时 Enter 属于该按钮，不再触发列表复制
     const target = event.target as HTMLElement | null
     if (target?.closest('button')) return
-    const clip = filteredClips.value[state.ui.activeIndex]
-    if (!clip) return
-    event.preventDefault()
-    onCopy(clip)
+    if (isHistoryView.value) {
+      const clip = filteredClips.value[state.ui.activeIndex]
+      if (!clip) return
+      event.preventDefault()
+      onCopy(clip)
+    } else {
+      const snippet = filteredSnippets.value[state.ui.snippetActiveIndex]
+      if (!snippet) return
+      event.preventDefault()
+      onCopySnippet(snippet)
+    }
   }
 }
 
@@ -230,11 +561,59 @@ watch(
     })
   }
 )
+
+const emptySnippetHint = computed(() =>
+  state.snippets.length
+    ? '换个关键词，或切到「全部」分组再试。'
+    : '把常用回复、命令或带 {{date}} / {{clipboard}} 的模板钉在这里，单击即可复制。'
+)
+
+const footerHint = computed(() => {
+  if (detailClip.value?.kind === 'text') return '格式化仅改变预览，原文始终保留'
+  if (detailClip.value) return 'Esc 返回列表'
+  if (editingSnippet.value) return '支持 {{date}} / {{time}} / {{clipboard}} · Esc 取消编辑'
+  if (!isHistoryView.value) return '方向键选择 · Enter 复制 · Alt+↑↓ 排序 · Esc 关闭'
+  return '方向键选择 · Enter 复制 · Esc 关闭'
+})
 </script>
 
 <template>
-  <div class="pop" role="dialog" aria-label="剪贴板历史" @keydown="onKeydown">
-    <header v-if="!detailClip" class="head">
+  <div
+    class="pop"
+    role="dialog"
+    :aria-label="isHistoryView ? '剪贴板历史' : '常用短语'"
+    @keydown="onKeydown"
+  >
+    <!-- 顶部双模式切换栏（详情与短语编辑态隐藏） -->
+    <div v-if="!detailClip && !editingSnippet" class="mode-bar">
+      <div class="seg mode-seg" role="tablist" aria-label="剪贴板功能切换">
+        <button
+          class="seg-btn"
+          type="button"
+          role="tab"
+          :aria-selected="isHistoryView"
+          :class="{ 'is-active': isHistoryView }"
+          @click="switchView('history')"
+        >
+          <span>历史记录</span>
+          <span class="seg-count">{{ state.clips.length }}</span>
+        </button>
+        <button
+          class="seg-btn"
+          type="button"
+          role="tab"
+          :aria-selected="!isHistoryView"
+          :class="{ 'is-active': !isHistoryView }"
+          @click="switchView('snippets')"
+        >
+          <span>常用短语</span>
+          <span class="seg-count">{{ state.snippets.length }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 搜索与主动作栏 -->
+    <header v-if="!detailClip && !editingSnippet" class="head">
       <div class="search">
         <Icon class="search-icon" name="search" :size="14" />
         <input
@@ -242,17 +621,24 @@ watch(
           type="text"
           spellcheck="false"
           autocomplete="off"
-          placeholder="搜索正文、备注、图片…"
-          aria-label="搜索剪贴板历史"
-          :value="state.ui.query"
+          :placeholder="isHistoryView ? '搜索正文、备注、图片…' : '搜索短语标题、正文、分组…'"
+          :aria-label="isHistoryView ? '搜索剪贴板历史' : '搜索常用短语'"
+          :value="isHistoryView ? state.ui.query : state.ui.snippetQuery"
           @input="onInput"
         />
-        <button v-if="state.ui.query" class="clear" type="button" aria-label="清除搜索" @click="onClear">
+        <button
+          v-if="isHistoryView ? state.ui.query : state.ui.snippetQuery"
+          class="clear"
+          type="button"
+          aria-label="清除搜索"
+          @click="onClear"
+        >
           <Icon name="close" :size="13" />
         </button>
       </div>
 
       <button
+        v-if="isHistoryView"
         class="pause"
         type="button"
         :class="{ 'is-paused': state.ui.paused }"
@@ -263,207 +649,671 @@ watch(
         <Icon :name="state.ui.paused ? 'play' : 'pause'" :size="14" />
         <span v-if="state.ui.paused">已暂停</span>
       </button>
+      <button
+        v-else
+        class="pause create-snippet-btn"
+        type="button"
+        aria-label="新建常用短语"
+        @click="openCreateSnippet"
+      >
+        <Icon name="plus" :size="14" />
+        <span>新建</span>
+      </button>
     </header>
 
-    <div v-if="!detailClip" class="filter-bar">
-      <div class="chips" role="group" aria-label="按分组筛选">
+    <!-- ==================== 分支一：历史记录模式 ==================== -->
+    <template v-if="isHistoryView">
+      <div v-if="!detailClip" class="filter-bar">
+        <div class="chips" role="group" aria-label="按分组筛选">
+          <button
+            v-for="group in groupFilters"
+            :key="group"
+            class="chip"
+            type="button"
+            :class="{ 'is-on': group === state.ui.group }"
+            :aria-pressed="group === state.ui.group"
+            @click="setGroup(group)"
+          >
+            {{ group }}
+          </button>
+        </div>
+        <div class="filter-actions" role="group" aria-label="收藏与管理">
+          <button
+            class="chip"
+            type="button"
+            :aria-pressed="state.ui.favoritesOnly"
+            :class="{ 'is-on': state.ui.favoritesOnly }"
+            @click="state.ui.favoritesOnly = !state.ui.favoritesOnly"
+          >
+            只看收藏
+          </button>
+          <button
+            class="chip"
+            type="button"
+            :aria-pressed="selecting"
+            :class="{ 'is-on': selecting }"
+            @click="selecting ? stopSelecting() : (selecting = true)"
+          >
+            {{ selecting ? '退出管理' : '批量管理' }}
+          </button>
+        </div>
+      </div>
+
+      <div
+        v-if="!detailClip && selecting"
+        class="management selection-actions"
+        role="group"
+        aria-label="批量选择操作"
+      >
+        <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
+        <button class="chip" type="button" @click="stopSelecting">取消选择</button>
         <button
-          v-for="group in groupFilters"
-          :key="group"
           class="chip"
           type="button"
-          :class="{ 'is-on': group === state.ui.group }"
-          :aria-pressed="group === state.ui.group"
-          @click="setGroup(group)"
+          :disabled="!selectedIds.size"
+          @click="prepareDeletion([...selectedIds])"
         >
-          {{ group }}
+          删除已选（{{ selectedIds.size }}）
         </button>
-      </div>
-      <div class="filter-actions" role="group" aria-label="收藏与管理">
-        <button class="chip" type="button" :aria-pressed="state.ui.favoritesOnly"
-          :class="{ 'is-on': state.ui.favoritesOnly }" @click="state.ui.favoritesOnly = !state.ui.favoritesOnly">只看收藏</button>
-        <button class="chip" type="button" :aria-pressed="selecting" :class="{ 'is-on': selecting }"
-          @click="selecting ? stopSelecting() : selecting = true">{{ selecting ? '退出管理' : '批量管理' }}</button>
-      </div>
-    </div>
-    <div v-if="!detailClip && selecting" class="management selection-actions" role="group" aria-label="批量选择操作">
-      <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
-      <button class="chip" type="button" @click="stopSelecting">取消选择</button>
-      <button class="chip" type="button" :disabled="!selectedIds.size"
-        @click="prepareDeletion([...selectedIds])">删除已选（{{ selectedIds.size }}）</button>
-    </div>
-    <div v-if="deletePrompt" class="management" role="alert">
-      <span>删除 {{ deletePrompt.ids.length }} 条记录<span v-if="deletePrompt.favorites">（含 {{ deletePrompt.favorites }} 条收藏）</span>？</span>
-      <button class="chip" type="button" :disabled="deleting" @click="confirmDeletion">确认删除</button>
-      <button class="chip" type="button" :disabled="deleting" @click="deletePrompt = null">取消</button>
-    </div>
-    <section v-if="detailClip" class="detail" aria-label="记录详情">
-      <div class="detail-head">
-        <button class="back" type="button" @click="closeDetail()">
-          <Icon name="back" :size="14" />
-          <span>返回列表</span>
-        </button>
-        <span class="detail-meta">{{ detailClip.group }} · {{ relativeTime(detailClip.copiedAt) }}</span>
       </div>
 
-      <div v-if="detailClip.kind === 'text'" class="preview-controls" aria-label="开发预览选项">
-        <div class="preview-modes" role="group" aria-label="文本预览方式">
-          <button class="chip" type="button" :aria-pressed="!formattedView" :class="{ 'is-on': !formattedView }" @click="showOriginal">原文</button>
-          <button class="chip" type="button" :aria-pressed="formattedView" :class="{ 'is-on': formattedView }" @click="showFormattedJson">JSON 格式化</button>
+      <div v-if="deletePrompt" class="management" role="alert">
+        <span>
+          删除 {{ deletePrompt.ids.length }} 条记录
+          <span v-if="deletePrompt.favorites">（含 {{ deletePrompt.favorites }} 条收藏）</span>？
+        </span>
+        <button class="chip" type="button" :disabled="deleting" @click="confirmDeletion">
+          确认删除
+        </button>
+        <button class="chip" type="button" :disabled="deleting" @click="deletePrompt = null">
+          取消
+        </button>
+      </div>
+
+      <section v-if="detailClip" class="detail" aria-label="记录详情">
+        <div class="detail-head">
+          <button class="back" type="button" @click="closeDetail()">
+            <Icon name="back" :size="14" />
+            <span>返回列表</span>
+          </button>
+          <span class="detail-meta">
+            {{ detailClip.group }} · {{ relativeTime(detailClip.copiedAt) }}
+          </span>
         </div>
-        <label><input v-model="showLineNumbers" type="checkbox" />行号</label>
-        <label><input v-model="wrapLines" type="checkbox" />自动换行</label>
-      </div>
-      <p v-if="formatError" class="format-error" role="status">{{ formatError }}</p>
 
-      <div class="detail-body scroll-y" :class="{ 'code-body': detailClip.kind === 'text', 'no-wrap': !wrapLines }"
-        :tabindex="detailClip.kind === 'text' ? 0 : undefined" :aria-label="detailClip.kind === 'text' ? '代码预览' : undefined">
-        <template v-if="detailClip.kind === 'image'">
-          <div v-if="isImageBroken(detailClip)" class="detail-missing">
-            <Icon name="image" :size="22" />
-            <p class="detail-missing-title">图片文件已缺失</p>
-            <p class="detail-missing-sub">原文件可能被移动或删除，这条记录无法预览，也无法复制。</p>
+        <div v-if="detailClip.kind === 'text'" class="preview-controls" aria-label="开发预览选项">
+          <div class="preview-modes" role="group" aria-label="文本预览方式">
+            <button
+              class="chip"
+              type="button"
+              :aria-pressed="!formattedView"
+              :class="{ 'is-on': !formattedView }"
+              @click="showOriginal"
+            >
+              原文
+            </button>
+            <button
+              class="chip"
+              type="button"
+              :aria-pressed="formattedView"
+              :class="{ 'is-on': formattedView }"
+              @click="showFormattedJson"
+            >
+              JSON 格式化
+            </button>
           </div>
-          <img
-            v-else
-            class="detail-img"
-            :src="detailClip.imageUrl"
-            :alt="`剪贴板图片 ${detailClip.width ?? 0} × ${detailClip.height ?? 0}`"
-          />
-        </template>
-        <div v-else class="code-lines" :class="{ numbered: showLineNumbers }" :style="{ '--line-number-width': `${String(previewLines.length).length + 1}ch` }">
-          <div v-for="(line, index) in previewLines" :key="index" class="code-line">
-            <span v-if="showLineNumbers" class="line-number" :data-line="index + 1" aria-hidden="true" />
-            <span class="line-text">{{ line }}</span>
-          </div>
+          <label><input v-model="showLineNumbers" type="checkbox" />行号</label>
+          <label><input v-model="wrapLines" type="checkbox" />自动换行</label>
         </div>
-      </div>
+        <p v-if="formatError" class="format-error" role="status">{{ formatError }}</p>
 
-      <div class="management">
-        <input v-model="noteDraft" maxlength="200" aria-label="剪贴板备注" placeholder="添加备注（最多 200 字）" />
-        <button class="chip" type="button" :disabled="savingNote || noteDraft.trim() === (detailClip.note ?? '')" @click="saveNote(detailClip)">保存备注</button>
-        <button class="chip" type="button" :disabled="savingNote" :aria-pressed="!!detailClip.favorite" @click="saveNote(detailClip, !detailClip.favorite)">
-          {{ detailClip.favorite ? '取消收藏' : '收藏' }}
-        </button>
-      </div>
-      <div class="detail-actions">
-        <select :value="detailClip.group" aria-label="记录分组" @change="assignClipGroup(detailClip.id, ($event.target as HTMLSelectElement).value)">
-          <option v-for="group in state.groups" :key="group" :value="group">{{ group }}</option>
-        </select>
-        <button
-          class="btn btn-ghost is-danger"
-          type="button"
-          @click="onDelete(detailClip)"
-        >
-          删除
-        </button>
-        <span class="spacer" />
-        <button v-if="detailClip.kind === 'image'" class="btn btn-ghost" type="button" :disabled="isImageBroken(detailClip)" @click="previewImage(detailClip.id)">预览 / 钉图</button>
-        <button
-          v-if="detailClip.kind === 'text'"
-          class="btn btn-ghost"
-          type="button"
-          @click="onTranslate(detailClip)"
-        >
-          翻译这条
-        </button>
-        <button
-          v-if="detailClip.kind === 'text' && formattedView && formattedText !== null"
-          class="btn btn-ghost" type="button" @click="onCopyFormatted"
-        >复制格式化结果</button>
-        <button
-          class="btn btn-primary"
-          type="button"
-          :disabled="isImageBroken(detailClip)"
-          @click="onCopy(detailClip)"
-        >
-          {{ detailClip.kind === 'text' ? '复制原文' : '复制' }}
-        </button>
-      </div>
-    </section>
-
-    <template v-else>
-      <div v-if="state.ui.paused" class="banner banner-paused" role="status">
-        <Icon name="pause" :size="13" />
-        <span>已暂停记录，新内容不会写入历史</span>
-        <button class="banner-btn" type="button" @click="onTogglePause">恢复记录</button>
-      </div>
-
-      <div v-if="filteredClips.length" ref="listEl" class="list scroll-y" role="group" aria-label="剪贴板记录">
         <div
-          v-for="(clip, index) in filteredClips"
-          :key="clip.id"
-          class="row"
-          role="button"
-          tabindex="-1"
-          :data-index="index"
-          :class="{ 'is-active': index === state.ui.activeIndex }"
-          :aria-label="`${clipSummary(clip)}，${clip.group}，${relativeTime(clip.copiedAt)}`"
-          @click="selecting ? toggleSelected(clip.id) : onCopy(clip)"
-          @mouseenter="setActive(index)"
+          class="detail-body scroll-y"
+          :class="{ 'code-body': detailClip.kind === 'text', 'no-wrap': !wrapLines }"
+          :tabindex="detailClip.kind === 'text' ? 0 : undefined"
+          :aria-label="detailClip.kind === 'text' ? '代码预览' : undefined"
         >
-          <input v-if="selecting" type="checkbox" :checked="selectedIds.has(clip.id)"
-            :aria-label="`选择：${clipSummary(clip)}`" @click.stop="toggleSelected(clip.id)" />
-          <div class="thumb" :class="{ 'is-broken': isImageBroken(clip) }">
-            <img v-if="clip.kind === 'image' && !isImageBroken(clip)" :src="clip.imageUrl" alt="" />
-            <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
-            <Icon v-else name="text" :size="16" />
-          </div>
-
-          <div class="row-main">
-            <div class="row-title">{{ clip.favorite ? '★ ' : '' }}{{ clipSummary(clip) }}</div>
-            <div class="row-meta">
-              <span class="row-meta-text">{{ clip.group }} · {{ relativeTime(clip.copiedAt) }}</span>
-              <span v-if="clip.note" class="row-meta-text" :title="clip.note">{{ clip.note }}</span>
-              <span v-if="clip.imageMissing" class="tag-missing">图片缺失</span>
+          <template v-if="detailClip.kind === 'image'">
+            <div v-if="isImageBroken(detailClip)" class="detail-missing">
+              <Icon name="image" :size="22" />
+              <p class="detail-missing-title">图片文件已缺失</p>
+              <p class="detail-missing-sub">
+                原文件可能被移动或删除，这条记录无法预览，也无法复制。
+              </p>
+            </div>
+            <img
+              v-else
+              class="detail-img"
+              :src="detailClip.imageUrl"
+              :alt="`剪贴板图片 ${detailClip.width ?? 0} × ${detailClip.height ?? 0}`"
+            />
+          </template>
+          <div
+            v-else
+            class="code-lines"
+            :class="{ numbered: showLineNumbers }"
+            :style="{ '--line-number-width': `${String(previewLines.length).length + 1}ch` }"
+          >
+            <div v-for="(line, index) in previewLines" :key="index" class="code-line">
+              <span
+                v-if="showLineNumbers"
+                class="line-number"
+                :data-line="index + 1"
+                aria-hidden="true"
+              />
+              <span class="line-text">{{ line }}</span>
             </div>
           </div>
+        </div>
 
-          <div v-if="!selecting" class="row-actions">
-            <button v-if="clip.kind === 'image'" class="icon-btn" type="button" title="预览 / 钉图"
-              :disabled="isImageBroken(clip)" :aria-label="`预览图片：${clipSummary(clip)}`" @click.stop="previewImage(clip.id)">
-              <Icon name="image" :size="14" />
+        <div class="management">
+          <input
+            v-model="noteDraft"
+            maxlength="200"
+            aria-label="剪贴板备注"
+            placeholder="添加备注（最多 200 字）"
+          />
+          <button
+            class="chip"
+            type="button"
+            :disabled="savingNote || noteDraft.trim() === (detailClip.note ?? '')"
+            @click="saveNote(detailClip)"
+          >
+            保存备注
+          </button>
+          <button
+            class="chip"
+            type="button"
+            :disabled="savingNote"
+            :aria-pressed="!!detailClip.favorite"
+            @click="saveNote(detailClip, !detailClip.favorite)"
+          >
+            {{ detailClip.favorite ? '取消收藏' : '收藏' }}
+          </button>
+        </div>
+
+        <div class="detail-actions">
+          <select
+            class="snippet-select"
+            :value="detailClip.group"
+            aria-label="记录分组"
+            @change="assignClipGroup(detailClip.id, ($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="group in state.groups" :key="group" :value="group">{{ group }}</option>
+          </select>
+          <button class="btn btn-ghost is-danger" type="button" @click="onDelete(detailClip)">
+            删除
+          </button>
+          <span class="spacer" />
+          <button
+            v-if="detailClip.kind === 'image'"
+            class="btn btn-ghost"
+            type="button"
+            :disabled="isImageBroken(detailClip)"
+            @click="previewImage(detailClip.id)"
+          >
+            预览 / 钉图
+          </button>
+          <button
+            v-if="detailClip.kind === 'text'"
+            class="btn btn-ghost"
+            type="button"
+            :disabled="savingClipSnippetId === detailClip.id"
+            @click="onSaveAsSnippet(detailClip)"
+          >
+            存为短语
+          </button>
+          <button
+            v-if="detailClip.kind === 'text'"
+            class="btn btn-ghost"
+            type="button"
+            @click="onTranslate(detailClip)"
+          >
+            翻译这条
+          </button>
+          <button
+            v-if="detailClip.kind === 'text' && formattedView && formattedText !== null"
+            class="btn btn-ghost"
+            type="button"
+            @click="onCopyFormatted"
+          >
+            复制格式化结果
+          </button>
+          <button
+            class="btn btn-primary"
+            type="button"
+            :disabled="isImageBroken(detailClip)"
+            @click="onCopy(detailClip)"
+          >
+            {{ detailClip.kind === 'text' ? '复制原文' : '复制' }}
+          </button>
+        </div>
+      </section>
+
+      <template v-else>
+        <div v-if="state.ui.paused" class="banner banner-paused" role="status">
+          <Icon name="pause" :size="13" />
+          <span>已暂停记录，新内容不会写入历史</span>
+          <button class="banner-btn" type="button" @click="onTogglePause">恢复记录</button>
+        </div>
+
+        <div
+          v-if="filteredClips.length"
+          ref="listEl"
+          class="list scroll-y"
+          role="group"
+          aria-label="剪贴板记录"
+        >
+          <div
+            v-for="(clip, index) in filteredClips"
+            :key="clip.id"
+            class="row"
+            role="button"
+            tabindex="-1"
+            :data-index="index"
+            :class="{ 'is-active': index === state.ui.activeIndex }"
+            :aria-label="`${clipSummary(clip)}，${clip.group}，${relativeTime(clip.copiedAt)}`"
+            @click="selecting ? toggleSelected(clip.id) : onCopy(clip)"
+            @mouseenter="setActive(index)"
+          >
+            <input
+              v-if="selecting"
+              type="checkbox"
+              :checked="selectedIds.has(clip.id)"
+              :aria-label="`选择：${clipSummary(clip)}`"
+              @click.stop="toggleSelected(clip.id)"
+            />
+            <div class="thumb" :class="{ 'is-broken': isImageBroken(clip) }">
+              <img v-if="clip.kind === 'image' && !isImageBroken(clip)" :src="clip.imageUrl" alt="" />
+              <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
+              <Icon v-else name="text" :size="16" />
+            </div>
+
+            <div class="row-main">
+              <div class="row-title">{{ clip.favorite ? '★ ' : '' }}{{ clipSummary(clip) }}</div>
+              <div class="row-meta">
+                <span class="row-meta-text">
+                  {{ clip.group }} · {{ relativeTime(clip.copiedAt) }}
+                </span>
+                <span v-if="clip.note" class="row-meta-text" :title="clip.note">
+                  {{ clip.note }}
+                </span>
+                <span v-if="clip.imageMissing" class="tag-missing">图片缺失</span>
+              </div>
+            </div>
+
+            <div v-if="!selecting" class="row-actions">
+              <button
+                v-if="clip.kind === 'image'"
+                class="icon-btn"
+                type="button"
+                title="预览 / 钉图"
+                :disabled="isImageBroken(clip)"
+                :aria-label="`预览图片：${clipSummary(clip)}`"
+                @click.stop="previewImage(clip.id)"
+              >
+                <Icon name="image" :size="14" />
+              </button>
+              <button
+                v-if="clip.kind === 'text'"
+                class="icon-btn"
+                type="button"
+                title="存为常用短语"
+                :disabled="savingClipSnippetId === clip.id"
+                :aria-label="`存为常用短语：${clipSummary(clip)}`"
+                @click.stop="onSaveAsSnippet(clip)"
+              >
+                <Icon name="bookmark" :size="14" />
+              </button>
+              <button
+                class="icon-btn"
+                type="button"
+                title="查看详情"
+                :aria-label="`查看详情：${clipSummary(clip)}`"
+                @click.stop="openDetail(clip.id)"
+              >
+                <Icon name="info" :size="14" />
+              </button>
+              <button
+                class="icon-btn is-danger"
+                type="button"
+                title="删除记录"
+                :aria-label="`删除这条记录：${clipSummary(clip)}`"
+                @click.stop="onDelete(clip)"
+              >
+                <Icon name="trash" :size="14" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="empty">
+          <Icon :name="state.clips.length ? 'search' : 'clipboard'" :size="26" />
+          <p class="empty-title">
+            {{ state.clips.length ? '没有匹配的记录' : '还没有剪贴板记录' }}
+          </p>
+          <p class="empty-sub">
+            {{
+              state.clips.length
+                ? '换个关键词，或切到「全部」分组再试。'
+                : '复制任意文本、网址或图片，历史会按时间倒序出现在这里。'
+            }}
+          </p>
+        </div>
+      </template>
+    </template>
+
+    <!-- ==================== 分支二：常用短语模式 ==================== -->
+    <template v-else>
+      <!-- 新建 / 编辑常用短语内联视图 -->
+      <section
+        v-if="editingSnippet"
+        class="detail snippet-editor-wrap"
+        aria-label="编辑常用短语"
+      >
+        <div class="detail-head snippet-head">
+          <button class="back" type="button" @click="cancelEditSnippet">
+            <Icon name="back" :size="14" />
+            <span>返回常用短语</span>
+          </button>
+          <span class="detail-meta">{{ editingSnippet.id ? '编辑模板' : '新建模板' }}</span>
+        </div>
+
+        <div class="snippet-editor scroll-y">
+          <label class="snippet-field">
+            <span class="snippet-label">短语标题</span>
+            <input
+              ref="snippetTitleEl"
+              v-model="editingSnippet.title"
+              class="snippet-input"
+              type="text"
+              maxlength="80"
+              spellcheck="false"
+              placeholder="例如：研发日报抬头、收件地址、常用命令"
+            />
+          </label>
+
+          <div class="snippet-meta-row">
+            <div class="snippet-group-picker">
+              <span class="snippet-label">分组</span>
+              <template v-if="!customGroupMode">
+                <select
+                  v-model="editingSnippet.group"
+                  class="snippet-select"
+                  aria-label="常用短语分组"
+                >
+                  <option v-for="group in state.snippetGroups" :key="group" :value="group">
+                    {{ group }}
+                  </option>
+                </select>
+                <button
+                  class="chip"
+                  type="button"
+                  @click="customGroupMode = true; customGroupName = ''"
+                >
+                  + 新分组
+                </button>
+              </template>
+              <template v-else>
+                <input
+                  v-model="customGroupName"
+                  class="snippet-input compact-input"
+                  type="text"
+                  maxlength="40"
+                  placeholder="输入新分组名"
+                  aria-label="新分组名称"
+                />
+                <button class="chip" type="button" @click="customGroupMode = false">
+                  选已有
+                </button>
+              </template>
+            </div>
+
+            <label class="pin-toggle">
+              <input v-model="editingSnippet.pinned" type="checkbox" />
+              <span>置顶此短语</span>
+            </label>
+          </div>
+
+          <div class="var-bar" role="group" aria-label="插入动态占位符">
+            <span class="var-hint">插入变量：</span>
+            <button
+              v-for="preset in variablePresets"
+              :key="preset.token"
+              class="chip var-chip"
+              type="button"
+              :title="preset.title"
+              @click="insertVariable(preset.token)"
+            >
+              + {{ preset.label }}
+            </button>
+          </div>
+
+          <label class="snippet-field snippet-body-field">
+            <span class="snippet-label">短语内容</span>
+            <textarea
+              ref="snippetBodyEl"
+              v-model="editingSnippet.content"
+              class="textarea snippet-textarea"
+              rows="4"
+              maxlength="20000"
+              spellcheck="false"
+              placeholder="输入短语正文，支持点击上方按钮插入 {{date}}、{{time}}、{{clipboard}} 等变量；复制时仅写入剪贴板，不会自动发送。"
+            />
+          </label>
+
+          <div v-if="draftHasVariables" class="var-preview" role="status">
+            <div class="var-preview-head">动态拼装实时预览</div>
+            <div class="var-preview-body">{{ draftPreviewText }}</div>
+          </div>
+        </div>
+
+        <div class="detail-actions snippet-actions">
+          <template v-if="editingOriginal">
+            <button
+              class="btn btn-ghost is-danger"
+              type="button"
+              :disabled="deletingSnippet"
+              @click="performDeleteSnippet(editingOriginal.id)"
+            >
+              删除
             </button>
             <button
-              class="icon-btn"
+              v-if="canMoveSnippet(editingOriginal, -1)"
+              class="btn btn-ghost"
               type="button"
-              :aria-label="`查看详情：${clipSummary(clip)}`"
-              @click.stop="openDetail(clip.id)"
+              @click="moveSnippetOrder(editingOriginal, -1)"
             >
-              <Icon name="info" :size="14" />
+              上移
             </button>
             <button
-              class="icon-btn is-danger"
+              v-if="canMoveSnippet(editingOriginal, 1)"
+              class="btn btn-ghost"
               type="button"
-              :aria-label="`删除这条记录：${clipSummary(clip)}`"
-              @click.stop="onDelete(clip)"
+              @click="moveSnippetOrder(editingOriginal, 1)"
             >
-              <Icon name="trash" :size="14" />
+              下移
+            </button>
+            <button
+              v-if="hasSnippetVariables(editingOriginal.content)"
+              class="btn btn-ghost"
+              type="button"
+              title="不展开变量，复制原始模板花括号"
+              @click="onCopySnippet(editingOriginal, true)"
+            >
+              原样复制
+            </button>
+          </template>
+          <span class="spacer" />
+          <button class="btn btn-ghost" type="button" @click="cancelEditSnippet">取消</button>
+          <button
+            class="btn btn-primary"
+            type="button"
+            :disabled="savingSnippet || !editingSnippet.title.trim() || !editingSnippet.content.trim()"
+            @click="submitSnippet"
+          >
+            {{ savingSnippet ? '保存中…' : '保存短语' }}
+          </button>
+        </div>
+      </section>
+
+      <!-- 常用短语列表视图 -->
+      <template v-else>
+        <div class="filter-bar">
+          <div class="chips" role="group" aria-label="按短语分组筛选">
+            <button
+              v-for="group in snippetGroupFilters"
+              :key="group"
+              class="chip"
+              type="button"
+              :class="{ 'is-on': group === state.ui.snippetGroup }"
+              :aria-pressed="group === state.ui.snippetGroup"
+              @click="setSnippetGroup(group)"
+            >
+              {{ group }}
+            </button>
+          </div>
+          <div class="filter-actions" role="group" aria-label="置顶筛选">
+            <button
+              class="chip"
+              type="button"
+              :aria-pressed="state.ui.snippetPinnedOnly"
+              :class="{ 'is-on': state.ui.snippetPinnedOnly }"
+              @click="state.ui.snippetPinnedOnly = !state.ui.snippetPinnedOnly; state.ui.snippetActiveIndex = 0"
+            >
+              只看置顶
             </button>
           </div>
         </div>
-      </div>
 
-      <div v-else class="empty">
-        <Icon :name="state.clips.length ? 'search' : 'clipboard'" :size="26" />
-        <p class="empty-title">{{ state.clips.length ? '没有匹配的记录' : '还没有剪贴板记录' }}</p>
-        <p class="empty-sub">
-          {{
-            state.clips.length
-              ? '换个关键词，或切到「全部」分组再试。'
-              : '复制任意文本、网址或图片，历史会按时间倒序出现在这里。'
-          }}
-        </p>
-      </div>
+        <div v-if="snippetDeletePrompt" class="management" role="alert">
+          <span>删除置顶短语「{{ snippetDeletePrompt.title }}」？</span>
+          <button
+            class="chip"
+            type="button"
+            :disabled="deletingSnippet"
+            @click="performDeleteSnippet(snippetDeletePrompt.id)"
+          >
+            确认删除
+          </button>
+          <button
+            class="chip"
+            type="button"
+            :disabled="deletingSnippet"
+            @click="snippetDeletePrompt = null"
+          >
+            取消
+          </button>
+        </div>
+
+        <div
+          v-if="filteredSnippets.length"
+          ref="snippetListEl"
+          class="list scroll-y"
+          role="group"
+          aria-label="常用短语列表"
+        >
+          <div
+            v-for="(snippet, index) in filteredSnippets"
+            :key="snippet.id"
+            class="row snippet-row"
+            role="button"
+            tabindex="-1"
+            :data-index="index"
+            :class="{ 'is-active': index === state.ui.snippetActiveIndex }"
+            :aria-label="`${snippet.title}，${snippet.group}`"
+            @click="onCopySnippet(snippet)"
+            @mouseenter="state.ui.snippetActiveIndex = index"
+          >
+            <div class="thumb snippet-thumb" :class="{ 'is-pinned': snippet.pinned }">
+              <Icon :name="snippet.pinned ? 'pin' : 'bookmark'" :size="15" />
+            </div>
+
+            <div class="row-main">
+              <div class="row-title snippet-title-line">
+                <span class="snippet-title-text">{{ snippet.title }}</span>
+                <span v-if="hasSnippetVariables(snippet.content)" class="tag-dynamic">动态</span>
+              </div>
+              <div class="row-meta">
+                <span class="row-meta-text">
+                  {{ snippet.group }} · {{ snippetSummary(snippet.content) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="row-actions">
+              <button
+                class="icon-btn"
+                type="button"
+                :class="{ 'is-pinned-btn': snippet.pinned }"
+                :title="snippet.pinned ? '取消置顶' : '置顶短语'"
+                :aria-label="`${snippet.pinned ? '取消置顶' : '置顶'}：${snippet.title}`"
+                @click.stop="onTogglePin(snippet)"
+              >
+                <Icon name="pin" :size="14" />
+              </button>
+              <button
+                class="icon-btn"
+                type="button"
+                title="编辑短语"
+                :aria-label="`编辑短语：${snippet.title}`"
+                @click.stop="openEditSnippet(snippet)"
+              >
+                <Icon name="edit" :size="14" />
+              </button>
+              <button
+                class="icon-btn is-danger"
+                type="button"
+                title="删除短语"
+                :aria-label="`删除短语：${snippet.title}`"
+                @click.stop="onRequestDeleteSnippet(snippet)"
+              >
+                <Icon name="trash" :size="14" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="empty">
+          <Icon :name="state.snippets.length ? 'search' : 'bookmark'" :size="26" />
+          <p class="empty-title">
+            {{ state.snippets.length ? '没有匹配的常用短语' : '还没有常用短语' }}
+          </p>
+          <p class="empty-sub">{{ emptySnippetHint }}</p>
+          <button
+            v-if="!state.snippets.length"
+            class="btn btn-primary empty-cta"
+            type="button"
+            @click="openCreateSnippet"
+          >
+            新建第一条短语
+          </button>
+        </div>
+      </template>
     </template>
 
-    <footer class="foot">{{ detailClip?.kind === 'text' ? '格式化仅改变预览，原文始终保留' : detailClip ? 'Esc 返回列表' : '方向键选择 · Enter 复制 · Esc 关闭' }}</footer>
+    <footer class="foot">{{ footerHint }}</footer>
   </div>
 </template>
 
 <style scoped>
-.management { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; }
-.management input:not([type]) { min-width: 8rem; flex: 1; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; }
+.management {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+}
+
+.management input:not([type]) {
+  min-width: 8rem;
+  flex: 1;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 5px 8px;
+}
 
 .pop {
   display: flex;
@@ -496,13 +1346,69 @@ watch(
   outline-offset: 1px;
 }
 
-/* 顶部：搜索与暂停 */
+/* 顶部模式切换栏 */
+.mode-bar {
+  flex: none;
+  padding: 8px 10px 0;
+}
+
+.mode-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+}
+
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: calc(var(--r-chip) - 2px);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.seg-btn:hover {
+  color: var(--text);
+}
+
+.seg-btn.is-active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.seg-count {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.45;
+}
+
+.seg-btn.is-active .seg-count {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+/* 顶部：搜索与动作按钮 */
 .head {
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 10px 10px 8px;
+  padding: 8px 10px;
 }
 
 .search {
@@ -578,7 +1484,7 @@ watch(
   align-items: center;
   gap: 5px;
   height: 32px;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: var(--r-chip);
   font-size: var(--text-sm);
@@ -597,14 +1503,17 @@ watch(
   background: var(--active);
 }
 
-.pause.is-paused {
+.pause.is-paused,
+.create-snippet-btn {
   background: var(--accent-weak);
-  border-color: var(--accent);
+  border-color: var(--accent-weak);
   color: var(--accent);
+  font-weight: 500;
 }
 
-.pause.is-paused:hover {
-  border-color: var(--accent-hover);
+.pause.is-paused:hover,
+.create-snippet-btn:hover {
+  border-color: var(--accent);
   color: var(--accent-hover);
 }
 
@@ -621,10 +1530,6 @@ watch(
   border-radius: var(--r-chip);
   font-size: var(--text-xs);
   color: var(--text-2);
-}
-
-.banner-readonly {
-  border-color: var(--line-strong);
 }
 
 .banner-btn {
@@ -659,6 +1564,7 @@ watch(
   gap: 6px 8px;
   padding: 0 10px 8px;
 }
+
 .chips {
   flex: 1 1 140px;
   min-width: 0;
@@ -670,8 +1576,19 @@ watch(
   scrollbar-width: none;
 }
 
-.filter-actions { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; padding-left: 8px; border-left: 1px solid var(--line-strong); }
-.selection-actions { padding-top: 0; }
+.filter-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.selection-actions {
+  padding-top: 0;
+}
 
 .chips::-webkit-scrollbar {
   display: none;
@@ -774,6 +1691,12 @@ watch(
   color: var(--text-3);
 }
 
+.snippet-thumb.is-pinned {
+  background: var(--accent-weak);
+  border-color: var(--accent-weak);
+  color: var(--accent);
+}
+
 .row-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -785,6 +1708,29 @@ watch(
   white-space: nowrap;
   font-size: var(--text-base);
   color: var(--text);
+}
+
+.snippet-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.snippet-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.tag-dynamic {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .row-meta {
@@ -847,6 +1793,10 @@ watch(
   background: var(--line-strong);
 }
 
+.icon-btn.is-pinned-btn {
+  color: var(--accent);
+}
+
 .icon-btn.is-danger:hover {
   background: var(--danger-weak);
   color: var(--danger);
@@ -859,7 +1809,7 @@ watch(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 34px 24px 38px;
+  padding: 28px 24px 32px;
   text-align: center;
   color: var(--text-3);
 }
@@ -871,20 +1821,24 @@ watch(
 }
 
 .empty-sub {
-  margin: 0;
-  max-width: 260px;
+  margin: 4px 0 0;
+  max-width: 268px;
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--text-3);
 }
 
-/* 详情 */
+.empty-cta {
+  margin-top: 12px;
+}
+
+/* 详情与短语编辑器 */
 .detail {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0 10px 10px;
+  padding: 8px 10px 10px;
 }
 
 .detail-head {
@@ -934,21 +1888,248 @@ watch(
   border-radius: var(--r-card);
 }
 
-.preview-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
-.preview-modes { display: flex; gap: 6px; margin-right: auto; }
-.preview-controls label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
-.preview-controls input { margin: 0; accent-color: var(--accent); }
-.format-error { margin: 0 0 8px; color: var(--danger); font-size: 12px; }
-.detail-body.code-body { flex: 0 1 auto; min-height: 90px; max-height: 224px; overflow: auto; padding: 10px 8px; }
-.code-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.code-lines { font-family: var(--font-mono); font-size: 12px; line-height: 1.75; tab-size: 4; color: var(--text); }
-.code-line { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 1.75em; }
-.numbered .code-line { grid-template-columns: var(--line-number-width) minmax(0, 1fr); column-gap: 12px; }
-.line-number { text-align: right; color: var(--text-3); user-select: none; }
-.line-number::before { content: attr(data-line); }
-.line-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-.no-wrap .code-lines { width: max-content; min-width: 100%; }
-.no-wrap .line-text { white-space: pre; overflow-wrap: normal; }
+/* 常用短语内联编辑区 */
+.snippet-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-right: 2px;
+}
+
+.snippet-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snippet-body-field {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.snippet-label {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.snippet-input,
+.snippet-select {
+  height: 30px;
+  padding: 0 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+  font-size: var(--text-sm);
+  color: var(--text);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.snippet-input::placeholder {
+  color: var(--text-3);
+}
+
+.snippet-input:focus-visible,
+.snippet-select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.compact-input {
+  width: 118px;
+}
+
+.snippet-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.snippet-group-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pin-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.var-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.var-hint {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  margin-right: 2px;
+}
+
+.var-chip {
+  height: 22px;
+  padding: 0 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.snippet-textarea {
+  width: 100%;
+  min-height: 74px;
+  flex: 1 1 auto;
+  resize: vertical;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.snippet-textarea::placeholder {
+  color: var(--text-3);
+}
+
+.snippet-textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.var-preview {
+  flex: none;
+  margin-top: 2px;
+  padding: 7px 9px;
+  background: var(--surface-2);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-chip);
+}
+
+.var-preview-head {
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+
+.var-preview-body {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.preview-modes {
+  display: flex;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.preview-controls label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.preview-controls input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.format-error {
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.detail-body.code-body {
+  flex: 0 1 auto;
+  min-height: 90px;
+  max-height: 224px;
+  overflow: auto;
+  padding: 10px 8px;
+}
+
+.code-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.code-lines {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.75;
+  tab-size: 4;
+  color: var(--text);
+}
+
+.code-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 1.75em;
+}
+
+.numbered .code-line {
+  grid-template-columns: var(--line-number-width) minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.line-number {
+  text-align: right;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.line-number::before {
+  content: attr(data-line);
+}
+
+.line-text {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.no-wrap .code-lines {
+  width: max-content;
+  min-width: 100%;
+}
+
+.no-wrap .line-text {
+  white-space: pre;
+  overflow-wrap: normal;
+}
 
 .detail-img {
   display: block;

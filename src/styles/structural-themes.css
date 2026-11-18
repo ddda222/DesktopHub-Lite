@@ -1,0 +1,373 @@
+/* 结构级器物主题全站覆盖：琥珀重工（mecha）、海棠书卷（scroll）、像素掌机（pixel） */
+
+/* ============================================================================
+ * 01 琥珀重工（data-theme="mecha"）：45° 倒角装甲、斜纹警示推子与工业导轨
+ * ============================================================================ */
+:root[data-theme='mecha'] ::selection {
+  background: rgba(245, 158, 11, 0.35);
+  color: #fff;
+}
+
+:root[data-theme='mecha'] .stage {
+  background:
+    repeating-linear-gradient(-45deg, rgba(245, 158, 11, 0.025) 0 8px, transparent 8px 16px),
+    radial-gradient(120% 90% at 50% 0%, var(--stage-1) 0%, var(--stage-2) 100%);
+}
+
+:root[data-theme='mecha'] * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(245, 158, 11, 0.52) rgba(245, 158, 11, 0.08);
+}
+
+:root[data-theme='mecha'] ::-webkit-scrollbar { width: 6px; height: 6px; }
+:root[data-theme='mecha'] ::-webkit-scrollbar-track { background: rgba(245, 158, 11, 0.07); border-radius: 0; }
+:root[data-theme='mecha'] ::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.5); border-radius: 0; border: 0; }
+:root[data-theme='mecha'] ::-webkit-scrollbar-thumb:hover { background: #fbbf24; }
+
+/* 调音台与设置页：45° 斜纹防滑警示推子 */
+:root[data-theme='mecha'] .audio-mixer .volume-control { --volume-fill: var(--accent); }
+:root[data-theme='mecha'] .audio-mixer .muted .volume-control { --volume-fill: var(--text-3); }
+:root[data-theme='mecha'] .audio-mixer .volume-slider::-webkit-slider-runnable-track,
+:root[data-theme='mecha'] .settings-ui .features .size-slider::-webkit-slider-runnable-track {
+  height: 7px; border-radius: 0;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.42);
+}
+:root[data-theme='mecha'] .settings-ui .features .size-slider::-webkit-slider-runnable-track {
+  background: rgba(245, 158, 11, 0.16);
+}
+:root[data-theme='mecha'] .audio-mixer .volume-slider::-webkit-slider-thumb,
+:root[data-theme='mecha'] .settings-ui .features .size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 15px; height: 19px; margin-top: -6px; border-radius: 1px;
+  background: repeating-linear-gradient(-45deg, #f59e0b 0 3px, #171920 3px 6px);
+  border: 1.5px solid #fde68a;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+:root[data-theme='mecha'] .audio-mixer .sound-profiles button,
+:root[data-theme='mecha'] .audio-mixer .mute,
+:root[data-theme='mecha'] .audio-mixer .save-profile button,
+:root[data-theme='mecha'] .file-shelf .shelf-tools button,
+:root[data-theme='mecha'] .translation-panel .primary {
+  border-radius: 2px;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .audio-mixer .sound-profiles button[aria-pressed='true'],
+:root[data-theme='mecha'] .audio-mixer .muted .mute,
+:root[data-theme='mecha'] .audio-mixer .save-profile button {
+  background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+}
+:root[data-theme='mecha'] .audio-mixer .volume-readout { border-radius: 2px; color: var(--accent); }
+
+/* 设置中心（琥珀重工） */
+:root[data-theme='mecha'] .settings-ui {
+  --accent: #f59e0b; --accent-text: #111318; --accent-weak: rgba(245, 158, 11, 0.18); --accent-hover: #fbbf24;
+}
+:root[data-theme='mecha'] .settings-ui .win {
+  border-radius: 4px; border-color: rgba(245, 158, 11, 0.45);
+  clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px), calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px), 0 12px);
+}
+:root[data-theme='mecha'] .settings-ui .win-head {
+  background: repeating-linear-gradient(-45deg, rgba(245, 158, 11, 0.06) 0 6px, transparent 6px 12px), #13161d;
+  border-bottom-color: rgba(245, 158, 11, 0.3);
+}
+:root[data-theme='mecha'] .settings-ui .brand-mark {
+  border-radius: 0; background: var(--accent); color: #111318; border-color: var(--accent);
+  clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
+}
+:root[data-theme='mecha'] .settings-ui .nav { background: #12151c; border-right-color: rgba(245, 158, 11, 0.22); }
+:root[data-theme='mecha'] .settings-ui .nav-item {
+  border-radius: 0;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+:root[data-theme='mecha'] .settings-ui .nav-item.is-active {
+  background: var(--accent); color: #111318; box-shadow: none;
+}
+:root[data-theme='mecha'] .settings-ui .btn,
+:root[data-theme='mecha'] .settings-ui .seg-item,
+:root[data-theme='mecha'] .settings-ui .app-management .category-filter {
+  border-radius: 0;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .settings-ui .btn-primary,
+:root[data-theme='mecha'] .settings-ui .seg-item.is-on,
+:root[data-theme='mecha'] .settings-ui .app-management .category-filter.selected {
+  background: var(--accent); color: #111318; border-color: var(--accent);
+}
+:root[data-theme='mecha'] .settings-ui .control,
+:root[data-theme='mecha'] .settings-ui .seg { border-radius: 3px; }
+:root[data-theme='mecha'] .settings-ui .switch { border-radius: 2px; }
+:root[data-theme='mecha'] .settings-ui .switch-knob { border-radius: 1px; }
+:root[data-theme='mecha'] .settings-ui .switch.is-on { background: var(--accent); border-color: var(--accent); }
+:root[data-theme='mecha'] .settings-ui .switch.is-on .switch-knob { background: #111318; }
+:root[data-theme='mecha'] .toast {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.5); box-shadow: inset 4px 0 0 var(--accent), 0 10px 28px rgba(0, 0, 0, 0.6);
+}
+:root[data-theme='mecha'] .pop .seg-btn.is-active,
+:root[data-theme='mecha'] .pop .create-snippet-btn,
+:root[data-theme='mecha'] .pop .btn-primary {
+  background: var(--accent); color: #111318; border-color: var(--accent); box-shadow: none;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .pop .seg-btn.is-active .seg-count {
+  background: rgba(17, 19, 24, 0.22); color: #111318;
+}
+:root[data-theme='mecha'] .pop .snippet-input,
+:root[data-theme='mecha'] .pop .snippet-select,
+:root[data-theme='mecha'] .pop .var-preview {
+  border-radius: 3px; border-color: rgba(245, 158, 11, 0.24);
+}
+:root[data-theme='mecha'] .pop .tag-dynamic {
+  border-radius: 1px; font-family: var(--font-mono);
+  clip-path: polygon(3px 0, 100% 0, 100% 100%, 0 100%, 0 3px);
+}
+
+
+/* ============================================================================
+ * 03 海棠书卷（data-theme="scroll"）：宣纸乌丝双栏、菱形朱砂印滑钮与折页方笺
+ * ============================================================================ */
+:root[data-theme='scroll'] ::selection {
+  background: rgba(185, 58, 38, 0.2);
+  color: #1f2421;
+}
+
+:root[data-theme='scroll'] * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(44, 48, 46, 0.4) transparent;
+}
+
+:root[data-theme='scroll'] ::-webkit-scrollbar { width: 5px; height: 5px; }
+:root[data-theme='scroll'] ::-webkit-scrollbar-track { background: transparent; border-left: 1px dashed rgba(31, 36, 33, 0.2); }
+:root[data-theme='scroll'] ::-webkit-scrollbar-thumb { background: #6b7068; border-radius: 0; border: 0; }
+:root[data-theme='scroll'] ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+
+/* 调音台与设置页：松烟墨横尺 + 45° 旋转菱形朱砂印泥滑块 */
+:root[data-theme='scroll'] .audio-mixer .volume-control { --volume-fill: #1f2421; }
+:root[data-theme='scroll'] .audio-mixer .volume-slider::-webkit-slider-runnable-track {
+  height: 2px; border-radius: 0; box-shadow: none;
+  background: linear-gradient(to right, #1f2421 0 var(--volume-progress), rgba(31, 36, 33, 0.22) var(--volume-progress) 100%);
+}
+:root[data-theme='scroll'] .settings-ui .features .size-slider::-webkit-slider-runnable-track {
+  height: 2px; border-radius: 0; box-shadow: none; background: rgba(31, 36, 33, 0.28);
+}
+:root[data-theme='scroll'] .audio-mixer .volume-slider::-webkit-slider-thumb,
+:root[data-theme='scroll'] .settings-ui .features .size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -6px; border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--accent); border: 2px solid #f6f1e5;
+  box-shadow: 0 1px 3px rgba(31, 36, 33, 0.3);
+}
+:root[data-theme='scroll'] .audio-mixer .volume-slider:hover::-webkit-slider-thumb,
+:root[data-theme='scroll'] .settings-ui .features .size-slider:hover::-webkit-slider-thumb {
+  transform: rotate(45deg) scale(1.12);
+}
+:root[data-theme='scroll'] .audio-mixer .volume-readout {
+  border-radius: 2px; border-color: rgba(31, 36, 33, 0.25); color: var(--accent); font-family: Georgia, serif;
+}
+:root[data-theme='scroll'] .audio-mixer .sound-channel,
+:root[data-theme='scroll'] .settings-ui .set-row,
+:root[data-theme='scroll'] .settings-ui .group-row,
+:root[data-theme='scroll'] .settings-ui .app-management .managed-app {
+  border-bottom-style: dashed;
+  border-top-style: dashed;
+}
+:root[data-theme='scroll'] .audio-mixer .sound-profiles button[aria-pressed='true'],
+:root[data-theme='scroll'] .audio-mixer .muted .mute,
+:root[data-theme='scroll'] .audio-mixer .save-profile button {
+  background: var(--accent); color: #fff; border-color: var(--accent); border-radius: 2px;
+}
+:root[data-theme='scroll'] .file-shelf .shelf-list li {
+  border-radius: 2px; border-color: rgba(31, 36, 33, 0.2);
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+}
+
+/* 设置中心（海棠书卷：古籍双线乌丝栏 + 海棠花窗角 + 朱砂印签） */
+:root[data-theme='scroll'] .settings-ui {
+  --accent: #b93a26; --accent-text: #ffffff; --accent-weak: rgba(185, 58, 38, 0.12); --accent-hover: #9e2f1e;
+}
+:root[data-theme='scroll'] .settings-ui .win {
+  border-radius: 2px; border: 2px solid #2c302e;
+  outline: 1px solid rgba(31, 36, 33, 0.24); outline-offset: -6px;
+}
+:root[data-theme='scroll'] .settings-ui .brand-mark {
+  border-radius: 1px; background: var(--accent); color: #fff; border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+:root[data-theme='scroll'] .settings-ui .nav {
+  background: #efe9d9; border-right: 1px solid rgba(31, 36, 33, 0.24);
+}
+:root[data-theme='scroll'] .settings-ui .nav-item { border-radius: 2px; }
+:root[data-theme='scroll'] .settings-ui .nav-item.is-active {
+  background: var(--accent); color: #fff;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 0 100%);
+  box-shadow: none;
+}
+:root[data-theme='scroll'] .settings-ui .btn,
+:root[data-theme='scroll'] .settings-ui .control,
+:root[data-theme='scroll'] .settings-ui .seg,
+:root[data-theme='scroll'] .settings-ui .seg-item { border-radius: 2px; }
+:root[data-theme='scroll'] .settings-ui .btn-primary,
+:root[data-theme='scroll'] .settings-ui .seg-item.is-on,
+:root[data-theme='scroll'] .settings-ui .app-management .category-filter.selected {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+:root[data-theme='scroll'] .settings-ui .switch { border-radius: 2px; }
+:root[data-theme='scroll'] .settings-ui .switch-knob { border-radius: 1px; transform: rotate(45deg) scale(0.78); }
+:root[data-theme='scroll'] .settings-ui .switch.is-on { background: var(--accent); border-color: var(--accent); }
+:root[data-theme='scroll'] .settings-ui .switch.is-on .switch-knob { transform: translateX(18px) rotate(45deg) scale(0.78); background: #fff; }
+:root[data-theme='scroll'] .toast {
+  border-radius: 2px; border: 1.5px solid #2c302e; box-shadow: inset 4px 0 0 var(--accent), 0 10px 26px rgba(31, 36, 33, 0.22);
+}
+:root[data-theme='scroll'] .pop .seg-btn.is-active,
+:root[data-theme='scroll'] .pop .btn-primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); border-radius: 2px;
+}
+:root[data-theme='scroll'] .pop .seg-btn.is-active .seg-count {
+  background: rgba(255, 255, 255, 0.22); color: #fff;
+}
+:root[data-theme='scroll'] .pop .snippet-input,
+:root[data-theme='scroll'] .pop .snippet-select,
+:root[data-theme='scroll'] .pop .var-preview {
+  border-radius: 2px; border-color: rgba(31, 36, 33, 0.24);
+}
+:root[data-theme='scroll'] .pop .tag-dynamic {
+  border-radius: 1px; background: var(--accent); color: #fff;
+}
+
+
+/* ============================================================================
+ * 04 像素掌机（data-theme="pixel"）：双层机身液晶屏、3D 厚底按键与分段像素能量格
+ * ============================================================================ */
+:root[data-theme='pixel'] ::selection {
+  background: #a3e635;
+  color: #0f0d1a;
+}
+
+:root[data-theme='pixel'] * {
+  scrollbar-width: thin;
+  scrollbar-color: #a3e635 #1c221e;
+}
+
+:root[data-theme='pixel'] ::-webkit-scrollbar { width: 8px; height: 8px; }
+:root[data-theme='pixel'] ::-webkit-scrollbar-track { background: #1c221e; border-left: 2px solid #0f0d1a; }
+:root[data-theme='pixel'] ::-webkit-scrollbar-thumb { background: #a3e635; border: 2px solid #0f0d1a; border-radius: 0; }
+:root[data-theme='pixel'] ::-webkit-scrollbar-thumb:hover { background: #facc15; }
+
+/* 调音台与设置页：10 格独立像素能量槽 + 硬阴影像素滑块 */
+:root[data-theme='pixel'] .audio-mixer .volume-control { --volume-fill: #a3e635; }
+:root[data-theme='pixel'] .audio-mixer .volume-slider::-webkit-slider-runnable-track {
+  height: 11px; border-radius: 0; border: 2px solid #0f0d1a; box-shadow: none;
+  background:
+    repeating-linear-gradient(90deg, transparent 0 9px, #1c221e 9px 12px),
+    linear-gradient(to right, var(--volume-fill) 0 var(--volume-progress), #2b352e var(--volume-progress) 100%);
+}
+:root[data-theme='pixel'] .settings-ui .features .size-slider::-webkit-slider-runnable-track {
+  height: 11px; border-radius: 0; border: 2px solid #0f0d1a; box-shadow: none;
+  background: repeating-linear-gradient(90deg, #a3e635 0 9px, #1c221e 9px 12px);
+}
+:root[data-theme='pixel'] .audio-mixer .volume-slider::-webkit-slider-thumb,
+:root[data-theme='pixel'] .settings-ui .features .size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 11px; height: 19px; margin-top: -6px; border-radius: 0;
+  background: #facc15; border: 2px solid #0f0d1a; box-shadow: 2px 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .audio-mixer .volume-readout {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; color: #facc15;
+}
+:root[data-theme='pixel'] .audio-mixer .sound-profiles button,
+:root[data-theme='pixel'] .audio-mixer .mute,
+:root[data-theme='pixel'] .audio-mixer .save-profile button,
+:root[data-theme='pixel'] .file-shelf .shelf-tools button,
+:root[data-theme='pixel'] .translation-panel .primary {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc;
+  box-shadow: 0 3px 0 #0f0d1a; font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .audio-mixer .sound-profiles button[aria-pressed='true'],
+:root[data-theme='pixel'] .audio-mixer .muted .mute,
+:root[data-theme='pixel'] .audio-mixer .save-profile button,
+:root[data-theme='pixel'] .translation-panel .primary {
+  background: var(--accent); color: #0f0d1a; font-weight: 700;
+}
+:root[data-theme='pixel'] .file-shelf .shelf-list li {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #252e27; box-shadow: 2px 2px 0 #0f0d1a;
+}
+
+/* 设置中心（像素掌机：紫灰外壳 + 暗绿内屏 + 3D 实体按键） */
+:root[data-theme='pixel'] .settings-ui {
+  --accent: #a3e635; --accent-text: #0f0d1a; --accent-weak: rgba(163, 230, 53, 0.22); --accent-hover: #bef264;
+  font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .settings-ui .win {
+  border-radius: 0; background: #35304f;
+  border: 3px solid #0f0d1a; box-shadow: 6px 6px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .win-head {
+  background: #2b2742; border-bottom: 3px solid #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .brand-mark {
+  border-radius: 0; background: #facc15; color: #0f0d1a; border: 2px solid #0f0d1a; box-shadow: 2px 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .nav {
+  background: #2b2742; border-right: 3px solid #0f0d1a; gap: 8px;
+}
+:root[data-theme='pixel'] .settings-ui .content {
+  background: #1c221e; box-shadow: inset 0 4px 0 rgba(0, 0, 0, 0.42);
+}
+:root[data-theme='pixel'] .settings-ui .nav-item,
+:root[data-theme='pixel'] .settings-ui .btn,
+:root[data-theme='pixel'] .settings-ui .seg-item,
+:root[data-theme='pixel'] .settings-ui .app-management .category-filter {
+  border-radius: 0; background: #4a436b; color: #f1f5f9;
+  border: 2px solid #0f0d1a; box-shadow: 0 3px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .nav-item:hover,
+:root[data-theme='pixel'] .settings-ui .btn:hover:not(:disabled),
+:root[data-theme='pixel'] .settings-ui .seg-item:hover:not(.is-on) {
+  background: #5b5282;
+}
+:root[data-theme='pixel'] .settings-ui .nav-item.is-active,
+:root[data-theme='pixel'] .settings-ui .btn-primary,
+:root[data-theme='pixel'] .settings-ui .seg-item.is-on,
+:root[data-theme='pixel'] .settings-ui .app-management .category-filter.selected {
+  background: var(--accent); color: #0f0d1a; border-color: #0f0d1a;
+  transform: translateY(1px); box-shadow: 0 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .nav-item:active,
+:root[data-theme='pixel'] .settings-ui .btn:active:not(:disabled) {
+  transform: translateY(3px); box-shadow: none;
+}
+:root[data-theme='pixel'] .settings-ui .seg {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; gap: 6px; padding: 6px;
+}
+:root[data-theme='pixel'] .settings-ui .control {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+:root[data-theme='pixel'] .settings-ui .switch {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; height: 24px;
+}
+:root[data-theme='pixel'] .settings-ui .switch-knob {
+  border-radius: 0; top: 2px; left: 2px; width: 16px; height: 16px; background: #94a3b8; border: 2px solid #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .switch.is-on { background: var(--accent); }
+:root[data-theme='pixel'] .settings-ui .switch.is-on .switch-knob { background: #facc15; transform: translateX(18px); }
+:root[data-theme='pixel'] .toast,
+:root[data-theme='pixel'] .image-preview-window button {
+  border-radius: 0; border: 2px solid #0f0d1a; box-shadow: 3px 3px 0 #0f0d1a; font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .pop .create-snippet-btn,
+:root[data-theme='pixel'] .pop .btn {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc;
+  box-shadow: 0 2px 0 #0f0d1a; font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .pop .btn-primary,
+:root[data-theme='pixel'] .pop .create-snippet-btn {
+  background: var(--accent); color: #0f0d1a; font-weight: 700;
+}
+:root[data-theme='pixel'] .pop .var-preview {
+  border-radius: 0; border: 2px dashed #0f0d1a; background: #141915;
+}
+:root[data-theme='pixel'] .pop .tag-dynamic {
+  border-radius: 0; background: #facc15; color: #0f0d1a; font-weight: 700;
+}

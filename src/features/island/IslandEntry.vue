@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import GlassLight from '@/components/GlassLight.vue'
-import LiquidSkin from './motion/LiquidSkin.vue'
+import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
 import IslandParticles from './motion/IslandParticles.vue'
 import { useIslandEffects, type IslandCue } from './motion/useIslandEffects'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
@@ -14,7 +14,7 @@ import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
-import { pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
+import { isDarkTheme, pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
 
 const props = defineProps<{ previewFeedback?: { kind: string; sequence: number }; previewKeepOpen?: boolean; previewCue?: IslandCue }>()
 const element = ref<HTMLElement | null>(null)
@@ -34,20 +34,39 @@ const windowDrag = useWindowDrag(viewport, {
   onError: error => pushToast(`无法拖动窗口：${String(error)}`, 'error')
 })
 const panel = ref<HTMLElement | null>(null)
+function resolveVariant(mode = state.settings.theme): IslandVariant {
+  if (mode === 'midnight') return 'telemetry'
+  if (mode === 'mecha') return 'mecha'
+  if (mode === 'scroll') return 'scroll'
+  if (mode === 'pixel') return 'pixel'
+  return 'standard'
+}
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
-const dark = ref(document.documentElement.dataset.theme === 'dark')
+const dark = ref(isDarkTheme())
+const variant = ref<IslandVariant>(resolveVariant())
+const telemetry = computed(() => variant.value === 'telemetry')
+const glassPalette = computed<'cool' | 'amber' | 'vermilion' | 'lime'>(() => {
+  if (variant.value === 'mecha') return 'amber'
+  if (variant.value === 'scroll') return 'vermilion'
+  if (variant.value === 'pixel') return 'lime'
+  return 'cool'
+})
+const scanSeq = ref(0)
 const hostExpanded = computed(() => state.ui.islandExpanded)
 const suppressed = computed(() => state.ui.fullscreenSuppressed)
 const hoverClosing = ref(false)
 const expanded = computed(() => hostExpanded.value && !hoverClosing.value)
 // 避让只决定收起形态；细线也能悬停展开。
 const tucked = computed(() => suppressed.value && !expanded.value)
-const expandMs = 550
-const collapseMs = 200
+const expandMs = 340
+const collapseMs = 195
 const geometryMoving = ref(false)
 const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(systemMotion.matches)
 const motionReduced = computed(() => state.ui.islandReducedMotion || reducedMotion.value)
+watch(expanded, (value, previous) => {
+  if (value && !previous && (telemetry.value || variant.value === 'mecha') && !motionReduced.value) scanSeq.value++
+})
 const materialRequested = computed(() => state.ui.islandAppearance.webgl !== false)
 const { active: effectsActive, cue, signal, quality, plainMaterial } = useIslandEffects(panel, tucked, motionReduced, materialRequested)
 const shape = computed(() => tucked.value ? 'line' : expanded.value ? 'expanded' : 'compact')
@@ -89,16 +108,27 @@ watch([effectsActive, materialAllowed], ([active, allowed]) => {
 const scale = computed(() => appearance.value.scale / 100)
 // 所有页面共用外壳宽度；新增分类也不能按页面单独改变尺寸。
 const expandedWidth = computed(() => Math.max(280, Math.min(504 * scale.value, availableWidth.value - 24)))
-const tuckedWidth = computed(() => 80 * scale.value)
+const tuckedWidth = computed(() => variant.value !== 'standard' ? Math.min(134, 118 * scale.value) : 80 * scale.value)
 const visibleWidth = computed(() => {
   if (expanded.value) return expandedWidth.value - 24
   if (suppressed.value) return tuckedWidth.value
-  return (capsuleStatus.value.kind === 'idle' ? 128 : 168) * scale.value
+  const idle = capsuleStatus.value.kind === 'idle'
+  if (variant.value === 'telemetry') return (idle ? 148 : 186) * scale.value
+  if (variant.value === 'mecha' || variant.value === 'pixel') return (idle ? 176 : 208) * scale.value
+  if (variant.value === 'scroll') return (idle ? 164 : 196) * scale.value
+  return (idle ? 128 : 168) * scale.value
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
+const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, scroll: 9, pixel: 9 }
+const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, scroll: 34, pixel: 36 }
 const visibleHeight = computed(() => expanded.value
   ? Math.min(44 + chromeHeight.value + (page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value), window.screen.availHeight - 60)
-  : (suppressed.value ? 5 : 32) * scale.value)
+  : (suppressed.value ? lineHeights[variant.value] : compactHeights[variant.value]) * scale.value)
+const cornerRadius = computed(() => {
+  if (variant.value === 'mecha' || variant.value === 'scroll' || variant.value === 'pixel') return 4
+  const base = expanded.value ? (telemetry.value ? 12 : 18) : tucked.value ? (telemetry.value ? 4 : 5) : (telemetry.value ? 10 : 24)
+  return Math.min(base, visibleHeight.value / 2, visibleWidth.value / 2)
+})
 const bounds = computed(() => ({
   width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (suppressed.value ? 0 : 4)),
   height: Math.max(14, visibleHeight.value + (expanded.value ? 24 : suppressed.value ? 0 : 4))
@@ -114,7 +144,7 @@ const rootStyle = computed(() => ({
   '--collapse-time': `${collapseMs}ms`,
   '--expand-time': `${expandMs}ms`,
   '--content-width': `${expandedWidth.value - 24}px`,
-  '--capsule-height': `${32 * scale.value}px`,
+  '--capsule-height': `${compactHeights[variant.value] * scale.value}px`,
   '--page-index': Math.max(0, sections.findIndex(section => section.value === page.value)),
   '--section-count': sections.length
 }))
@@ -129,10 +159,12 @@ function revealSelectedPage(): void {
   const nav = modeNav.value
   const selected = nav?.querySelector<HTMLElement>('button.selected')
   if (!nav || !selected) return
+  nav.style.setProperty('--sel-x', `${selected.offsetLeft}px`)
+  nav.style.setProperty('--sel-w', `${selected.offsetWidth}px`)
   if (selected.offsetLeft < nav.scrollLeft) nav.scrollLeft = selected.offsetLeft
   else if (selected.offsetLeft + selected.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = selected.offsetLeft + selected.offsetWidth - nav.clientWidth
 }
-watch(page, revealSelectedPage, { flush: 'post' })
+watch([page, expanded, variant], revealSelectedPage, { flush: 'post' })
 watch(scale, revealSelectedPage, { flush: 'post' })
 onMounted(revealSelectedPage)
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
@@ -184,7 +216,8 @@ watch(() => state.ui.wechatEvent, (event, previous) => {
   if (event !== previous && state.ui.wechatEnabled && state.ui.wechatAttention) signal('notice')
 })
 function updateTheme(): void {
-  dark.value = state.settings.theme === 'system' ? systemDark.matches : state.settings.theme === 'dark'
+  dark.value = isDarkTheme()
+  variant.value = resolveVariant()
 }
 
 watch(() => state.settings.theme, updateTheme)
@@ -541,25 +574,33 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" class="island-viewport" :class="`anchor-${state.ui.islandAnchor}`" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
-    :class="{ expanded, moving: geometryMoving, desktop: isDesktop, dark, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed }"
+    :class="[{ expanded, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed }, `variant-${variant}`]"
     :style="rootStyle" aria-label="顶部灵动岛"
     @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
-    <div ref="panel" class="island solid-surface" :class="{ expanded, tucked: !revealed }"
+    <div ref="panel" class="island solid-surface" :class="[{ expanded, tucked: !revealed, telemetry }, `variant-${variant}`]"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
-      <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" />
+      <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" />
       <GlassLight v-if="materialReady && glassAvailable"
-        :light-surface="!dark" :signal="taskSignal" :expanded="expanded" :quality="quality" :active="effectsActive" @unavailable="glassAvailable = false" />
+        :light-surface="!dark" :signal="taskSignal" :expanded="expanded" :quality="quality" :active="effectsActive" :corner-radius="cornerRadius" :palette="glassPalette" @unavailable="glassAvailable = false" />
       <IslandParticles v-if="materialReady"
         :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" />
+      <span v-if="(telemetry || variant === 'mecha') && scanSeq && expanded && !motionReduced" :key="scanSeq" class="telemetry-scan" aria-hidden="true" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
       <button class="capsule" :class="{ 'has-feedback': capsuleStatus.kind !== 'idle' }" type="button" :aria-expanded="expanded"
         :aria-label="`${capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
         :inert="!revealed" aria-description="按住拖动位置，单击展开或收起"
         @pointerdown.stop="windowDrag.begin" @click="activateCapsule">
         <span class="capsule-text" :class="{ feedback: capsuleStatus.kind !== 'idle' }" aria-hidden="true">
-          <Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}
+          <span v-if="telemetry && !expanded" class="telemetry-led" :class="capsuleStatus.kind" />
+          <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
+          <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : '安' }}</span>
+          <span v-else-if="variant === 'pixel' && !expanded" class="pixel-hp">♥HP</span>
+          <span class="capsule-label"><Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}</span>
+          <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
+          <span v-else-if="variant === 'scroll' && !expanded" class="scroll-knot" />
+          <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
         </span>
         <span class="grip" aria-hidden="true" />
       </button>
@@ -588,26 +629,28 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div ref="content" class="island-content">
-          <div v-if="page === 'applications'" class="applications">
-            <nav class="categories" aria-label="应用分类">
-              <button v-for="category in state.categories" :key="category.id" type="button"
-                :class="{ selected: state.ui.activeCategoryId === category.id }" :aria-pressed="state.ui.activeCategoryId === category.id"
-                @click="setCategory(category.id)">{{ category.name }}</button>
-            </nav>
-            <p v-if="!visibleApps.length" class="empty">这个分类还没有应用</p>
-            <div v-else class="app-grid scroll-y">
-              <button v-for="app in visibleApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
-                <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
-                <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
-              </button>
+          <Transition name="island-pane" mode="out-in" @enter="measureContent" @after-enter="measureContent">
+            <div v-if="page === 'applications'" :key="'applications'" class="applications">
+              <nav class="categories" aria-label="应用分类">
+                <button v-for="category in state.categories" :key="category.id" type="button"
+                  :class="{ selected: state.ui.activeCategoryId === category.id }" :aria-pressed="state.ui.activeCategoryId === category.id"
+                  @click="setCategory(category.id)">{{ category.name }}</button>
+              </nav>
+              <p v-if="!visibleApps.length" class="empty">这个分类还没有应用</p>
+              <div v-else class="app-grid scroll-y">
+                <button v-for="app in visibleApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
+                  <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
+                  <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
+                </button>
+              </div>
             </div>
-          </div>
-          <div v-else class="feature-pane scroll-y">
-            <ClipboardPopover v-if="page === 'clipboard'" />
-            <TranslationPanel v-else-if="page === 'translation'" />
-            <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
-            <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
-          </div>
+            <div v-else :key="page" class="feature-pane scroll-y">
+              <ClipboardPopover v-if="page === 'clipboard'" />
+              <TranslationPanel v-else-if="page === 'translation'" />
+              <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
+              <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
+            </div>
+          </Transition>
         </div>
       </div>
     </div>
@@ -623,19 +666,19 @@ onBeforeUnmount(() => {
 .island-viewport.anchor-right > .island-hit-area { left: auto; right: 0; transform: none; }
 .island-hit-area {
   --geometry-time: var(--expand-time);
-  --geometry-ease: cubic-bezier(.23, 1, .32, 1);
+  --geometry-ease: cubic-bezier(.2, .9, .25, 1);
   --island-shadow: rgb(0 0 0 / .2);
   --island-outline: rgb(0 0 0 / .16);
   --surface-inset: 2px;
   position: relative;
   flex: none;
-  transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), opacity 125ms;
+  transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), opacity 110ms;
 }
 .island-hit-area.dark { --island-shadow: rgb(0 0 0 / .5); --island-outline: rgb(255 255 255 / .14); }
 .island-hit-area.expanded { --surface-inset: 12px; }
 /* 从细线展开时顶边不下移，避免窗口裁切热区后把原位置的鼠标判为移出。 */
 .island-hit-area.desktop.avoiding { --surface-inset: 0px; }
-.island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: cubic-bezier(.22, .7, .3, 1); }
+.island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: cubic-bezier(.32, .72, .28, 1); }
 .island-hit-area.reduced { --geometry-time: 0ms; transition: none; }
 .island-hit-area.suppressed { --surface-inset: 0px; }
 .island-hit-area.desktop.suppressed { --geometry-time: 0ms; }
@@ -651,86 +694,115 @@ onBeforeUnmount(() => {
 .island {
   position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%);
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
+  box-shadow: inset 0 1px 0 var(--island-top-sheen);
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
 .island.expanded { border-radius: 18px; }
-.island.tucked { border-radius: 5px; }
+.island.tucked { border-radius: 5px; box-shadow: none; }
 .island.tucked .capsule { visibility: hidden; }
 .island.tucked :deep(.glass-light) { visibility: hidden; }
-.capsule { position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; height: 24px; width: 156px; margin: 0 auto; white-space: nowrap; font-size: 12px; }
-.capsule { cursor: grab; touch-action: none; user-select: none; }
+.capsule {
+  position: relative; z-index: 3; display: flex; align-items: center; justify-content: center;
+  height: 24px; width: 156px; margin: 0 auto; white-space: nowrap; font-size: 12px;
+  cursor: grab; touch-action: none; user-select: none;
+}
 .capsule:active { transform: none; }
 .window-dragging .capsule { cursor: grabbing; }
 .island:not(.expanded) .capsule { height: var(--capsule-height); width: 100%; }
-.island-hit-area:not(.desktop) .island .capsule { transition: opacity 120ms ease-out 65ms; }
+.island-hit-area:not(.desktop) .island .capsule { transition: opacity 110ms ease-out 40ms; }
 .island-hit-area:not(.desktop) .island.tucked .capsule {
   visibility: visible;
   opacity: 0;
-  transition: opacity 85ms ease-out;
+  transition: opacity 75ms ease-out;
 }
-.capsule-text { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: .6px; font-variant-numeric: tabular-nums; }
-.capsule-text { transition: opacity 90ms ease-out 100ms; }
-.expanded .capsule-text:not(.feedback) { opacity: 0; transition: opacity 55ms ease-out; }
-.capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }
 .capsule-text {
-  font-weight: 600;
-  letter-spacing: .22px;
+  display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px;
+  font-weight: 600; letter-spacing: .22px; font-variant-numeric: tabular-nums; color: var(--text);
+  transition: opacity 110ms ease-out 55ms, transform 150ms var(--geometry-ease);
 }
-.capsule-text { color: var(--text); }
+.expanded .capsule-text:not(.feedback) { opacity: 0; transform: translateY(-3px) scale(.96); transition: opacity 65ms ease-out, transform 90ms ease-out; }
+.capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }
 .capsule-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.grip { position: absolute; width: 40px; height: 4px; border-radius: 8px; background: currentColor; opacity: 0; transition: opacity 70ms ease-out; }
-.expanded .grip { opacity: .26; transition: opacity 110ms ease-out 100ms; }
-.grip { width: 28px; height: 3px; }
-.expanded .capsule:hover .grip { opacity: .55; }
+.grip {
+  position: absolute; width: 32px; height: 3px; border-radius: 8px;
+  background: currentColor; opacity: 0; transform: scaleX(.72);
+  transition: opacity 85ms ease-out, transform 130ms var(--geometry-ease);
+}
+.expanded .grip { opacity: .28; transform: scaleX(1); transition: opacity 130ms ease-out 75ms, transform 180ms var(--geometry-ease) 55ms; }
+.expanded .capsule:hover .grip { opacity: .62; transform: scaleX(1.12); }
 .capsule.has-feedback .grip { opacity: 0; }
-.expanded-content { position: relative; z-index: 3; width: var(--content-width); max-height: calc(100% - 24px); overflow: hidden; padding: 0 20px 20px; opacity: 0; clip-path:inset(0 45% 100% round 18px); transition: opacity 85ms ease-out, clip-path var(--collapse-time) var(--geometry-ease); }
-.expanded .expanded-content { overflow-y: auto; opacity: 1; clip-path:inset(0 round 18px); transition: opacity 160ms ease-out 40ms, clip-path var(--expand-time) var(--geometry-ease); }
+.expanded-content {
+  position: relative; z-index: 3; width: var(--content-width); max-height: calc(100% - 24px);
+  overflow: hidden; padding: 0 18px 18px; opacity: 0;
+  transform: translateY(-6px); clip-path: inset(0 0 100% round 18px);
+  transition: opacity 95ms ease-out, transform var(--collapse-time) var(--geometry-ease), clip-path var(--collapse-time) var(--geometry-ease);
+}
+.expanded .expanded-content {
+  overflow-y: auto; opacity: 1; transform: none; clip-path: inset(0 round 18px);
+  transition: opacity 170ms ease-out 35ms, transform var(--expand-time) var(--geometry-ease), clip-path var(--expand-time) var(--geometry-ease);
+}
 .moving .expanded-content { overflow-y: hidden; }
 .island-chrome { display: flow-root; }
 .island-content { width: 100%; }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0 8px; }
+.island-pane-enter-active { transition: opacity 150ms cubic-bezier(.2, .9, .25, 1), transform 160ms cubic-bezier(.2, .9, .25, 1); }
+.island-pane-leave-active { transition: opacity 85ms ease-out, transform 85ms ease-out; }
+.island-pane-enter-from { opacity: 0; transform: translateY(5px); }
+.island-pane-leave-to { opacity: 0; transform: translateY(-3px); }
 .toolbar {
-  margin-bottom: 8px;
-  padding: 0 0 7px;
-  gap: 6px;
-  border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 10px; padding: 0 0 8px; border-bottom: 1px solid var(--line);
 }
-.tools { display: flex; align-items: center; gap: 10px; }
-.tools { gap: 6px; }
-.round-action { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); }
-.round-action { background: transparent; border-radius: 10px; }
+.tools { display: flex; align-items: center; gap: 4px; flex: none; }
+.round-action {
+  display: grid; place-items: center; flex: none; width: 34px; height: 34px;
+  border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text-2);
+}
 .collapse-action svg { transform: rotate(180deg); }
-.round-action:hover { background: var(--surface-3); color: var(--text); }
-.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-height: 80px; overflow-y: auto; margin: 0 0 12px; padding: 2px; }
-.categories button { flex: none; padding: 6px 12px; border-radius: 22px; min-height: 34px; font-size: 14px; color: var(--text-2); }
-.categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; }
-.categories { gap: 4px; margin-bottom: 8px; }
-.categories .selected { background: var(--surface-3); color: var(--text); }
-.categories button:hover { color: var(--text); background: var(--hover); }
-.app-grid { --app-icon-size: 28px; --app-cell-size: 44px; --app-gap: 8px; display: grid; grid-template-columns: repeat(auto-fill, var(--app-cell-size)); grid-auto-rows: var(--app-cell-size); justify-content: start; align-content: start; max-height: calc(var(--app-cell-size) * 2 + var(--app-gap)); overflow-y: auto; gap: var(--app-gap); padding: 0 2px; }
-.app-tile { display: flex; align-items: center; justify-content: center; width: var(--app-cell-size); height: var(--app-cell-size); padding: 8px; border-radius: 12px; }
-.app-tile:hover { background: var(--hover); }
-.app-grid { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.round-action:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
+.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 80px; overflow-y: auto; margin: 0 0 10px; padding: 2px; }
+.categories button { flex: none; padding: 5px 12px; border-radius: 20px; border: 1px solid transparent; min-height: 32px; font-size: 13px; color: var(--text-2); }
+.categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.categories button:hover:not(.selected) { color: var(--text); background: var(--hover); border-color: var(--line); }
+.app-grid {
+  --app-icon-size: 28px; --app-cell-size: 46px; --app-gap: 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, var(--app-cell-size));
+  grid-auto-rows: var(--app-cell-size); justify-content: start; align-content: start;
+  max-height: calc(var(--app-cell-size) * 2 + var(--app-gap)); overflow-y: auto; gap: var(--app-gap); padding: 2px;
+  scrollbar-width: thin; scrollbar-color: transparent transparent;
+}
+.app-tile {
+  display: flex; align-items: center; justify-content: center;
+  width: var(--app-cell-size); height: var(--app-cell-size); padding: 8px;
+  border-radius: 12px; border: 1px solid transparent;
+}
+.app-tile:hover { background: var(--hover); border-color: var(--line); }
 .app-grid:hover, .app-grid:focus-within { scrollbar-color: var(--line-strong) transparent; }
 .app-tile img, .fallback { flex: none; width: var(--app-icon-size); height: var(--app-icon-size); object-fit: contain; }
 .app-tile img { filter: drop-shadow(0 3px 2px rgba(0,0,0,.08)); }
 .fallback { display: grid; place-items: center; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600; box-shadow: inset 0 1px 1px rgba(255,255,255,.4), 0 3px 5px -3px var(--island-shadow); }
 .empty { display: flex; align-items: center; min-height: 64px; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.8; padding: 16px 4px; }
-.mode-nav { position: relative; flex: none; width: calc(var(--section-count) * 44px); height: 40px; display: grid; grid-template-columns: repeat(var(--section-count), minmax(0, 1fr)); color: var(--text); }
-.mode-selection { position: absolute; inset: 0 auto 0 0; width: calc(100% / var(--section-count)); border-radius: 20px; background: var(--surface-3); transform: translateX(calc(var(--page-index) * 100%)); transition: transform 220ms var(--geometry-ease); }
-.mode-selection { inset-block: 3px; border-radius: 11px; background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.mode-nav button { position: relative; display: flex; align-items: center; justify-content: center; gap: 9px; min-width: 0; border-radius: 24px; color: var(--text-2); font-size: 14px; }
-.mode-nav button { border-radius: 12px; }
+.mode-nav {
+  position: relative; display: flex; flex: 1; align-items: center; gap: 4px;
+  min-width: 0; width: auto; height: 42px; padding: 2px;
+  overflow-x: auto; scrollbar-width: thin; color: var(--text);
+}
+.mode-selection {
+  position: absolute; top: 3px; bottom: 3px; left: 0;
+  width: var(--sel-w, 40px); border-radius: 11px;
+  background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--line-strong);
+  transform: translateX(var(--sel-x, 2px));
+  transition: transform 200ms cubic-bezier(.2, .9, .25, 1), width 200ms cubic-bezier(.2, .9, .25, 1);
+  pointer-events: none;
+}
+.mode-nav button {
+  position: relative; z-index: 1; display: flex; flex: 0 0 40px; align-items: center; justify-content: center;
+  height: 36px; min-width: 0; border-radius: 11px; color: var(--text-2); font-size: 14px;
+}
 .mode-nav .selected { color: var(--text); font-weight: 600; }
 .mode-nav .selected svg { color: var(--accent); }
 .mode-nav button:hover { color: var(--text); }
-.toolbar { flex-wrap:nowrap; }
-.mode-nav { display:flex; flex:1; min-width:0; width:auto; height:46px; overflow-x:auto; scrollbar-width:thin; }
-.mode-nav button { flex:0 0 40px; min-height:38px; }
-.mode-selection { display:none; }
-.mode-nav .selected { background:var(--accent-weak); box-shadow:inset 0 0 0 1px var(--line-strong); }
-button { transition: background 130ms ease, color 130ms ease, transform 150ms var(--geometry-ease); }
-button:active { transform: scale(.97); }
+button { transition: background 130ms ease, color 130ms ease, border-color 130ms ease; }
+:is(.categories button, .attention-strip button, .feature-pane button):active { transform: scale(.97); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 2; background: var(--success); border-radius: 50%; }
 .island:not(.tucked) > .attention-dot { right: 16px; top: 50%; transform: translateY(-50%); background: #42d580; }
@@ -742,27 +814,319 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 .feature-pane :deep(.panel > .head) { display: none; }
 .feature-pane :deep(button:disabled) { opacity: 1; color: var(--text-3); background: var(--surface-2); cursor: not-allowed; }
-.feature-pane :deep(.pop > .head), .feature-pane :deep(.panel > .content) { padding-left: 0; padding-right: 0; }
+.feature-pane :deep(.pop > .mode-bar), .feature-pane :deep(.pop > .head), .feature-pane :deep(.pop > .detail), .feature-pane :deep(.pop > .foot), .feature-pane :deep(.panel > .content) { padding-left: 0; padding-right: 0; }
+.feature-pane :deep(.pop > .mode-bar) { padding-top: 2px; }
 .feature-pane { --r-chip: 8px; --r-tile: 10px; }
-.feature-pane :deep(.search) { height: 36px; border-radius: 11px; background: var(--surface-2); }
-.feature-pane :deep(.pause) { height: 36px; border-radius: 11px; }
+.feature-pane :deep(.search) { height: 36px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color 120ms ease, box-shadow 120ms ease; }
+.feature-pane :deep(.search:hover) { border-color: var(--line-strong); }
+.feature-pane :deep(.search:focus-within) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
+.feature-pane :deep(.pause) { height: 36px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface-2); }
 .feature-pane :deep(.filter-bar) { padding: 0 0 8px; }
 .feature-pane :deep(.chips) { gap: 4px; padding: 2px; }
 .feature-pane :deep(.chip) { height: 30px; padding: 0 12px; }
 .feature-pane :deep(.filter-bar .chip) { height: 28px; padding: 0 8px; }
-.feature-pane :deep(.chips .chip:not(.is-on)) { border-color: transparent; }
+.feature-pane :deep(.var-bar .chip) { height: 24px; padding: 0 8px; }
+.feature-pane :deep(.chips .chip:not(.is-on)) { border-color: transparent; background: var(--surface-2); }
+.feature-pane :deep(.chips .chip:not(.is-on):hover) { background: var(--hover); border-color: var(--line); }
+.feature-pane :deep(.chips .chip.is-on) { box-shadow: inset 0 0 0 1px var(--accent-weak); }
 .feature-pane :deep(.list) { padding-left: 0; padding-right: 0; }
-.feature-pane :deep(.row) { padding: 10px; border-bottom: 1px solid var(--line); }
+.feature-pane :deep(.row) { padding: 10px; border-radius: 9px; border-bottom: 1px solid var(--line); }
 .feature-pane :deep(.row.is-active) { background: var(--accent-weak); box-shadow: inset 2px 0 0 var(--accent); }
-.feature-pane :deep(.seg) { padding: 4px; border-radius: 22px; background: var(--surface-2); }
-.feature-pane :deep(.seg-btn) { height: 32px; border-radius: 18px; }
-.feature-pane :deep(.textarea) { border-radius: 18px; background: var(--surface-2); }
-.compact .expanded-content { padding-left: 20px; padding-right: 20px; }
-.narrow .expanded-content { padding-left: 16px; padding-right: 16px; }
-.expanded-content { padding-inline: 18px; }
+.feature-pane :deep(.seg) { padding: 4px; border-radius: 22px; background: var(--surface-2); border: 1px solid var(--line); }
+.feature-pane :deep(.seg-btn) { height: 30px; border-radius: 18px; }
+.feature-pane :deep(.seg-btn.is-active) { box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 2px rgb(0 0 0 / .06); }
+.feature-pane :deep(.textarea) { border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color 120ms ease, box-shadow 120ms ease; }
+.feature-pane :deep(.textarea:focus-visible) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
+.compact .expanded-content { padding-inline: 18px; }
 .narrow .expanded-content { padding-inline: 14px; }
 .narrow .categories { gap: 2px; }
-.narrow .categories button { padding: 6px 10px; }
+.narrow .categories button { padding: 5px 10px; }
+
+/* 星舰仪表主题：三态专属轮廓圆角、遥测状态灯、扫描光束与方正秩序控件 */
+@keyframes telemetryPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .42; transform: scale(.8); }
+}
+@keyframes telemetrySweep {
+  0% { transform: translateX(-80px); opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateX(520px); opacity: 0; }
+}
+.island.telemetry { border-radius: 10px; }
+.island.telemetry.expanded { border-radius: 12px; }
+.island.telemetry.tucked { border-radius: 4px; }
+.telemetry .capsule-text { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; }
+.telemetry-led {
+  flex: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+  animation: telemetryPulse 2.2s ease-in-out infinite;
+}
+.telemetry-led.working { background: #7de2ff; box-shadow: 0 0 10px #7de2ff; animation-duration: .95s; }
+.telemetry-led.feedback { background: var(--success); box-shadow: 0 0 8px var(--success); animation: none; }
+.telemetry-led.paused { background: var(--text-3); box-shadow: none; animation: none; opacity: .75; }
+.telemetry-scan {
+  position: absolute; inset: 0 auto 0 0; width: 84px; z-index: 2; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(109, 182, 255, .24), transparent);
+  animation: telemetrySweep 460ms cubic-bezier(.22, .61, .36, 1) forwards;
+}
+.telemetry .grip { height: 2px; width: 34px; border-radius: 1px; background: var(--accent); }
+.telemetry .mode-selection {
+  border-radius: 6px;
+  background: rgba(109, 182, 255, .14);
+  box-shadow: inset 0 -2px 0 var(--accent), inset 0 0 0 1px rgba(109, 182, 255, .36);
+}
+.telemetry .mode-nav button { border-radius: 6px; }
+.telemetry .round-action { border-radius: 6px; border: 1px solid rgba(145, 180, 235, .14); }
+.telemetry .categories button { border-radius: 6px; font-size: 12px; }
+.telemetry .categories .selected { background: rgba(109, 182, 255, .16); box-shadow: inset 0 0 0 1px rgba(109, 182, 255, .42); }
+.telemetry .app-tile {
+  border-radius: 7px;
+  background: rgba(109, 182, 255, .05);
+  border-color: rgba(109, 182, 255, .16);
+}
+.telemetry .app-tile:hover {
+  background: rgba(109, 182, 255, .14);
+  border-color: rgba(109, 182, 255, .46);
+  box-shadow: inset 0 0 10px rgba(109, 182, 255, .1);
+}
+.telemetry .attention-strip {
+  border-radius: 6px;
+  border: 1px solid rgba(109, 182, 255, .24);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.telemetry .attention-strip button { border-radius: 5px; border: 1px solid rgba(109, 182, 255, .2); }
+.telemetry .app-grid:hover, .telemetry .app-grid:focus-within { scrollbar-color: rgba(109, 182, 255, .5) rgba(109, 182, 255, .06); }
+.telemetry .feature-pane { --r-chip: 6px; --r-tile: 7px; }
+.telemetry .feature-pane :deep(.search),
+.telemetry .feature-pane :deep(.pause) {
+  border-radius: 6px;
+  border: 1px solid rgba(109, 182, 255, .2);
+}
+.telemetry .feature-pane :deep(.search:focus-within) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(109, 182, 255, .36), 0 0 12px rgba(109, 182, 255, .14);
+}
+.telemetry .feature-pane :deep(.chip) { border-radius: 5px; }
+.telemetry .feature-pane :deep(.chip.is-on) {
+  border-color: rgba(109, 182, 255, .46);
+  box-shadow: inset 0 0 0 1px rgba(109, 182, 255, .18);
+}
+.telemetry .feature-pane :deep(.row) {
+  border-radius: 6px;
+  border-bottom-color: rgba(109, 182, 255, .1);
+}
+.telemetry .feature-pane :deep(.row:hover) {
+  box-shadow: inset 2px 0 0 rgba(109, 182, 255, .48);
+}
+.telemetry .feature-pane :deep(.row.is-active) {
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px rgba(109, 182, 255, .26);
+}
+.telemetry .feature-pane :deep(.seg) {
+  padding: 3px;
+  border-radius: 7px;
+  border: 1px solid rgba(109, 182, 255, .18);
+}
+.telemetry .feature-pane :deep(.seg-btn) { height: 28px; border-radius: 5px; }
+.telemetry .feature-pane :deep(.textarea) {
+  border-radius: 8px;
+  border-color: rgba(109, 182, 255, .2);
+}
+.telemetry .feature-pane :deep(.textarea:focus-visible) {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(109, 182, 255, .14);
+}
+.capsule-label { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ==================== 琥珀重工（variant-mecha：45° 倒角装甲与液压导轨） ==================== */
+.island.variant-mecha {
+  border-radius: 2px;
+  box-shadow: none;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px);
+}
+.island.variant-mecha.expanded {
+  clip-path: polygon(13px 0, calc(100% - 13px) 0, 100% 13px, 100% calc(100% - 13px), calc(100% - 13px) 100%, 13px 100%, 0 calc(100% - 13px), 0 13px);
+}
+.island.variant-mecha.tucked { clip-path: none; }
+.variant-mecha .telemetry-scan { background: linear-gradient(90deg, transparent, rgba(245, 158, 11, .3), transparent); }
+.variant-mecha:not(.expanded) .capsule-text { width: 100%; justify-content: space-between; padding: 0 12px; font-family: var(--font-mono); font-size: 12px; }
+.mecha-badge {
+  padding: 1px 5px; font-size: 10px; font-weight: 800; letter-spacing: .04em;
+  background: var(--accent); color: #111318;
+  clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%, 0 4px);
+}
+.mecha-ribs { display: inline-flex; gap: 2px; opacity: .75; }
+.mecha-ribs i { display: block; width: 2px; height: 10px; background: var(--accent); }
+.variant-mecha .grip {
+  width: 38px; height: 3px; border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 8px, transparent 8px 12px);
+}
+.variant-mecha .mode-selection {
+  border-radius: 0; background: var(--accent); box-shadow: none;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.variant-mecha .mode-nav .selected,
+.variant-mecha .mode-nav .selected svg { color: #111318; }
+.variant-mecha .round-action {
+  border-radius: 3px; border-color: rgba(245, 158, 11, .24);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.variant-mecha .categories button {
+  border-radius: 2px; font-family: var(--font-mono); font-size: 12px;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+.variant-mecha .categories .selected { background: var(--accent); color: #111318; box-shadow: none; }
+.variant-mecha .app-tile {
+  position: relative; border-radius: 0; background: var(--surface-2); border-color: rgba(245, 158, 11, .22);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.variant-mecha .app-tile::after {
+  content: ''; position: absolute; bottom: 3px; left: 50%; width: 14px; height: 2px;
+  transform: translateX(-50%); background: rgba(245, 158, 11, .45); pointer-events: none;
+}
+.variant-mecha .app-tile:hover { border-color: var(--accent); background: var(--surface-3); }
+.variant-mecha .app-tile:hover::after { background: var(--accent); }
+.variant-mecha .feature-pane { --r-chip: 3px; --r-tile: 4px; }
+.variant-mecha .feature-pane :deep(.search),
+.variant-mecha .feature-pane :deep(.pause),
+.variant-mecha .feature-pane :deep(.seg),
+.variant-mecha .feature-pane :deep(.seg-btn),
+.variant-mecha .feature-pane :deep(.textarea),
+.variant-mecha .feature-pane :deep(.row) { border-radius: 3px; }
+.variant-mecha .feature-pane :deep(.row:hover) { box-shadow: inset 3px 0 0 rgba(245, 158, 11, .55); }
+
+/* ==================== 海棠书卷（variant-scroll：四角内凹花窗、燕尾红签与折角方笺） ==================== */
+.island.variant-scroll {
+  border-radius: 2px; box-shadow: none;
+  -webkit-mask:
+    radial-gradient(circle 7px at 0 0, transparent 96%, #000 100%) top left,
+    radial-gradient(circle 7px at 100% 0, transparent 96%, #000 100%) top right,
+    radial-gradient(circle 7px at 0 100%, transparent 96%, #000 100%) bottom left,
+    radial-gradient(circle 7px at 100% 100%, transparent 96%, #000 100%) bottom right;
+  -webkit-mask-size: 51% 51%;
+  -webkit-mask-repeat: no-repeat;
+}
+.island.variant-scroll.expanded {
+  -webkit-mask:
+    radial-gradient(circle 11px at 0 0, transparent 96%, #000 100%) top left,
+    radial-gradient(circle 11px at 100% 0, transparent 96%, #000 100%) top right,
+    radial-gradient(circle 11px at 0 100%, transparent 96%, #000 100%) bottom left,
+    radial-gradient(circle 11px at 100% 100%, transparent 96%, #000 100%) bottom right;
+  -webkit-mask-size: 51% 51%;
+  -webkit-mask-repeat: no-repeat;
+}
+.island.variant-scroll.tucked { -webkit-mask: none; }
+.variant-scroll:not(.expanded) .capsule-text { width: 100%; justify-content: space-between; padding: 0 14px; font-family: Georgia, 'Songti SC', 'SimSun', serif; letter-spacing: .08em; }
+.scroll-seal {
+  padding: 1px 5px; border-radius: 1px; background: var(--accent); color: #fff;
+  font-size: 10px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .38);
+}
+.scroll-knot { width: 6px; height: 6px; transform: rotate(45deg); border: 1.4px solid var(--accent); }
+.variant-scroll .grip { width: 30px; height: 2px; border-radius: 0; background: rgba(31, 36, 33, .45); }
+.variant-scroll .toolbar { border-bottom: 1px solid rgba(31, 36, 33, .22); padding-top: 0; }
+.variant-scroll .mode-selection {
+  top: 0; bottom: 0; border-radius: 0; background: var(--accent); box-shadow: none;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+}
+.variant-scroll .mode-nav .selected,
+.variant-scroll .mode-nav .selected svg { color: #fff; transform: translateY(-2px); }
+.variant-scroll .round-action { border-radius: 3px; border-color: rgba(31, 36, 33, .2); }
+.variant-scroll .categories button { border-radius: 2px; border-color: rgba(31, 36, 33, .14); font-family: 'Songti SC', 'SimSun', var(--font-sans); }
+.variant-scroll .categories .selected { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35); }
+.variant-scroll .app-tile {
+  position: relative; border-radius: 0; background: var(--surface-2); border: 1px solid rgba(31, 36, 33, .2);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
+}
+.variant-scroll .app-tile::after {
+  content: ''; position: absolute; top: 0; right: 0; width: 8px; height: 8px;
+  background: #cfc6b2; border-left: 1px solid rgba(31, 36, 33, .25); border-bottom: 1px solid rgba(31, 36, 33, .25);
+  pointer-events: none;
+}
+.variant-scroll .app-tile:hover { border-color: var(--accent); background: #f2ece0; }
+.variant-scroll .feature-pane { --r-chip: 3px; --r-tile: 3px; }
+.variant-scroll .feature-pane :deep(.search),
+.variant-scroll .feature-pane :deep(.pause),
+.variant-scroll .feature-pane :deep(.seg),
+.variant-scroll .feature-pane :deep(.seg-btn),
+.variant-scroll .feature-pane :deep(.textarea) { border-radius: 3px; border-color: rgba(31, 36, 33, .24); }
+.variant-scroll .feature-pane :deep(.row) { border-radius: 2px; border-bottom: 1px dashed rgba(31, 36, 33, .22); }
+
+/* ==================== 像素掌机（variant-pixel：锯齿外壳、双层液晶内屏与 3D 厚底按键） ==================== */
+.island.variant-pixel {
+  border-radius: 2px; box-shadow: none;
+  clip-path: polygon(
+    6px 0, calc(100% - 6px) 0, calc(100% - 6px) 3px, calc(100% - 3px) 3px, calc(100% - 3px) 6px, 100% 6px,
+    100% calc(100% - 6px), calc(100% - 3px) calc(100% - 6px), calc(100% - 3px) calc(100% - 3px), calc(100% - 6px) calc(100% - 3px), calc(100% - 6px) 100%,
+    6px 100%, 6px calc(100% - 3px), 3px calc(100% - 3px), 3px calc(100% - 6px), 0 calc(100% - 6px),
+    0 6px, 3px 6px, 3px 3px, 6px 3px
+  );
+}
+.island.variant-pixel.tucked { clip-path: none; }
+.variant-pixel:not(.expanded) .capsule-text { width: 100%; justify-content: space-between; padding: 0 11px; font-family: var(--font-mono); font-size: 12px; }
+.variant-pixel:not(.expanded) .capsule-label {
+  padding: 1px 7px; background: #1c221e; border: 2px solid #0f0d1a; color: #bef264; font-weight: 700;
+}
+.pixel-hp { color: #a3e635; font-size: 11px; font-weight: 700; }
+.pixel-lv { color: #facc15; font-size: 10px; font-weight: 700; }
+.variant-pixel .grip {
+  width: 34px; height: 4px; border-radius: 0;
+  background: repeating-linear-gradient(90deg, #0f0d1a 0 6px, transparent 6px 10px); opacity: .75;
+}
+.variant-pixel .toolbar { border-bottom: 0; margin-bottom: 8px; padding-bottom: 2px; }
+.variant-pixel .mode-selection { display: none; }
+.variant-pixel .mode-nav { gap: 6px; padding: 2px 2px 5px; }
+.variant-pixel .mode-nav button,
+.variant-pixel .round-action {
+  border-radius: 0; background: #4a436b; color: #e2e8f0;
+  border: 2px solid #0f0d1a; box-shadow: 0 3px 0 #0f0d1a;
+}
+.variant-pixel .mode-nav button:hover,
+.variant-pixel .round-action:hover { background: #5a5280; color: #fff; }
+.variant-pixel .mode-nav .selected {
+  background: var(--accent); color: #0f0d1a;
+  transform: translateY(1px); box-shadow: 0 2px 0 #0f0d1a;
+}
+.variant-pixel .mode-nav .selected svg { color: #0f0d1a; }
+.variant-pixel .mode-nav button:active,
+.variant-pixel .round-action:active { transform: translateY(3px); box-shadow: none; }
+.variant-pixel .island-content {
+  background: #1c221e; border: 2px solid #0f0d1a; padding: 10px;
+  box-shadow: inset 0 3px 0 rgba(0, 0, 0, .45);
+}
+.variant-pixel .categories button {
+  border-radius: 0; font-family: var(--font-mono); font-size: 12px;
+  background: #2b352e; border: 2px solid #0f0d1a; box-shadow: 0 2px 0 #0f0d1a; color: #cbd5e1;
+}
+.variant-pixel .categories .selected { background: #facc15; color: #0f0d1a; border-color: #0f0d1a; box-shadow: 0 1px 0 #0f0d1a; transform: translateY(1px); }
+.variant-pixel .app-tile {
+  border-radius: 0; background: #2b352e; border: 2px solid #0f0d1a; box-shadow: 0 3px 0 #0f0d1a;
+}
+.variant-pixel .app-tile:hover { background: #36443a; border-color: #0f0d1a; }
+.variant-pixel .app-tile:active { transform: translateY(3px); box-shadow: none; }
+.variant-pixel .feature-pane { --r-chip: 0px; --r-tile: 0px; font-family: var(--font-mono); }
+.variant-pixel .feature-pane :deep(.search),
+.variant-pixel .feature-pane :deep(.pause),
+.variant-pixel .feature-pane :deep(.seg),
+.variant-pixel .feature-pane :deep(.seg-btn),
+.variant-pixel .feature-pane :deep(.snippet-input),
+.variant-pixel .feature-pane :deep(.snippet-select),
+.variant-pixel .feature-pane :deep(.textarea) {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #252e27; box-shadow: inset 0 2px 0 rgba(0, 0, 0, .35);
+}
+.variant-pixel .feature-pane :deep(.seg-btn.is-active) {
+  background: var(--accent); color: #0f0d1a; box-shadow: none;
+}
+.variant-pixel .feature-pane :deep(.seg-btn.is-active .seg-count) {
+  background: #0f0d1a; color: #facc15; border-radius: 0;
+}
+.variant-pixel .feature-pane :deep(.row) {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #252e27; margin-bottom: 4px;
+}
+.variant-pixel .feature-pane :deep(.row.is-active) {
+  background: var(--accent); color: #0f0d1a; box-shadow: none;
+}
+.variant-pixel .feature-pane :deep(.row.is-active *) { color: #0f0d1a; }
+
 .reduced *, .reduced *::before, .reduced *::after { transition: none !important; animation:none !important; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation:none !important; } }
 @media (prefers-contrast: more) {
@@ -775,5 +1139,5 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .fixed-search .island-chrome { flex: none; }
 .fixed-search .island-content { min-height: 0; display: flex; flex-direction: column; }
 .fixed-search .feature-pane { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-.fixed-search .feature-pane :deep(.pop) { min-height: 0; max-height: 420px; }
+.fixed-search .feature-pane :deep(.pop) { height: 420px; min-height: 0; max-height: 420px; }
 </style>

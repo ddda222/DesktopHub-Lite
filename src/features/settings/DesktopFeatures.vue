@@ -171,8 +171,32 @@ watch(() => state.ui.settingsOpen, open => {
 .check-row strong { font-size: 14px; font-weight: 500; }
 .check-row small { font-size: 12px; color: var(--text-2); }
 .check-row input { flex: none; width: 18px; height: 18px; accent-color: var(--text); margin: 0; cursor: pointer; }
-.size-slider { width: 100%; min-width: 0; height: 36px; margin: 0; accent-color: var(--text); cursor: pointer; }
-.field-label output { float: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.size-slider {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; min-width: 0; height: 36px; margin: 0; background: transparent; accent-color: var(--text); cursor: pointer;
+}
+.size-slider::-webkit-slider-runnable-track {
+  height: 7px; border-radius: 99px;
+  background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; box-sizing: border-box;
+  width: 18px; height: 18px; margin-top: -5.5px; border-radius: 50%;
+  border: 2px solid var(--text); background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .2), 0 0 0 2px var(--surface);
+  transition: transform 120ms ease;
+}
+.size-slider:hover::-webkit-slider-thumb, .size-slider:active::-webkit-slider-thumb { transform: scale(1.1); }
+.size-slider::-moz-range-track {
+  height: 7px; border-radius: 99px;
+  background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.size-slider::-moz-range-thumb {
+  box-sizing: border-box; width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--text); background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .2), 0 0 0 2px var(--surface);
+}
+.field-label output { float: right; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .advanced-fields { margin: 12px 0; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--text-2); }
 </style>

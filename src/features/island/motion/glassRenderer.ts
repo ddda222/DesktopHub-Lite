@@ -12,6 +12,8 @@ export interface GlassFrame {
   openingAge: number
   direction: number
   full: boolean
+  tintBase?: [number, number, number]
+  tintRim?: [number, number, number]
 }
 
 const vertex = `
@@ -26,6 +28,7 @@ precision highp float;
 precision mediump float;
 #endif
 uniform vec2 size, bufferSize, light, origin;
+uniform vec3 tintBase, tintRim;
 uniform float corner, energy, tone, opening, ripple, direction, full;
 float bell(float distance, float width) {
   float x = distance / width;
@@ -58,8 +61,7 @@ void main() {
   }
   float halo = bell(depth,band*.46);
   float alpha = coverage * min(.86,(rim*.62+ribbon+halo*.26)*focus+rim*.08);
-  vec3 reflection = mix(mix(vec3(.48,.73,.67),vec3(.84,.92,.84),rim),
-                        mix(vec3(.24,.41,.38),vec3(.50,.62,.53),rim),tone);
+  vec3 reflection = mix(tintBase, tintRim, rim);
   gl_FragColor = vec4(reflection,alpha);
 }`
 
@@ -95,7 +97,8 @@ export function createGlassPass(gl: WebGLRenderingContext) {
   const location = {
     size: uniform('size'), bufferSize: uniform('bufferSize'), corner: uniform('corner'),
     light: uniform('light'), energy: uniform('energy'), tone: uniform('tone'), origin: uniform('origin'),
-    opening: uniform('opening'), ripple: uniform('ripple'), direction: uniform('direction'), full: uniform('full')
+    opening: uniform('opening'), ripple: uniform('ripple'), direction: uniform('direction'), full: uniform('full'),
+    tintBase: uniform('tintBase'), tintRim: uniform('tintRim')
   }
   gl.useProgram(program)
   gl.bindBuffer(gl.ARRAY_BUFFER, triangle)
@@ -117,6 +120,12 @@ export function createGlassPass(gl: WebGLRenderingContext) {
       gl.uniform1f(location.ripple, frame.rippleAge)
       gl.uniform1f(location.direction, frame.direction)
       gl.uniform1f(location.full, Number(frame.full))
+      const defaultBase: [number, number, number] = frame.tone > .5 ? [.22, .38, .66] : [.52, .73, .98]
+      const defaultRim: [number, number, number] = frame.tone > .5 ? [.44, .58, .82] : [.91, .95, 1]
+      const base = frame.tintBase ?? defaultBase
+      const rim = frame.tintRim ?? defaultRim
+      gl.uniform3f(location.tintBase, base[0], base[1], base[2])
+      gl.uniform3f(location.tintRim, rim[0], rim[1], rim[2])
       gl.drawArrays(gl.TRIANGLES, 0, 3)
     },
     dispose(): void {

@@ -114,14 +114,18 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
 </script>
 
 <template>
-  <div class="preview" :class="{ plain, dark: state.settings.theme === 'dark' }">
+  <div class="preview" :class="{ plain, dark: ['dark', 'midnight', 'mecha', 'pixel'].includes(state.settings.theme) }">
     <header class="preview-tools">
-      <span>DesktopHub <small>黑白实底预览</small></span>
+      <span>DesktopHub <small>实底高对比预览</small></span>
       <div class="preview-options">
         <a href="?preview=styles" style="color: inherit; font-weight: 600">十款样式实验室 ↗</a>
         <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button>
         <button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button>
+        <button type="button" :aria-pressed="state.settings.theme === 'midnight'" @click="setTheme('midnight')">星舰仪表</button>
+        <button type="button" :aria-pressed="state.settings.theme === 'mecha'" @click="setTheme('mecha')">琥珀重工</button>
+        <button type="button" :aria-pressed="state.settings.theme === 'scroll'" @click="setTheme('scroll')">海棠书卷</button>
+        <button type="button" :aria-pressed="state.settings.theme === 'pixel'" @click="setTheme('pixel')">像素掌机</button>
         <label>尺寸<select v-model.number="state.ui.islandAppearance.scale"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option></select></label>
         <label><input v-model="plain" type="checkbox" />纯色背景</label>
         <label>场景<select v-model="scene" aria-label="模拟窗口状态"><option value="normal">桌面／普通窗口</option><option value="maximized">窗口最大化</option><option value="fullscreen">游戏／全屏</option></select></label>
@@ -160,7 +164,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
     <p class="preview-note">拖动胶囊或展开后的顶部握柄调整位置。<br />黑白实底、主题跟随与局部 WebGL 光晕。</p>
     <SettingsWindow v-if="state.ui.settingsOpen" :standalone="settingsStandalone" />
     <dialog ref="imageDialog" class="image-demo" aria-label="独立图片预览演示" :style="{ width: `${imageDemoSize.width}px`, height: `${imageDemoSize.height}px` }" @cancel.prevent="closeImageDemo" @close="browserImagePreview = null">
-      <header ref="imageDemoHeader" class="image-demo-header"><span>网页演示 · 置顶仅展示状态</span><div><button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button><button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button></div></header>
+      <header ref="imageDemoHeader" class="image-demo-header"><span>网页演示 · 置顶仅展示状态</span><div><button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button><button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button><button type="button" :aria-pressed="state.settings.theme === 'midnight'" @click="setTheme('midnight')">星舰仪表</button></div></header>
       <ImagePreviewWindow v-if="browserImagePreview" :demo-content="browserImagePreview" @close="closeImageDemo" @resize="resizeImageDemo" />
     </dialog>
     <div class="toasts" role="status" aria-live="polite">

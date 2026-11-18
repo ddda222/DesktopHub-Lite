@@ -1,0 +1,452 @@
+/* 星舰仪表主题（data-theme="midnight"）全组件设计系统覆盖 */
+
+/* 1. 调音台（AudioMixer） */
+:root[data-theme='midnight'] .audio-mixer .sound-profiles button {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.24);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+:root[data-theme='midnight'] .audio-mixer .sound-profiles button:hover {
+  background: var(--hover);
+  border-color: rgba(109, 182, 255, 0.5);
+}
+
+:root[data-theme='midnight'] .audio-mixer .sound-profiles button[aria-pressed='true'] {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .sound-icon {
+  border-radius: 6px;
+  background: rgba(109, 182, 255, 0.06);
+  border-color: rgba(109, 182, 255, 0.26);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-control {
+  --volume-fill: var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .muted .volume-control {
+  --volume-fill: var(--text-3);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-slider {
+  accent-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(109, 182, 255, 0.24);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 20px;
+  margin-top: -7px;
+  border-radius: 3px;
+  border: 1.5px solid var(--accent);
+  background: #0f1726;
+  box-shadow: 0 0 8px rgba(109, 182, 255, 0.38);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(109, 182, 255, 0.24);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 20px;
+  border-radius: 3px;
+  border: 1.5px solid var(--accent);
+  background: #0f1726;
+  box-shadow: 0 0 8px rgba(109, 182, 255, 0.38);
+}
+
+:root[data-theme='midnight'] .audio-mixer .volume-readout {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.3);
+  color: var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .mute {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.26);
+}
+
+:root[data-theme='midnight'] .audio-mixer .mute:hover {
+  border-color: var(--accent);
+  background: var(--hover);
+}
+
+:root[data-theme='midnight'] .audio-mixer .muted .mute {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .save-profile input {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.24);
+}
+
+:root[data-theme='midnight'] .audio-mixer .save-profile input:focus-visible {
+  border-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .save-profile button {
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+:root[data-theme='midnight'] .audio-mixer .save-profile button:hover {
+  background: var(--accent-hover);
+}
+
+/* 2. 文件中转与预览（FileShelf / FileShelfPreview） */
+:root[data-theme='midnight'] .file-shelf {
+  border-radius: 8px;
+}
+
+:root[data-theme='midnight'] .file-shelf .shelf-tools button {
+  border-radius: 6px;
+  border: 1px solid rgba(109, 182, 255, 0.22);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+:root[data-theme='midnight'] .file-shelf .shelf-tools button:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: rgba(109, 182, 255, 0.48);
+}
+
+:root[data-theme='midnight'] .file-shelf .shelf-undo {
+  border-radius: 6px;
+  border: 1px solid rgba(109, 182, 255, 0.28);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+:root[data-theme='midnight'] .file-shelf .undo-button {
+  border-radius: 5px;
+}
+
+:root[data-theme='midnight'] .file-shelf .shelf-list li {
+  border-radius: 7px;
+  border: 1px solid rgba(109, 182, 255, 0.16);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+:root[data-theme='midnight'] .file-shelf .shelf-list li:hover {
+  border-color: rgba(109, 182, 255, 0.38);
+  background: rgba(29, 43, 68, 0.72);
+}
+
+:root[data-theme='midnight'] .file-shelf .row-action {
+  border-radius: 5px;
+}
+
+:root[data-theme='midnight'] .file-preview button {
+  border-radius: 6px;
+  border: 1px solid rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .file-preview button:hover:not(:disabled) {
+  border-color: rgba(109, 182, 255, 0.48);
+  background: var(--hover);
+}
+
+:root[data-theme='midnight'] .file-preview .file-icon,
+:root[data-theme='midnight'] .file-preview .text-content,
+:root[data-theme='midnight'] .file-preview .preview-placeholder,
+:root[data-theme='midnight'] .file-preview .image-viewer {
+  border-radius: 8px;
+  border: 1px solid rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .file-preview .image-header .back {
+  border-radius: 6px;
+}
+
+:root[data-theme='midnight'] .file-preview .view-modes button[aria-pressed='true'] {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-color: rgba(109, 182, 255, 0.44);
+  box-shadow: none;
+}
+
+:root[data-theme='midnight'] .file-preview .image-actions .pin-action {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .file-preview .image-actions .pin-action:hover {
+  background: var(--accent-hover);
+}
+
+/* 3. 剪贴板（ClipboardPopover） */
+:root[data-theme='midnight'] .pop {
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 var(--island-top-sheen), var(--pop-shadow);
+}
+
+:root[data-theme='midnight'] .pop .thumb,
+:root[data-theme='midnight'] .pop .thumb img {
+  border-radius: 6px;
+}
+
+:root[data-theme='midnight'] .pop .row-meta-text {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme='midnight'] .pop .icon-btn,
+:root[data-theme='midnight'] .pop .back,
+:root[data-theme='midnight'] .pop .banner-btn,
+:root[data-theme='midnight'] .pop .clear {
+  border-radius: 5px;
+}
+
+:root[data-theme='midnight'] .pop .icon-btn:hover {
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px rgba(109, 182, 255, 0.36);
+}
+
+:root[data-theme='midnight'] .pop .detail-body {
+  border-radius: 8px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .pop .management input:not([type]) {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .pop .management input:not([type]):focus-visible {
+  border-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .pop .mode-seg {
+  border-radius: 7px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .pop .seg-btn {
+  border-radius: 5px;
+}
+
+:root[data-theme='midnight'] .pop .seg-btn.is-active {
+  box-shadow: inset 0 -2px 0 var(--accent), inset 0 0 0 1px rgba(109, 182, 255, 0.34);
+}
+
+:root[data-theme='midnight'] .pop .snippet-input,
+:root[data-theme='midnight'] .pop .snippet-select,
+:root[data-theme='midnight'] .pop .snippet-textarea,
+:root[data-theme='midnight'] .pop .var-preview {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .pop .tag-dynamic {
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  box-shadow: inset 0 0 0 1px rgba(109, 182, 255, 0.3);
+}
+
+/* 4. 翻译面板（TranslationPanel） */
+:root[data-theme='midnight'] .translation-panel {
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 var(--island-top-sheen), var(--pop-shadow);
+}
+
+:root[data-theme='midnight'] .translation-panel .seg {
+  border-radius: 7px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .translation-panel .seg-btn {
+  border-radius: 5px;
+}
+
+:root[data-theme='midnight'] .translation-panel .seg-btn.is-active {
+  box-shadow: inset 0 -2px 0 var(--accent), inset 0 0 0 1px rgba(109, 182, 255, 0.34);
+}
+
+:root[data-theme='midnight'] .translation-panel .textarea {
+  border-radius: 8px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .translation-panel .textarea:focus-visible {
+  box-shadow: 0 0 12px rgba(109, 182, 255, 0.16);
+}
+
+:root[data-theme='midnight'] .translation-panel .primary {
+  border-radius: 6px;
+  box-shadow: 0 0 14px rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .translation-panel .primary:hover:not(:disabled) {
+  box-shadow: 0 0 18px rgba(109, 182, 255, 0.38);
+}
+
+:root[data-theme='midnight'] .translation-panel .notice,
+:root[data-theme='midnight'] .translation-panel .chip,
+:root[data-theme='midnight'] .translation-panel .link-btn,
+:root[data-theme='midnight'] .translation-panel .ghost {
+  border-radius: 6px;
+}
+
+/* 5. 设置中心子模块（DesktopFeatures / AppManagement / ConfigBackup） */
+:root[data-theme='midnight'] .settings-ui .features .check-row input,
+:root[data-theme='midnight'] .settings-ui .features .size-slider {
+  accent-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .settings-ui .features .field-label output {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+:root[data-theme='midnight'] .settings-ui .features .size-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+
+:root[data-theme='midnight'] .settings-ui .features .size-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 2px;
+  background: rgba(109, 182, 255, 0.16);
+  border: 1px solid rgba(109, 182, 255, 0.28);
+}
+
+:root[data-theme='midnight'] .settings-ui .features .size-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 20px;
+  margin-top: -8px;
+  border-radius: 3px;
+  background: #0f1726;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 8px rgba(109, 182, 255, 0.44);
+}
+
+:root[data-theme='midnight'] .settings-ui .features .size-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 2px;
+  background: rgba(109, 182, 255, 0.16);
+  border: 1px solid rgba(109, 182, 255, 0.28);
+}
+
+:root[data-theme='midnight'] .settings-ui .features .size-slider::-moz-range-thumb {
+  width: 14px;
+  height: 20px;
+  border-radius: 3px;
+  background: #0f1726;
+  border: 1.5px solid var(--accent);
+  box-shadow: 0 0 8px rgba(109, 182, 255, 0.44);
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .category-filter {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.22);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .category-filter:hover {
+  background: var(--hover);
+  border-color: rgba(109, 182, 255, 0.45);
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .category-filter.selected {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(109, 182, 255, 0.28);
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .managed-app.selected {
+  border-radius: 6px;
+  background: rgba(109, 182, 255, 0.09);
+  box-shadow: inset 2px 0 0 var(--accent), inset 0 0 0 1px rgba(109, 182, 255, 0.24);
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .app-summary,
+:root[data-theme='midnight'] .settings-ui .app-management .app-initials {
+  border-radius: 6px;
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .app-initials {
+  border-color: rgba(109, 182, 255, 0.26);
+  color: var(--accent);
+}
+
+:root[data-theme='midnight'] .settings-ui .app-management .drop-target {
+  outline-color: var(--accent);
+}
+
+:root[data-theme='midnight'] .settings-ui .configuration-backup .restore-preview {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.32);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+:root[data-theme='midnight'] .settings-ui .configuration-backup h5:focus-visible {
+  outline-color: var(--accent);
+}
+
+/* 6. 独立轻提示与图片预览窗（ToastWindow / ImagePreviewWindow） */
+:root[data-theme='midnight'] .toast {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.32);
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 rgba(186, 214, 255, 0.22), 0 10px 28px rgba(2, 6, 16, 0.55);
+}
+
+:root[data-theme='midnight'] .toast.is-success {
+  box-shadow: inset 3px 0 0 var(--success), inset 0 1px 0 rgba(186, 214, 255, 0.18), 0 10px 28px rgba(2, 6, 16, 0.55);
+}
+
+:root[data-theme='midnight'] .toast.is-error {
+  box-shadow: inset 3px 0 0 var(--danger), inset 0 1px 0 rgba(186, 214, 255, 0.18), 0 10px 28px rgba(2, 6, 16, 0.55);
+}
+
+:root[data-theme='midnight'] .image-preview-window .image-mark,
+:root[data-theme='midnight'] .image-preview-window button,
+:root[data-theme='midnight'] .image-preview-window .zoom-control {
+  border-radius: 6px;
+  border: 1px solid rgba(109, 182, 255, 0.2);
+}
+
+:root[data-theme='midnight'] .image-preview-window button:hover:not(:disabled) {
+  border-color: rgba(109, 182, 255, 0.48);
+  background: var(--hover);
+}
+
+:root[data-theme='midnight'] .image-preview-window .pin-button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(109, 182, 255, 0.28);
+}
+
+:root[data-theme='midnight'] .image-preview-window .pin-button[aria-pressed='true']:hover {
+  background: var(--accent-hover);
+}
+
+:root[data-theme='midnight'] .image-preview-window .image-mark {
+  color: var(--accent);
+}
+
+:root[data-theme='midnight'] .image-preview-window .zoom-value {
+  font-family: var(--font-mono);
+}

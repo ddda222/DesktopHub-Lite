@@ -109,19 +109,70 @@ textarea::placeholder {
   scrollbar-color: var(--line-strong) transparent;
 }
 
-.scroll-y::-webkit-scrollbar {
-  width: 8px;
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
 }
 
-.scroll-y::-webkit-scrollbar-thumb {
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-thumb {
   background: var(--line-strong);
-  border-radius: 8px;
+  border-radius: 99px;
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
-.scroll-y::-webkit-scrollbar-track {
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* 星舰仪表主题：全局精密导轨滚动条、文本选区与舞台格栅背景 */
+:root[data-theme='midnight'] ::selection {
+  background: rgba(109, 182, 255, 0.34);
+  color: #f6f9ff;
+}
+
+:root[data-theme='midnight'] .stage {
+  background:
+    linear-gradient(var(--grid-tint) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, var(--grid-tint) 1px, transparent 1px) 0 0 / 28px 28px,
+    radial-gradient(120% 90% at 50% 0%, var(--stage-1) 0%, var(--stage-2) 100%);
+}
+
+:root[data-theme='midnight'] .scroll-y,
+:root[data-theme='midnight'] * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(109, 182, 255, 0.4) rgba(109, 182, 255, 0.06);
+}
+
+:root[data-theme='midnight'] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+:root[data-theme='midnight'] ::-webkit-scrollbar-track {
+  background: rgba(109, 182, 255, 0.06);
+  border-radius: 2px;
+}
+
+:root[data-theme='midnight'] ::-webkit-scrollbar-thumb {
+  background: rgba(109, 182, 255, 0.38);
+  border-radius: 2px;
+  border: 0;
+}
+
+:root[data-theme='midnight'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(109, 182, 255, 0.72);
 }
 
 .sr-only {

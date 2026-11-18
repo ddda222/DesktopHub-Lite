@@ -111,7 +111,7 @@ pub fn validate(backup: &ConfigurationBackup) -> Result<(), String> {
         if !matches!(app.color.len(), 4 | 7 | 9) || !app.color.starts_with('#') || !app.color[1..].chars().all(|c| c.is_ascii_hexdigit()) { return Err(format!("应用颜色无效：{}", app.name)); }
     }
     let p = &backup.preferences;
-    if !matches!(p.theme.as_str(), "light" | "dark" | "system") || !matches!(p.island_anchor.as_str(), "left" | "center" | "right") || !crate::state::valid_island_page(&p.island_page) || !(75..=125).contains(&p.scale) || !(100..=2000).contains(&p.island_hover_ms) || !(100..=4000).contains(&p.island_leave_ms) || !categories.contains(p.active_category_id.as_str()) { return Err("显示偏好包含无效主题、页面、分类、比例或延时".into()); }
+    if !crate::state::valid_theme(&p.theme) || !matches!(p.island_anchor.as_str(), "left" | "center" | "right") || !crate::state::valid_island_page(&p.island_page) || !(75..=125).contains(&p.scale) || !(100..=2000).contains(&p.island_hover_ms) || !(100..=4000).contains(&p.island_leave_ms) || !categories.contains(p.active_category_id.as_str()) { return Err("显示偏好包含无效主题、页面、分类、比例或延时".into()); }
     Ok(())
 }
 
@@ -188,7 +188,10 @@ mod tests {
     }
     fn bytes(value: &ConfigurationBackup) -> Vec<u8> { serde_json::to_vec(value).unwrap() }
     #[test] fn round_trip_preserves_portable_configuration() {
-        let backup=sample(); let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert!(restored.applications.apps[0].broken.is_none());
+        for theme in ["midnight", "mecha", "scroll", "pixel"] {
+            let mut backup=sample(); backup.preferences.theme=theme.into();
+            let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert!(restored.applications.apps[0].broken.is_none()); assert_eq!(restored.preferences.theme,theme);
+        }
     }
     #[test] fn removed_page_backups_restore_to_applications_without_an_empty_panel() {
         let mut backup=sample();backup.preferences.island_page="compare".into();

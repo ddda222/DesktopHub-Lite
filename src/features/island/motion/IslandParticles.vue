@@ -67,8 +67,9 @@ function start(cue: IslandCue | null): void {
         pointer = { x: event.clientX - box.left, y: event.clientY - box.top, pressed: Boolean(event.buttons & 1) }
         event = null
       }
+      const particleColor = getComputedStyle(surface!).getPropertyValue('--particle-color').trim()
       context!.setTransform(bufferWidth / width, 0, 0, density, 0, 0)
-      paintFlow(context!, motes, cue!.kind, Math.max(0, progress), width, Math.min(.05, (now - previous) / 1000), pointer, props.dark)
+      paintFlow(context!, motes, cue!.kind, Math.max(0, progress), width, Math.min(.05, (now - previous) / 1000), pointer, props.dark, particleColor)
       previous = now
     }
     frame = requestAnimationFrame(render)

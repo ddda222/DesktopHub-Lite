@@ -12,6 +12,8 @@ import {
   saveClipHistoryLimit,
   createClipGroup,
   removeClipGroup,
+  createSnippetGroup,
+  removeSnippetGroup,
   saveTranslationSettings,
   saveTranslationSecret,
   deleteTranslationSecret,
@@ -53,7 +55,11 @@ const sections: { id: SettingsSection; label: string }[] = [
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: '跟随系统' },
   { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' }
+  { value: 'dark', label: '深色' },
+  { value: 'midnight', label: '星舰仪表' },
+  { value: 'mecha', label: '琥珀重工' },
+  { value: 'scroll', label: '海棠书卷' },
+  { value: 'pixel', label: '像素掌机' }
 ]
 
 const directionOptions: { value: TranslateDirection; label: string }[] = [
@@ -128,6 +134,19 @@ const newGroup = ref('')
 function addGroup(): void {
   if (!isDesktop) return
   if (newGroup.value.trim()) { void createClipGroup(newGroup.value); newGroup.value = '' }
+}
+
+const newSnippetGroup = ref('')
+function snippetGroupCount(group: string): number {
+  return state.snippets.filter((item) => item.group === group).length
+}
+async function addSnippetGroup(): Promise<void> {
+  if (!newSnippetGroup.value.trim()) return
+  if (await createSnippetGroup(newSnippetGroup.value)) newSnippetGroup.value = ''
+}
+function onRemoveSnippetGroup(group: string): void {
+  if (group === '未分组') return
+  void removeSnippetGroup(group)
 }
 
 /** 清空需要二次确认，3 秒后自动回到初始文案 */
@@ -371,7 +390,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               </p>
             </div>
 
-            <h4 class="sub-title">分组</h4>
+            <h4 class="sub-title">历史记录分组</h4>
             <label class="field-label" for="new-clip-group">新分组名称</label>
             <div class="secret-edit">
               <input id="new-clip-group" v-model="newGroup" class="control" maxlength="40" placeholder="例如：工作资料" @keydown.enter.prevent="addGroup" />
@@ -396,10 +415,35 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               </div>
             </div>
 
+            <h4 class="sub-title">常用短语分组</h4>
+            <label class="field-label" for="new-snippet-group">新短语分组名称</label>
+            <div class="secret-edit">
+              <input id="new-snippet-group" v-model="newSnippetGroup" class="control" maxlength="40" placeholder="例如：快捷回复、常用脚本" @keydown.enter.prevent="addSnippetGroup" />
+              <button class="btn" type="button" :disabled="!newSnippetGroup.trim()" @click="addSnippetGroup">添加分组</button>
+            </div>
+            <p class="hint">删除短语分组后，该组短语会自动归入“未分组”，正文不会丢失。</p>
+            <div class="card">
+              <div v-for="group in state.snippetGroups" :key="group" class="group-row">
+                <span class="group-name">{{ group }}</span>
+                <span v-if="group === '未分组'" class="tag tag-muted">默认组</span>
+                <span class="count">{{ snippetGroupCount(group) }}</span>
+                <button
+                  class="icon-btn sm"
+                  type="button"
+                  :disabled="group === '未分组'"
+                  :aria-label="`删除短语分组 ${group}`"
+                  :title="group === '未分组' ? '默认组不可删除' : '删除短语分组'"
+                  @click="onRemoveSnippetGroup(group)"
+                >
+                  <Icon name="trash" :size="13" />
+                </button>
+              </div>
+            </div>
+
             <div class="danger-row">
               <span class="set-text">
-                <span class="set-label">全部记录</span>
-                <span class="set-desc">包括所有收藏。清空后无法恢复，需要再点一次确认。</span>
+                <span class="set-label">全部历史记录</span>
+                <span class="set-desc">包括所有收藏，但不会删除常用短语。清空后无法恢复，需要再点一次确认。</span>
               </span>
               <button
                 class="btn btn-danger"
@@ -536,10 +580,10 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
             <h3 class="panel-title">通用</h3><p class="page-description">设置外观、灵动岛与日常操作习惯。</p><h4 class="sub-title">显示主题 <span class="save-mode">即时生效</span></h4>
 
             <div class="card">
-              <div class="set-row">
+              <div class="set-row set-row-stack">
                 <span class="set-text">
                   <span class="set-label">主题</span>
-                  <span class="set-desc">立即应用到设置、小胶囊和展开面板；跟随系统会随 Windows 的浅色 / 深色设置切换。</span>
+                  <span class="set-desc">立即应用到设置、小胶囊和展开面板；不同器物主题拥有独立的轮廓结构与控件形态。</span>
                 </span>
                 <span class="seg" role="radiogroup" aria-label="主题">
                   <label

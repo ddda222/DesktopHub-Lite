@@ -8,7 +8,9 @@ const props = withDefaults(defineProps<{
   expanded?: boolean
   active?: boolean
   quality?: 'full' | 'low'
-}>(), { active: true, quality: 'full' })
+  cornerRadius?: number
+  palette?: 'cool' | 'amber' | 'vermilion' | 'lime'
+}>(), { active: true, quality: 'full', palette: 'cool' })
 const emit = defineEmits<{ unavailable: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 let dispose: (() => void) | undefined
@@ -89,10 +91,17 @@ onMounted(() => {
     lightY += (targetY - lightY) * follow
     energy += (targetEnergy - energy) * follow
     tone += (Number(props.lightSurface) - tone) * follow
-    const rippleAge = Math.min((now - rippleStart) / 760, 1)
-    const openingAge = Math.min((now - openingStart) / 570, 1)
-    pass.draw({ width, height, corner, lightX, lightY, energy, tone, rippleX: originX, rippleY: originY,
-      rippleAge, openingAge, direction: props.expanded ? 1 : -1, full })
+    const rippleAge = Math.min((now - rippleStart) / 680, 1)
+    const openingAge = Math.min((now - openingStart) / (props.expanded ? 380 : 230), 1)
+    const cornerNow = props.cornerRadius ?? (parseFloat(getComputedStyle(surface!).borderTopLeftRadius) || corner)
+    const paletteMap: Record<string, { base: [number, number, number]; rim: [number, number, number] } | undefined> = {
+      amber: { base: [.96, .62, .08], rim: [1, .92, .56] },
+      vermilion: { base: [.72, .24, .16], rim: [.92, .48, .36] },
+      lime: { base: [.64, .9, .21], rim: [.98, .92, .25] },
+    }
+    const colors = paletteMap[props.palette ?? 'cool']
+    pass.draw({ width, height, corner: cornerNow, lightX, lightY, energy, tone, rippleX: originX, rippleY: originY,
+      rippleAge, openingAge, direction: props.expanded ? 1 : -1, full, tintBase: colors?.base, tintRim: colors?.rim })
     const remaining = Math.abs(targetX-lightX) + Math.abs(targetY-lightY) + Math.abs(targetEnergy-energy) + Math.abs(Number(props.lightSurface)-tone)
     if (remaining > .005 || rippleAge < 1 || openingAge < 1) {
       previous = now
@@ -134,7 +143,7 @@ onMounted(() => {
     sync()
   })
   const stopActive = watch(() => props.active, sync)
-  const stopTone = watch(() => props.lightSurface, schedule)
+  const stopTone = watch(() => [props.lightSurface, props.cornerRadius, props.palette], schedule)
   const stopQuality = watch(() => props.quality, () => { trim = true; schedule() })
   const stopOpening = watch(() => props.expanded, () => {
     if (enabled()) { openingStart = performance.now(); schedule() }

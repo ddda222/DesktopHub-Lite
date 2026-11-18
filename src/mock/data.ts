@@ -3,6 +3,7 @@ import type {
   ClipItem,
   HubApp,
   HubSettings,
+  SnippetItem,
   TranslationProvider,
   TranslationSettings
 } from '@/lib/desktop/types'
@@ -166,6 +167,43 @@ export const clips: ClipItem[] = [
 ]
 
 export const groups = ['未分组', '工作', '代码', '图片']
+
+export const snippetGroups = ['未分组', '工作', '代码', '回复']
+
+export const snippets: SnippetItem[] = [
+  {
+    id: 'snip-daily-report',
+    title: '研发日报抬头',
+    content: '【{{date}} {{weekday}} 研发进度】\n1. 今日完成：\n2. 明日计划：\n3. 风险与协作：',
+    group: '工作',
+    pinned: true,
+    updatedAt: now - minute * 5
+  },
+  {
+    id: 'snip-code-quote',
+    title: '代码块引用包装',
+    content: '定位记录（{{time}}）：\n```\n{{clipboard}}\n```',
+    group: '代码',
+    pinned: true,
+    updatedAt: now - minute * 18
+  },
+  {
+    id: 'snip-reply-ack',
+    title: '收到确认与排期回复',
+    content: '已收到，正在核对上下文与复现条件，稍后同步处理结论。',
+    group: '回复',
+    pinned: false,
+    updatedAt: now - minute * 45
+  },
+  {
+    id: 'snip-git-check',
+    title: '提交前空白与构建自检',
+    content: 'git diff --check && pnpm --dir next run build',
+    group: '代码',
+    pinned: false,
+    updatedAt: now - minute * 90
+  }
+]
 
 export const defaultSettings: HubSettings = {
   theme: 'dark',

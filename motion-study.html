@@ -6,9 +6,12 @@
   <title>光轨舱门 · DesktopHub Lite</title>
   <link rel="stylesheet" href="/src/styles/tokens.css">
   <link rel="stylesheet" href="/src/styles/base.css">
+  <link rel="stylesheet" href="/src/styles/midnight.css">
+  <link rel="stylesheet" href="/src/styles/structural-themes.css">
   <style>
     :root { --studio-paper: #f5f6f1; --studio-ink: #25352e; --studio-quiet: #526159; --studio-rule: #bac5ba; --studio-tint: #e1e8dc; --sky: #eff1e6; --horizon: #cfdbd1; --far: #c5d4c5; --near: #b7c8bc; }
     :root[data-theme="dark"] { --studio-paper: #1d2422; --studio-ink: #e3ebe1; --studio-quiet: #aebdb0; --studio-rule: #49594f; --studio-tint: #33423a; --sky: #48574e; --horizon: #34443d; --far: #394a40; --near: #304137; }
+    :root[data-theme="midnight"] { --studio-paper: #0b111d; --studio-ink: #e6efff; --studio-quiet: #96abc9; --studio-rule: #283a56; --studio-tint: #19263d; --sky: #16233a; --horizon: #10192b; --far: #132036; --near: #0e182a; }
     html, body { height: auto; min-height: 100%; }
     body { background: var(--studio-paper); overflow: auto; }
     .sheet { max-width: 1020px; margin: auto; padding: clamp(18px,4vw,48px); color: var(--studio-ink); }
@@ -74,6 +77,7 @@
       <label><input id="light" type="checkbox" checked>边缘特效</label>
       <label><input id="reduced" type="checkbox">减少动态效果</label>
       <label><input id="dark" type="checkbox">深色外观</label>
+      <label><input id="midnight" type="checkbox">星舰仪表</label>
     </div>
     <p class="hint" id="hint" role="status">快速往返切换形态可观察反向接续；在岛内移动、按住和松开可查看响应。</p>
     <p class="footnote">仅预览，不操作 Windows 应用或用户文件。<a href="/">返回完整交互预览</a></p>
@@ -126,7 +130,16 @@
             hint.textContent = '已模拟' + cues[kind] + '事件。切换「减少动态效果」可对比静态反馈。'
           }))
           listen(document.getElementById('light'), 'change', event => { state.ui.islandAppearance.webgl = event.target.checked })
-          listen(document.getElementById('dark'), 'change', event => setTheme(event.target.checked ? 'dark' : 'light'))
+          const darkBox = document.getElementById('dark')
+          const midnightBox = document.getElementById('midnight')
+          listen(darkBox, 'change', () => {
+            if (darkBox.checked) midnightBox.checked = false
+            setTheme(darkBox.checked ? 'dark' : 'light')
+          })
+          listen(midnightBox, 'change', () => {
+            if (midnightBox.checked) darkBox.checked = false
+            setTheme(midnightBox.checked ? 'midnight' : 'light')
+          })
           listen(quiet, 'change', () => { state.ui.islandReducedMotion = quiet.checked })
           listen(systemMotion, 'change', syncMotion)
           syncMotion()

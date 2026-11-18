@@ -28,11 +28,11 @@ export function createMotes(kind: IslandCueKind, low: boolean): Mote[] {
 
 export function paintFlow(
   ctx: CanvasRenderingContext2D, motes: Mote[], kind: IslandCueKind,
-  progress: number, width: number, elapsed: number, pointer: FlowPointer | null, dark: boolean,
+  progress: number, width: number, elapsed: number, pointer: FlowPointer | null, dark: boolean, color?: string,
 ): void {
   ctx.clearRect(0, 0, width, FLOW_HEIGHT)
   const drag = Math.exp(-elapsed * 16)
-  ctx.fillStyle = ctx.strokeStyle = dark ? '#badfd7' : '#477d76'
+  ctx.fillStyle = ctx.strokeStyle = color || (dark ? '#b8d6ff' : '#2558c4')
   ctx.lineCap = 'round'
   for (const mote of motes) {
     const seed = mote.seed

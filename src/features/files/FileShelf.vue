@@ -153,16 +153,18 @@ onBeforeUnmount(() => {
 .file-shelf.receiving { background: var(--accent-weak); outline: 1px dashed var(--accent); outline-offset: -1px; }
 .shelf-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
 .shelf-tools > div { display: flex; gap: 6px; }
-.shelf-tools button { padding: 6px 10px; min-height: 30px; border-radius: 16px; background: var(--surface-2); }
+.shelf-tools button { padding: 6px 10px; min-height: 30px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); transition: background 120ms ease, border-color 120ms ease; }
+.shelf-tools button:hover:not(:disabled) { border-color: var(--line-strong); }
 .shelf-help, .shelf-message, .shelf-error { font-size: 12px; line-height: 1.6; margin: 8px 0; color: var(--text-2); }
 .shelf-error { color: var(--danger, #fa8e8e); }
-.shelf-undo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; padding: 6px 8px 6px 12px; border-radius: 12px; background: var(--accent-weak); font-size: 12px; }
+.shelf-undo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; padding: 6px 8px 6px 12px; border-radius: 12px; border: 1px solid var(--accent-weak); background: var(--accent-weak); font-size: 12px; }
 .shelf-undo span { color: var(--text); }
 .undo-button { flex: none; font-weight: 600; color: var(--accent); min-height: 30px; padding: 5px 10px; border-radius: 8px; }
 .shelf-empty { min-height: 120px; display: flex; flex-direction: column; gap: 9px; align-items: center; justify-content: center; padding: 16px 8px; color: var(--text-2); font-size: 13px; text-align: center; }
 .shelf-empty small { font-size: 12px; color: var(--text-3); }
 .shelf-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; max-height: 250px; overflow-y: auto; }
-.shelf-list li { display: flex; align-items: center; gap: 6px; padding: 6px; min-width: 0; border-radius: 14px; background: var(--surface-2); }
+.shelf-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; min-width: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); transition: background 120ms ease, border-color 120ms ease; }
+.shelf-list li:hover { background: var(--surface-3); border-color: var(--line-strong); }
 .shelf-list input { accent-color: var(--accent); flex: none; }
 .file-main { display: flex; align-items: center; flex: 1; min-width: 0; gap: 9px; text-align: left; cursor: grab; padding: 5px 0; }
 .file-main:active { cursor: grabbing; }

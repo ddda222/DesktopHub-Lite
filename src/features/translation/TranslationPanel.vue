@@ -132,7 +132,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <section class="panel" aria-label="翻译面板" @keydown="onPanelKeydown">
+  <section class="panel translation-panel" aria-label="翻译面板" @keydown="onPanelKeydown">
     <header class="head">
       <h2 class="title">翻译</h2>
       <button class="icon-btn" type="button" aria-label="关闭翻译面板" title="关闭" @click="dismiss()">

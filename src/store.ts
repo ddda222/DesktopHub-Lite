@@ -34,7 +34,9 @@ import {
   categories as mockCategories,
   clips as mockClips,
   defaultTranslationSettings as mockTranslationSettings,
-  groups as mockGroups
+  groups as mockGroups,
+  snippetGroups as mockSnippetGroups,
+  snippets as mockSnippets
 } from '@/mock/data'
 import type {
   AppConfig,
@@ -43,6 +45,9 @@ import type {
   ClipboardRecord,
   HubApp,
   HubSettings,
+  SnippetDraft,
+  SnippetItem,
+  SnippetPayload,
   Toast,
   ToastKind,
   TranslateDirection,
@@ -62,6 +67,8 @@ export const state = reactive({
   categories: [] as Category[],
   clips: [] as ClipItem[],
   groups: [] as string[],
+  snippets: [] as SnippetItem[],
+  snippetGroups: ['未分组'] as string[],
   clipboardPreferences: { captureImages: true, historyLimit: null as number | null, defaultHistoryLimit: 500 },
   settings: {
     theme: 'dark',
@@ -107,11 +114,16 @@ export const state = reactive({
     panel: null as PanelName,
     settingsOpen: false,
     settingsSection: 'apps' as SettingsSection,
+    clipboardView: 'history' as 'history' | 'snippets',
     query: '',
     favoritesOnly: false,
     group: '全部',
     detailId: null as string | null,
     activeIndex: 0,
+    snippetQuery: '',
+    snippetGroup: '全部',
+    snippetPinnedOnly: false,
+    snippetActiveIndex: 0,
     paused: false,
     dockOffset: { x: 0, y: 0 }
   }
@@ -169,6 +181,21 @@ async function refreshTranslationSettings(): Promise<void> {
   if (ticket === translationSettingsRefresh) state.translationSettings = settings
 }
 
+function applySnippets(payload: SnippetPayload): void {
+  state.snippetGroups = payload.groups.length ? [...payload.groups] : ['未分组']
+  state.snippets = payload.entries.map((entry) => ({ ...entry }))
+  if (state.ui.snippetGroup !== '全部' && !state.snippetGroups.includes(state.ui.snippetGroup)) {
+    state.ui.snippetGroup = '全部'
+  }
+}
+
+let snippetsRefresh = 0
+async function refreshSnippets(): Promise<void> {
+  const ticket = ++snippetsRefresh
+  const payload = await invokeHost<SnippetPayload>('list_snippets')
+  if (ticket === snippetsRefresh) applySnippets(payload)
+}
+
 function applyApps(config: AppConfig): void {
   state.categories = config.categories.map((cat) => ({ ...cat }))
   state.apps = config.apps.map((app) => ({ ...app }))
@@ -220,6 +247,8 @@ export async function bootstrap(): Promise<void> {
     state.categories = mockCategories.map((cat) => ({ ...cat }))
     state.clips = mockClips.map((clip) => ({ ...clip }))
     state.groups = [...mockGroups]
+    state.snippets = mockSnippets.map((item) => ({ ...item }))
+    state.snippetGroups = [...mockSnippetGroups]
     state.translationSettings = { ...mockTranslationSettings }
     state.ready = true
     return
@@ -229,6 +258,7 @@ export async function bootstrap(): Promise<void> {
     const config = await invokeHost<AppConfig>('list_applications')
     applyApps(config)
     await refreshClipboard()
+    await refreshSnippets()
     state.shortcuts = await invokeHost<typeof state.shortcuts>('get_shortcuts')
     state.settings.clipboardHotkey = state.shortcuts.clipboard
     const settings = await invokeHost<TranslationSettings>('get_translation_settings')
@@ -287,6 +317,7 @@ export async function subscribeHostEvents(): Promise<() => void> {
   const offs = await Promise.all([
     subscribeUiState(), subscribeApplications(),
     listenHost('clipboard-changed', () => { void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error')) }),
+    listenHost<SnippetPayload>('snippets-changed', (payload) => applySnippets(payload)),
     listenHost<string>('clipboard-notice', (message) => pushToast(message, 'error')),
     listenHost('translation-settings-changed', () => { void refreshTranslationSettings().catch(() => pushToast('读取翻译设置失败', 'error')) })
   ])
@@ -342,12 +373,30 @@ export const activeClip = computed(
   () => state.clips.find((clip) => clip.id === state.ui.detailId) ?? null
 )
 
+export const snippetGroupFilters = computed(() => ['全部', ...state.snippetGroups])
+
+export const filteredSnippets = computed(() => {
+  const query = state.ui.snippetQuery.trim().toLowerCase()
+  return state.snippets.filter((item) => {
+    if (state.ui.snippetGroup !== '全部' && item.group !== state.ui.snippetGroup) return false
+    if (state.ui.snippetPinnedOnly && !item.pinned) return false
+    if (!query) return true
+    return (
+      item.title.toLowerCase().includes(query) ||
+      item.content.toLowerCase().includes(query) ||
+      item.group.toLowerCase().includes(query)
+    )
+  })
+})
+
 /* ---------- 弹层与导航 ---------- */
 
 export function togglePanel(panel: Exclude<PanelName, null>): void {
   state.ui.detailId = null
   state.ui.query = ''
+  state.ui.snippetQuery = ''
   state.ui.activeIndex = 0
+  state.ui.snippetActiveIndex = 0
   if (isDesktop) {
     void requestPanel(panel)
     return
@@ -361,6 +410,7 @@ export function closePanel(): void {
     return
   }
   state.ui.query = ''
+  state.ui.snippetQuery = ''
   if (isDesktop) {
     void dismissPanel()
     return
@@ -879,6 +929,11 @@ export function setTheme(theme: HubSettings['theme']): void {
 
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
 
+export function isDarkTheme(theme: HubSettings['theme'] = state.settings.theme): boolean {
+  if (theme === 'system') return prefersDark.matches
+  return theme === 'dark' || theme === 'midnight' || theme === 'mecha' || theme === 'pixel'
+}
+
 function applyTheme(): void {
   const mode = state.settings.theme
   const resolved = mode === 'system' ? (prefersDark.matches ? 'dark' : 'light') : mode
@@ -936,6 +991,306 @@ export async function assignClipGroup(id: string, group: string): Promise<void> 
   catch (error) { pushToast(String(error), 'error') }
 }
 
+/* ---------- 常用短语 ---------- */
+
+const KNOWN_SNIPPET_VARS = new Set(['date', 'time', 'datetime', 'weekday', 'clipboard'])
+
+export function hasSnippetVariables(template: string): boolean {
+  let rest = template
+  while (true) {
+    const start = rest.indexOf('{{')
+    if (start < 0) return false
+    let afterOpen = rest.slice(start + 2)
+    while (afterOpen.startsWith('{')) afterOpen = afterOpen.slice(1)
+    const end = afterOpen.indexOf('}}')
+    if (end < 0) return false
+    if (afterOpen.slice(0, end).includes('{{')) {
+      rest = afterOpen
+      continue
+    }
+    if (KNOWN_SNIPPET_VARS.has(afterOpen.slice(0, end).trim().toLowerCase())) return true
+    rest = afterOpen.slice(end + 2)
+  }
+}
+
+export function renderSnippetPreview(
+  template: string,
+  clipboardSample = '（当前剪贴板文本）',
+  now = new Date()
+): string {
+  if (!template.includes('{{')) return template
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`
+  const datetimeStr = `${dateStr} ${timeStr}`
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  const weekdayStr = weekdays[now.getDay()] ?? '周一'
+
+  let out = ''
+  let rest = template
+  while (true) {
+    const start = rest.indexOf('{{')
+    if (start < 0) break
+    out += rest.slice(0, start)
+    let openOffset = start
+    let afterOpen = rest.slice(start + 2)
+    while (afterOpen.startsWith('{')) {
+      out += '{'
+      openOffset += 1
+      afterOpen = afterOpen.slice(1)
+    }
+    const end = afterOpen.indexOf('}}')
+    if (end < 0) {
+      out += rest.slice(openOffset)
+      return out
+    }
+    if (afterOpen.slice(0, end).includes('{{')) {
+      out += '{{'
+      rest = afterOpen
+      continue
+    }
+    const token = afterOpen.slice(0, end).trim().toLowerCase()
+    if (token === 'date') out += dateStr
+    else if (token === 'time') out += timeStr
+    else if (token === 'datetime') out += datetimeStr
+    else if (token === 'weekday') out += weekdayStr
+    else if (token === 'clipboard') out += clipboardSample
+    else out += rest.slice(openOffset, openOffset + 2 + end + 2)
+    rest = afterOpen.slice(end + 2)
+  }
+  return out + rest
+}
+
+function normalizeMockSnippetOrder(entries: SnippetItem[]): SnippetItem[] {
+  return [...entries.filter((item) => item.pinned), ...entries.filter((item) => !item.pinned)]
+}
+
+export function setClipboardView(view: 'history' | 'snippets'): void {
+  state.ui.clipboardView = view
+  if (view === 'snippets') {
+    state.ui.detailId = null
+    state.ui.snippetActiveIndex = 0
+  } else {
+    state.ui.activeIndex = 0
+  }
+}
+
+export function setSnippetQuery(value: string): void {
+  state.ui.snippetQuery = value
+  state.ui.snippetActiveIndex = 0
+}
+
+export function setSnippetGroup(group: string): void {
+  state.ui.snippetGroup = group
+  state.ui.snippetActiveIndex = 0
+}
+
+export function moveSnippetActive(delta: number): void {
+  const total = filteredSnippets.value.length
+  if (!total) return
+  state.ui.snippetActiveIndex = (state.ui.snippetActiveIndex + delta + total) % total
+}
+
+export async function copySnippet(snippet: SnippetItem, raw = false): Promise<void> {
+  if (!isDesktop) {
+    const dynamic = !raw && hasSnippetVariables(snippet.content)
+    pushToast(
+      `样稿：已模拟复制短语「${snippet.title}」${dynamic ? '（已展开动态变量）' : ''}，未写入系统剪贴板`,
+      'info'
+    )
+    return
+  }
+  try {
+    await invokeHost('copy_snippet', { id: snippet.id, raw })
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : String(error), 'error')
+  }
+}
+
+export async function saveSnippet(draft: SnippetDraft): Promise<boolean> {
+  const title = draft.title.trim()
+  const content = draft.content
+  const group = draft.group.trim() || '未分组'
+  if (!title) {
+    pushToast('请填写短语标题', 'error')
+    return false
+  }
+  if ([...title].length > 80) {
+    pushToast('短语标题不能超过 80 个字符', 'error')
+    return false
+  }
+  if (!content.trim()) {
+    pushToast('短语内容不能为空', 'error')
+    return false
+  }
+  if (group === '全部' || [...group].length > 40) {
+    pushToast('分组名需为 1–40 个字符，且不能为“全部”', 'error')
+    return false
+  }
+
+  if (!isDesktop) {
+    if (!state.snippetGroups.includes(group)) state.snippetGroups.push(group)
+    const now = Date.now()
+    if (draft.id) {
+      const target = state.snippets.find((item) => item.id === draft.id)
+      if (target) Object.assign(target, { title, content, group, pinned: draft.pinned, updatedAt: now })
+    } else {
+      state.snippets.unshift({
+        id: `snip-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        title,
+        content,
+        group,
+        pinned: draft.pinned,
+        updatedAt: now
+      })
+    }
+    state.snippets = normalizeMockSnippetOrder(state.snippets)
+    pushToast('常用短语已保存（浏览器样稿，未落盘）', 'success')
+    return true
+  }
+
+  try {
+    const payload = await invokeHost<SnippetPayload>('save_snippet', {
+      snippet: { id: draft.id, title, content, group, pinned: draft.pinned }
+    })
+    applySnippets(payload)
+    pushToast('常用短语已保存', 'success')
+    return true
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : String(error), 'error')
+    return false
+  }
+}
+
+export async function deleteSnippet(id: string): Promise<boolean> {
+  if (!isDesktop) {
+    const before = state.snippets.length
+    state.snippets = state.snippets.filter((item) => item.id !== id)
+    if (state.snippets.length < before) pushToast('已删除常用短语', 'success')
+    return state.snippets.length < before
+  }
+  try {
+    const payload = await invokeHost<SnippetPayload>('delete_snippet', { id })
+    applySnippets(payload)
+    pushToast('已删除常用短语', 'success')
+    return true
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : String(error), 'error')
+    return false
+  }
+}
+
+export async function saveClipAsSnippet(clip: ClipItem): Promise<boolean> {
+  if (clip.kind !== 'text' || !clip.text?.trim()) {
+    pushToast('只有非空文本记录可以存为常用短语', 'error')
+    return false
+  }
+  if (!isDesktop) {
+    const rawLine = (clip.note?.trim() || clip.text.split(/\r?\n/).find((line) => line.trim()) || '常用短语').trim()
+    const chars = [...rawLine]
+    const title = chars.length > 28 ? `${chars.slice(0, 28).join('')}…` : rawLine
+    const group = clip.group && clip.group !== '全部' ? clip.group : '未分组'
+    if (!state.snippetGroups.includes(group)) state.snippetGroups.push(group)
+    state.snippets = normalizeMockSnippetOrder([
+      {
+        id: `snip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        title,
+        content: clip.text,
+        group,
+        pinned: false,
+        updatedAt: Date.now()
+      },
+      ...state.snippets
+    ])
+    pushToast(`已存入常用短语：${title}（浏览器样稿）`, 'success')
+    return true
+  }
+  try {
+    const payload = await invokeHost<SnippetPayload>('save_clip_as_snippet', { clipId: clip.id })
+    applySnippets(payload)
+    pushToast('已存入常用短语', 'success')
+    return true
+  } catch (error) {
+    pushToast(error instanceof Error ? error.message : String(error), 'error')
+    return false
+  }
+}
+
+export async function reorderVisibleSnippets(
+  visibleIds: string[],
+  fromId: string,
+  toId: string
+): Promise<boolean> {
+  const fromSnippet = state.snippets.find((item) => item.id === fromId)
+  const toSnippet = state.snippets.find((item) => item.id === toId)
+  if (!fromSnippet || !toSnippet || fromSnippet.pinned !== toSnippet.pinned) return false
+  const visible = new Set(visibleIds)
+  const ordered = state.snippets.filter((item) => visible.has(item.id) && item.pinned === fromSnippet.pinned)
+  const from = ordered.findIndex((item) => item.id === fromId)
+  const to = ordered.findIndex((item) => item.id === toId)
+  if (from < 0 || to < 0 || from === to) return false
+  const [moved] = ordered.splice(from, 1)
+  ordered.splice(to, 0, moved)
+  let cursor = 0
+  const next = state.snippets.map((item) =>
+    visible.has(item.id) && item.pinned === fromSnippet.pinned ? ordered[cursor++] : item
+  )
+  if (!isDesktop) {
+    state.snippets = normalizeMockSnippetOrder(next)
+    return true
+  }
+  try {
+    const payload = await invokeHost<SnippetPayload>('reorder_snippets', {
+      ids: next.map((item) => item.id)
+    })
+    applySnippets(payload)
+    return true
+  } catch (error) {
+    pushToast(`保存短语顺序失败：${String(error)}`, 'error')
+    return false
+  }
+}
+
+export async function createSnippetGroup(group: string): Promise<boolean> {
+  const trimmed = group.trim()
+  if (!trimmed || trimmed === '全部' || [...trimmed].length > 40) {
+    pushToast('分组名需为 1–40 个字符，且不能为“全部”', 'error')
+    return false
+  }
+  if (!isDesktop) {
+    if (!state.snippetGroups.includes(trimmed)) state.snippetGroups.push(trimmed)
+    return true
+  }
+  try {
+    const payload = await invokeHost<SnippetPayload>('create_snippet_group', { group: trimmed })
+    applySnippets(payload)
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
+export async function removeSnippetGroup(group: string): Promise<boolean> {
+  if (group === '未分组') return false
+  if (!isDesktop) {
+    state.snippetGroups = state.snippetGroups.filter((name) => name !== group)
+    state.snippets.forEach((item) => {
+      if (item.group === group) item.group = '未分组'
+    })
+    if (state.ui.snippetGroup === group) state.ui.snippetGroup = '全部'
+    return true
+  }
+  try {
+    const payload = await invokeHost<SnippetPayload>('remove_snippet_group', { group })
+    applySnippets(payload)
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
 export async function saveShortcuts(settings: typeof state.shortcuts = state.shortcuts): Promise<boolean> {
   if (!isDesktop) return false
   try {
@@ -967,6 +1322,9 @@ export async function saveAppCategory(id: string, name: string | null): Promise<
 
 watch(() => state.ui.panel, (panel, previous) => {
   if (!isDesktop) return
-  if (panel === 'clipboard') void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error'))
+  if (panel === 'clipboard') {
+    void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error'))
+    void refreshSnippets().catch(() => pushToast('读取常用短语失败', 'error'))
+  }
   if (windowLabel !== 'translation' && previous === 'translation' && panel !== 'translation') cancelTranslation()
 })

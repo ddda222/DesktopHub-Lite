@@ -228,9 +228,9 @@ async function removeApp(id: string): Promise<void> {
 .search-control > svg { position: absolute; left: 12px; top: 10px; color: var(--text-3); }
 .search-control .control { padding-left: 36px; }
 .category-filters { display: flex; flex-wrap: wrap; gap: 8px; }
-.category-filter { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-2); }
+.category-filter { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 6px 12px; border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 9px; color: var(--text-2); transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
 .category-filter > span:first-child { overflow-wrap: anywhere; text-align: left; }
-.category-filter:hover { background: var(--surface-2); }
+.category-filter:hover:not(.selected) { background: var(--surface-3); border-color: var(--text-3); color: var(--text); }
 .category-filter.selected { background: var(--text); color: var(--surface); border-color: var(--text); font-weight: 600; }
 .category-filter.selected .count { color: inherit; background: transparent; }
 .result-summary { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin: 20px 0 8px; }
@@ -241,8 +241,8 @@ async function removeApp(id: string): Promise<void> {
 .app-group-heading { margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text-2); overflow-wrap: anywhere; }
 .managed-apps { list-style: none; padding: 0; margin: 0; }
 .managed-app { border-bottom: 1px solid var(--line); }
-.managed-app.selected { background: var(--surface-2); border-radius: 8px; }
-.app-summary { display: flex; align-items: center; gap: 12px; padding: 12px 8px; min-height: 64px; width: 100%; text-align: left; border-radius: 8px; }
+.managed-app.selected { background: var(--surface-2); border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.app-summary { display: flex; align-items: center; gap: 12px; padding: 12px 10px; min-height: 64px; width: 100%; text-align: left; border-radius: 10px; transition: background 120ms ease; }
 .app-summary:hover { background: var(--hover); }
 .app-summary > img, .app-initials { flex: none; width: 32px; height: 32px; object-fit: contain; }
 .app-initials { display: grid; place-items: center; background: var(--surface-3); color: var(--text); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }

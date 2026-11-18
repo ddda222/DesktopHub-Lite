@@ -16,7 +16,24 @@ pub const PANEL_OVERFLOW: &str = "overflow";
 
 pub const THEME_DARK: &str = "dark";
 pub const THEME_LIGHT: &str = "light";
+pub const THEME_MIDNIGHT: &str = "midnight";
+pub const THEME_MECHA: &str = "mecha";
+pub const THEME_SCROLL: &str = "scroll";
+pub const THEME_PIXEL: &str = "pixel";
 pub const THEME_SYSTEM: &str = "system";
+
+pub fn valid_theme(theme: &str) -> bool {
+    matches!(
+        theme,
+        THEME_DARK
+            | THEME_LIGHT
+            | THEME_MIDNIGHT
+            | THEME_MECHA
+            | THEME_SCROLL
+            | THEME_PIXEL
+            | THEME_SYSTEM
+    )
+}
 
 pub const CATEGORY_ALL: &str = "all";
 
@@ -47,7 +64,7 @@ pub struct UiState {
     pub paused: bool,
     /// 图标条当前分类，弹层窗口也要按同一分类展示
     pub active_category_id: String,
-    /// dark / light / system
+    /// dark / light / midnight / system
     pub theme: String,
 }
 

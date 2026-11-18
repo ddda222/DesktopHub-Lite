@@ -1,4 +1,4 @@
-export type ThemeMode = 'system' | 'light' | 'dark'
+export type ThemeMode = 'system' | 'light' | 'dark' | 'midnight' | 'mecha' | 'scroll' | 'pixel'
 
 export interface Category {
   id: string
@@ -114,4 +114,27 @@ export interface TranslationSettingsRecord {
   baseUrl: string
   direction: TranslateDirection
   hasSecret: boolean
+}
+
+/** Rust 侧 snippets.json 的单条常用短语结构。 */
+export interface SnippetItem {
+  id: string
+  title: string
+  content: string
+  group: string
+  pinned: boolean
+  updatedAt: number
+}
+
+export interface SnippetPayload {
+  groups: string[]
+  entries: SnippetItem[]
+}
+
+export interface SnippetDraft {
+  id?: string
+  title: string
+  content: string
+  group: string
+  pinned: boolean
 }

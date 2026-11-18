@@ -21,6 +21,8 @@ import { isDesktop, windowLabel, resolveWindowLabel } from '@/lib/desktop/deskto
 import * as store from './store'
 import './styles/tokens.css'
 import './styles/base.css'
+import './styles/midnight.css'
+import './styles/structural-themes.css'
 
 function pickRoot(): { root: Component; shell: string } {
   if (!isDesktop) return { root: new URLSearchParams(location.search).get('preview') === 'styles' ? StyleLab : BrowserPreview, shell: 'browser' }

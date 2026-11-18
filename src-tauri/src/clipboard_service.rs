@@ -165,6 +165,19 @@ fn write_text(text: &str) -> Result<(), String> {
     SELF_SEQUENCE.store(unsafe { GetClipboardSequenceNumber() }, Ordering::SeqCst);
     Ok(())
 }
+
+/// 将纯文本写入系统剪贴板，并通知灵动岛展示“已复制”反馈（不自动粘贴或发送）。
+pub(crate) fn copy_plain_text(app: &AppHandle, text: &str) -> Result<(), String> {
+    write_text(text)?;
+    copied(app);
+    Ok(())
+}
+
+/// 按需读取当前系统剪贴板中的纯文本；若剪贴板为空、非文本或暂不可访问则返回 None。
+pub(crate) fn read_current_text() -> Option<String> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    clipboard.get_text().ok()
+}
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || {
         let mut sequence = unsafe { GetClipboardSequenceNumber() };

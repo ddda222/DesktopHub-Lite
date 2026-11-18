@@ -34,82 +34,311 @@
 
 /* 深色（默认） */
 :root[data-theme='dark'] {
-  --page-bg: #0a0b0d;
-  --stage-1: #14161b;
-  --stage-2: #0b0c0f;
+  color-scheme: dark;
+  --page-bg: #0a0b0e;
+  --stage-1: #151820;
+  --stage-2: #0b0c10;
 
-  --bar-bg: rgba(23, 24, 28, 0.86);
-  --bar-border: rgba(255, 255, 255, 0.09);
-  --bar-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 16px 40px rgba(0, 0, 0, 0.55),
+  --bar-bg: rgba(22, 24, 29, 0.88);
+  --bar-border: rgba(255, 255, 255, 0.1);
+  --bar-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 40px rgba(0, 0, 0, 0.55),
     0 2px 8px rgba(0, 0, 0, 0.4);
 
-  --surface: #17181c;
-  --surface-2: #1d1f24;
-  --surface-3: #24262c;
+  --surface: #16181d;
+  --surface-2: #1d2026;
+  --surface-3: #262a33;
 
-  --hover: rgba(255, 255, 255, 0.07);
-  --active: rgba(255, 255, 255, 0.12);
+  --hover: rgba(255, 255, 255, 0.075);
+  --active: rgba(255, 255, 255, 0.13);
 
-  --text: #f1f2f4;
-  --text-2: #c6cbd3;
-  --text-3: #aab2bf;
+  --text: #f2f4f8;
+  --text-2: #c7cdd8;
+  --text-3: #9da6b5;
 
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.14);
+  --line: rgba(255, 255, 255, 0.085);
+  --line-strong: rgba(255, 255, 255, 0.16);
 
   --accent: #8bb8ff;
   --accent-hover: #a6c8ff;
   --accent-weak: rgba(139, 184, 255, 0.16);
-  --accent-text: #101827;
+  --accent-text: #0f1726;
 
   --danger: #f2777a;
   --danger-weak: rgba(242, 119, 122, 0.14);
   --success: #5fd28a;
 
-  --pop-bg: rgba(23, 24, 28, 0.97);
-  --pop-border: rgba(255, 255, 255, 0.1);
+  --pop-bg: rgba(22, 24, 29, 0.98);
+  --pop-border: rgba(255, 255, 255, 0.12);
   --pop-shadow: 0 24px 64px rgba(0, 0, 0, 0.62), 0 4px 14px rgba(0, 0, 0, 0.45);
 
-  --thumb-bg: #2a2d34;
+  --thumb-bg: #282c35;
+  --island-rim: rgba(255, 255, 255, 0.15);
+  --island-top-sheen: rgba(255, 255, 255, 0.2);
+  --island-hem-a: rgba(210, 224, 245, 0.22);
+  --island-hem-b: rgba(139, 184, 255, 0.58);
 }
 
 /* 浅色 */
 :root[data-theme='light'] {
-  --page-bg: #eef0f4;
-  --stage-1: #f7f8fa;
-  --stage-2: #e4e7ec;
+  color-scheme: light;
+  --page-bg: #eef1f6;
+  --stage-1: #f8f9fc;
+  --stage-2: #e3e7f0;
 
-  --bar-bg: rgba(255, 255, 255, 0.88);
-  --bar-border: rgba(16, 24, 40, 0.09);
-  --bar-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 16px 40px rgba(16, 24, 40, 0.16),
-    0 2px 8px rgba(16, 24, 40, 0.08);
+  --bar-bg: rgba(255, 255, 255, 0.9);
+  --bar-border: rgba(15, 23, 42, 0.1);
+  --bar-shadow: 0 1px 0 rgba(255, 255, 255, 0.95) inset, 0 16px 40px rgba(15, 23, 42, 0.15),
+    0 2px 8px rgba(15, 23, 42, 0.08);
 
   --surface: #ffffff;
-  --surface-2: #f5f6f9;
-  --surface-3: #eceef2;
+  --surface-2: #f4f6fa;
+  --surface-3: #e9edf4;
 
-  --hover: rgba(16, 24, 40, 0.06);
-  --active: rgba(16, 24, 40, 0.1);
+  --hover: rgba(15, 23, 42, 0.055);
+  --active: rgba(15, 23, 42, 0.1);
 
-  --text: #14171d;
-  --text-2: #424954;
-  --text-3: #5b6472;
+  --text: #11151c;
+  --text-2: #414956;
+  --text-3: #646f80;
 
-  --line: rgba(16, 24, 40, 0.09);
-  --line-strong: rgba(16, 24, 40, 0.16);
+  --line: rgba(15, 23, 42, 0.085);
+  --line-strong: rgba(15, 23, 42, 0.16);
 
-  --accent: #1d4ed8;
-  --accent-hover: #1e40af;
-  --accent-weak: rgba(29, 78, 216, 0.1);
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-weak: rgba(37, 99, 235, 0.11);
   --accent-text: #ffffff;
 
-  --danger: #d92d20;
-  --danger-weak: rgba(217, 45, 32, 0.1);
-  --success: #12805c;
+  --danger: #dc2626;
+  --danger-weak: rgba(220, 38, 38, 0.1);
+  --success: #0d9468;
 
   --pop-bg: rgba(255, 255, 255, 0.99);
-  --pop-border: rgba(16, 24, 40, 0.1);
-  --pop-shadow: 0 24px 64px rgba(16, 24, 40, 0.2), 0 4px 14px rgba(16, 24, 40, 0.1);
+  --pop-border: rgba(15, 23, 42, 0.11);
+  --pop-shadow: 0 24px 64px rgba(15, 23, 42, 0.18), 0 4px 14px rgba(15, 23, 42, 0.09);
 
-  --thumb-bg: #e8ebf0;
+  --thumb-bg: #e7ebf2;
+  --island-rim: rgba(15, 23, 42, 0.14);
+  --island-top-sheen: rgba(255, 255, 255, 0.96);
+  --island-hem-a: rgba(37, 99, 235, 0.14);
+  --island-hem-b: rgba(37, 99, 235, 0.44);
+}
+
+/* 星舰仪表（深海靛黑高对比 + 精密微圆角与冰蓝光轨） */
+:root[data-theme='midnight'] {
+  color-scheme: dark;
+  --r-bar: 12px;
+  --r-pop: 12px;
+  --r-card: 8px;
+  --r-tile: 7px;
+  --r-chip: 6px;
+  --dur-fast: 110ms;
+  --dur: 150ms;
+
+  --page-bg: #070b14;
+  --stage-1: #101726;
+  --stage-2: #080d17;
+
+  --bar-bg: rgba(16, 23, 38, 0.9);
+  --bar-border: rgba(145, 180, 235, 0.16);
+  --bar-shadow: 0 1px 0 rgba(186, 214, 255, 0.08) inset, 0 16px 40px rgba(2, 6, 16, 0.65),
+    0 2px 8px rgba(2, 6, 16, 0.48);
+
+  --surface: #0f1726;
+  --surface-2: #162135;
+  --surface-3: #1d2b44;
+
+  --hover: rgba(109, 182, 255, 0.1);
+  --active: rgba(109, 182, 255, 0.18);
+
+  --text: #f3f7ff;
+  --text-2: #c5d1e6;
+  --text-3: #96a8c6;
+
+  --line: rgba(109, 182, 255, 0.14);
+  --line-strong: rgba(109, 182, 255, 0.28);
+
+  --accent: #6db6ff;
+  --accent-hover: #92c9ff;
+  --accent-weak: rgba(109, 182, 255, 0.18);
+  --accent-text: #071222;
+  --accent-glow: rgba(109, 182, 255, 0.24);
+  --grid-tint: rgba(109, 182, 255, 0.045);
+
+  --danger: #ff7e85;
+  --danger-weak: rgba(255, 126, 133, 0.16);
+  --success: #5ae09b;
+
+  --pop-bg: rgba(15, 23, 38, 0.98);
+  --pop-border: rgba(109, 182, 255, 0.24);
+  --pop-shadow: 0 24px 64px rgba(2, 6, 16, 0.72), 0 4px 14px rgba(2, 6, 16, 0.5);
+
+  --thumb-bg: #22304a;
+  --island-rim: rgba(109, 182, 255, 0.34);
+  --island-top-sheen: rgba(186, 214, 255, 0.26);
+  --island-hem-a: rgba(130, 178, 255, 0.24);
+  --island-hem-b: rgba(109, 182, 255, 0.72);
+  --particle-color: #6db6ff;
+}
+
+/* 琥珀重工（45° 倒角装甲 + 深钨钢灰黑 + 警示琥珀金） */
+:root[data-theme='mecha'] {
+  color-scheme: dark;
+  --r-bar: 6px;
+  --r-pop: 6px;
+  --r-card: 4px;
+  --r-tile: 4px;
+  --r-chip: 3px;
+  --dur-fast: 105ms;
+  --dur: 145ms;
+
+  --page-bg: #0b0d12;
+  --stage-1: #161922;
+  --stage-2: #0b0d12;
+
+  --bar-bg: rgba(22, 25, 33, 0.94);
+  --bar-border: rgba(245, 158, 11, 0.42);
+  --bar-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.48);
+
+  --surface: #161921;
+  --surface-2: #1e222d;
+  --surface-3: #272c3a;
+
+  --hover: rgba(245, 158, 11, 0.11);
+  --active: rgba(245, 158, 11, 0.2);
+
+  --text: #f5f7fa;
+  --text-2: #cbd2df;
+  --text-3: #95a0b4;
+
+  --line: rgba(245, 158, 11, 0.16);
+  --line-strong: rgba(245, 158, 11, 0.36);
+
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --accent-weak: rgba(245, 158, 11, 0.18);
+  --accent-text: #111318;
+
+  --danger: #f87171;
+  --danger-weak: rgba(248, 113, 113, 0.16);
+  --success: #34d399;
+
+  --pop-bg: rgba(22, 25, 33, 0.99);
+  --pop-border: rgba(245, 158, 11, 0.38);
+  --pop-shadow: 0 24px 64px rgba(0, 0, 0, 0.72), 0 4px 14px rgba(0, 0, 0, 0.5);
+
+  --thumb-bg: #2a3040;
+  --island-rim: rgba(245, 158, 11, 0.48);
+  --island-top-sheen: rgba(253, 230, 138, 0.28);
+  --island-hem-a: rgba(245, 158, 11, 0.24);
+  --island-hem-b: rgba(251, 191, 36, 0.75);
+  --particle-color: #fbbf24;
+}
+
+/* 海棠书卷（宣纸米白 + 古籍乌丝栏 + 海棠内凹角 + 朱砂红签） */
+:root[data-theme='scroll'] {
+  color-scheme: light;
+  --r-bar: 8px;
+  --r-pop: 8px;
+  --r-card: 4px;
+  --r-tile: 4px;
+  --r-chip: 3px;
+  --dur-fast: 120ms;
+  --dur: 165ms;
+
+  --page-bg: #e6e0d2;
+  --stage-1: #efeadd;
+  --stage-2: #dcd5c4;
+
+  --bar-bg: rgba(246, 241, 229, 0.96);
+  --bar-border: rgba(44, 48, 46, 0.32);
+  --bar-shadow: 0 16px 38px rgba(31, 36, 33, 0.16), 0 2px 8px rgba(31, 36, 33, 0.08);
+
+  --surface: #f6f1e5;
+  --surface-2: #ede6d6;
+  --surface-3: #e2dac6;
+
+  --hover: rgba(31, 36, 33, 0.06);
+  --active: rgba(185, 58, 38, 0.12);
+
+  --text: #1f2421;
+  --text-2: #494f4b;
+  --text-3: #6e746f;
+
+  --line: rgba(31, 36, 33, 0.14);
+  --line-strong: rgba(31, 36, 33, 0.28);
+
+  --accent: #b93a26;
+  --accent-hover: #9e2f1e;
+  --accent-weak: rgba(185, 58, 38, 0.12);
+  --accent-text: #ffffff;
+
+  --danger: #b91c1c;
+  --danger-weak: rgba(185, 28, 28, 0.11);
+  --success: #2b6e4c;
+
+  --pop-bg: rgba(246, 241, 229, 0.99);
+  --pop-border: rgba(31, 36, 33, 0.28);
+  --pop-shadow: 0 22px 54px rgba(31, 36, 33, 0.2), 0 4px 12px rgba(31, 36, 33, 0.1);
+
+  --thumb-bg: #dfd7c5;
+  --island-rim: rgba(44, 48, 46, 0.42);
+  --island-top-sheen: rgba(255, 253, 248, 0.85);
+  --island-hem-a: rgba(185, 58, 38, 0.16);
+  --island-hem-b: rgba(185, 58, 38, 0.52);
+  --particle-color: #b93a26;
+}
+
+/* 像素掌机（锯齿阶梯外壳 + 内凹液晶屏 + 3D 厚底按键 + 青柠能量格） */
+:root[data-theme='pixel'] {
+  color-scheme: dark;
+  --r-bar: 2px;
+  --r-pop: 2px;
+  --r-card: 0px;
+  --r-tile: 0px;
+  --r-chip: 0px;
+  --dur-fast: 80ms;
+  --dur: 120ms;
+
+  --page-bg: #13111c;
+  --stage-1: #1f1b2e;
+  --stage-2: #12101b;
+
+  --bar-bg: #322d4b;
+  --bar-border: #0f0d1a;
+  --bar-shadow: 4px 4px 0 #0f0d1a;
+
+  --surface: #322d4b;
+  --surface-2: #212823;
+  --surface-3: #2d3830;
+
+  --hover: rgba(163, 230, 53, 0.16);
+  --active: rgba(163, 230, 53, 0.28);
+
+  --text: #f1f5f9;
+  --text-2: #cbd5e1;
+  --text-3: #94a3b8;
+
+  --line: rgba(15, 13, 26, 0.65);
+  --line-strong: #0f0d1a;
+
+  --accent: #a3e635;
+  --accent-hover: #bef264;
+  --accent-weak: rgba(163, 230, 53, 0.2);
+  --accent-text: #0f0d1a;
+
+  --danger: #fb7185;
+  --danger-weak: rgba(251, 113, 133, 0.2);
+  --success: #4ade80;
+
+  --pop-bg: #322d4b;
+  --pop-border: #0f0d1a;
+  --pop-shadow: 5px 5px 0 #0f0d1a;
+
+  --thumb-bg: #262f28;
+  --island-rim: #0f0d1a;
+  --island-top-sheen: rgba(255, 255, 255, 0.14);
+  --island-hem-a: rgba(163, 230, 53, 0.3);
+  --island-hem-b: rgba(250, 204, 21, 0.85);
+  --particle-color: #a3e635;
 }

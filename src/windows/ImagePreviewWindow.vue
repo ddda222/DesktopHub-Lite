@@ -38,7 +38,7 @@ function measureScale(): void {
     (canvas.value.clientHeight - 32) / original.value.height) * 100)
 }
 function syncTheme(ui: UiState): void {
-  if (['light', 'dark', 'system'].includes(ui.theme)) state.settings.theme = ui.theme as typeof state.settings.theme
+  if (['light', 'dark', 'midnight', 'mecha', 'scroll', 'pixel', 'system'].includes(ui.theme)) state.settings.theme = ui.theme as typeof state.settings.theme
 }
 async function readImage(): Promise<void> {
   error.value = ''; imageFailed.value = false; loaded.value = false; preview.value = null

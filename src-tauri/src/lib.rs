@@ -21,6 +21,7 @@ mod config_format;
 mod config_transfer;
 mod launcher;
 mod logging;
+mod snippets;
 mod state;
 mod storage;
 mod translation;
@@ -42,7 +43,7 @@ use applications::{AppConfig, HubApp, OpenResult};
 use clipboard::ClipboardIndex;
 use state::{
     UiState, UiStateHandle, CATEGORY_ALL, PANEL_CATEGORY, PANEL_CLIPBOARD, PANEL_OVERFLOW,
-    PANEL_TRANSLATION, THEME_DARK, THEME_LIGHT, THEME_SYSTEM,
+    PANEL_TRANSLATION, valid_theme,
 };
 use storage::Store;
 use translation::TranslationSettings;
@@ -64,6 +65,7 @@ pub struct AppState {
     ui: UiStateHandle,
     windows: WindowsHandle,
     clipboard: Mutex<ClipboardIndex>,
+    snippets: Mutex<snippets::SnippetIndex>,
     file_shelf: Mutex<file_shelf::ShelfIndex>,
     translation: Mutex<TranslationSettings>,
     running: AtomicBool,
@@ -403,7 +405,7 @@ fn selftest_windows(app: AppHandle) -> Vec<String> {
 /// 切换主题。system 交给前端按系统偏好解析，Rust 只记录用户选择。
 #[tauri::command]
 fn set_theme(app: AppHandle, theme: String) -> Result<UiState, String> {
-    if ![THEME_DARK, THEME_LIGHT, THEME_SYSTEM].contains(&theme.as_str()) {
+    if !valid_theme(&theme) {
         return Err(format!("未知主题：{theme}"));
     }
     let next = update_ui_preferences(&app, |ui| ui.theme = theme)?;
@@ -1027,6 +1029,11 @@ pub fn run() {
                 .read(clipboard::INDEX_FILE)
                 .unwrap_or_default();
             if clipboard.schema_version != clipboard::SCHEMA_VERSION { return Err("剪贴板索引版本不兼容，原文件已保留".into()); }
+            let mut snippets: snippets::SnippetIndex = store
+                .read(snippets::SNIPPETS_FILE)
+                .unwrap_or_default();
+            if snippets.schema_version != snippets::SCHEMA_VERSION { return Err("常用短语索引版本不兼容，原文件已保留".into()); }
+            snippets.ensure_invariants();
             let translation: TranslationSettings = store
                 .read(translation::SETTINGS_FILE)
                 .unwrap_or_default();
@@ -1066,6 +1073,7 @@ pub fn run() {
                 configuration_gate: Mutex::new(()),
                 windows: WindowsHandle::new(window_state),
                 clipboard: Mutex::new(clipboard),
+                snippets: Mutex::new(snippets),
                 file_shelf: Mutex::new(file_shelf),
                 translation: Mutex::new(translation),
                 running: AtomicBool::new(true),
@@ -1263,6 +1271,14 @@ pub fn run() {
             clipboard_service::create_clipboard_group,
             clipboard_service::remove_clipboard_group,
             clipboard_service::assign_clipboard_group,
+            snippets::list_snippets,
+            snippets::save_snippet,
+            snippets::delete_snippet,
+            snippets::reorder_snippets,
+            snippets::create_snippet_group,
+            snippets::remove_snippet_group,
+            snippets::save_clip_as_snippet,
+            snippets::copy_snippet,
             get_translation_settings,
             save_translation_settings,
             translation::translate_text,

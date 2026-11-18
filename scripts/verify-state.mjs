@@ -65,4 +65,26 @@ await test('旧页面状态回退应用且不保留空面板，调音台保持�
   api.applyUiState({islandPage:'compare',panel:'compare'});assert.equal(state.ui.islandPage,'applications');assert.equal(state.ui.panel,null)
   api.applyUiState({islandPage:'audio',panel:'audio'});assert.equal(state.ui.islandPage,'audio');assert.equal(state.ui.panel,'audio')
 })
+await test('常用短语刷新旧响应不能覆盖新响应',async()=> {
+  const jobs=[deferred(),deferred()],state={snippets:[],snippetGroups:['未分组'],ui:{snippetGroup:'全部'}};let index=0
+  const api=subject(['applySnippets','refreshSnippets'],{state,invokeHost:()=>jobs[index++].promise},'let snippetsRefresh=0')
+  const first=api.refreshSnippets(),second=api.refreshSnippets()
+  jobs[1].resolve({groups:['未分组','代码'],entries:[{id:'new',title:'新',content:'c',group:'代码',pinned:false,updatedAt:2}]});await second
+  jobs[0].resolve({groups:['未分组'],entries:[{id:'old',title:'旧',content:'c',group:'未分组',pinned:false,updatedAt:1}]});await first
+  assert.equal(state.snippets[0]?.id,'new');assert.deepEqual([...state.snippetGroups],['未分组','代码'])
+})
+await test('常用短语保存与排序在落盘失败时保持原内存不变',async()=> {
+  const state={snippets:[{id:'a',title:'A',content:'1',group:'未分组',pinned:false,updatedAt:1},{id:'b',title:'B',content:'2',group:'未分组',pinned:false,updatedAt:2}],snippetGroups:['未分组'],ui:{snippetGroup:'全部'}}
+  const api=subject(['applySnippets','saveSnippet','reorderVisibleSnippets'],{state,invokeHost:async()=>{throw new Error('disk-error')}},'')
+  assert.equal(await api.saveSnippet({title:'C',content:'3',group:'未分组',pinned:false}),false)
+  assert.equal(await api.reorderVisibleSnippets(['a','b'],'a','b'),false)
+  assert.deepEqual(state.snippets.map(s=>s.id),['a','b'])
+})
+await test('常用短语前端预览单趟替换变量且保留未知语法',()=> {
+  const api=subject(['hasSnippetVariables','renderSnippetPreview'],{},'const KNOWN_SNIPPET_VARS = new Set(["date","time","datetime","weekday","clipboard"])')
+  assert.equal(api.hasSnippetVariables('{{ item.name }}'),false)
+  assert.equal(api.hasSnippetVariables('{{{date}}}'),true)
+  const fixed=new Date(2026,10,18,14,5,9)
+  assert.equal(api.renderSnippetPreview('[{{date}} {{time}}] {{clipboard}} {{ user.id }}','含 {{date}} 原文',fixed),'[2026-11-18 14:05:09] 含 {{date}} 原文 {{ user.id }}')
+})
 if(failed)process.exitCode=1

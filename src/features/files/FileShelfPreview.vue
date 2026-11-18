@@ -110,9 +110,9 @@ header, footer, footer > div { display: flex; align-items: center; gap: 8px; }
 header { padding-bottom: 14px; }
 header > span { margin-left: auto; font-size: 11px; color: var(--text-2); }
 kbd { font: inherit; font-size: 10px; color: var(--text-2); border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px; }
-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 6px 9px; border-radius: 10px; background: var(--surface-2); font-size: 12px; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 6px 9px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); font-size: 12px; transition: background 120ms ease, border-color 120ms ease; }
 .back { padding-left: 5px; }
-button:hover { background: var(--hover); }
+button:hover:not(:disabled) { background: var(--hover); border-color: var(--line-strong); }
 button:focus-visible, pre:focus-visible, .image-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .image-canvas:focus-visible { outline-offset: -2px; }
 .file-heading { display: flex; align-items: center; gap: 11px; margin-bottom: 12px; }
