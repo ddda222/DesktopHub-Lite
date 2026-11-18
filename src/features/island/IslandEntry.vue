@@ -2,11 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import GlassLight from '@/components/GlassLight.vue'
+import LiquidSkin from './motion/LiquidSkin.vue'
+import IslandParticles from './motion/IslandParticles.vue'
+import { useIslandEffects, type IslandCue } from './motion/useIslandEffects'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
 import AudioMixer from '@/features/audio/AudioMixer.vue'
-import CompareBoard from '@/features/compare/CompareBoard.vue'
 import { addShelfFiles, shelf, subscribeShelf } from '@/features/files/shelf'
 import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
@@ -14,7 +16,7 @@ import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
 import { pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
 
-const props = defineProps<{ previewFeedback?: { kind: string; sequence: number }; previewKeepOpen?: boolean }>()
+const props = defineProps<{ previewFeedback?: { kind: string; sequence: number }; previewKeepOpen?: boolean; previewCue?: IslandCue }>()
 const element = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
 const windowDrag = useWindowDrag(viewport, {
@@ -45,6 +47,10 @@ const collapseMs = 200
 const geometryMoving = ref(false)
 const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(systemMotion.matches)
+const motionReduced = computed(() => state.ui.islandReducedMotion || reducedMotion.value)
+const materialRequested = computed(() => state.ui.islandAppearance.webgl !== false)
+const { active: effectsActive, cue, signal, quality, plainMaterial } = useIslandEffects(panel, tucked, motionReduced, materialRequested)
+const shape = computed(() => tucked.value ? 'line' : expanded.value ? 'expanded' : 'compact')
 const glassAvailable = ref(true)
 const clockText = ref(formatTime())
 const feedbackText = ref('')
@@ -74,6 +80,12 @@ const availableWidth = ref(window.screen.availWidth)
 const revealed = computed(() => !tucked.value)
 const page = computed(() => state.ui.islandPage)
 const appearance = computed(() => state.ui.islandAppearance)
+const materialAllowed = computed(() => materialRequested.value && !motionReduced.value && !plainMaterial.value)
+const materialReady = ref(false)
+watch([effectsActive, materialAllowed], ([active, allowed]) => {
+  if (!allowed) { materialReady.value = false; glassAvailable.value = true }
+  else if (active) materialReady.value = true
+}, { immediate: true })
 const scale = computed(() => appearance.value.scale / 100)
 // 所有页面共用外壳宽度；新增分类也不能按页面单独改变尺寸。
 const expandedWidth = computed(() => Math.max(280, Math.min(504 * scale.value, availableWidth.value - 24)))
@@ -111,7 +123,6 @@ const sections = [
   { value: 'clipboard', label: '剪贴板', icon: 'clipboard' },
   { value: 'translation', label: '翻译', icon: 'translate' },
   { value: 'files', label: '文件中转', icon: 'folder' },
-  { value: 'compare', label: '对照台', icon: 'compare' },
   { value: 'audio', label: '调音台', icon: 'volume' }
 ] as const
 function revealSelectedPage(): void {
@@ -154,6 +165,7 @@ function showFeedback(kind: string): void {
   if (tucked.value || !['copied', 'translated', 'translation-error'].includes(kind)) return
   clearTimeout(feedbackTimer)
   feedbackText.value = kind === 'copied' ? '已复制' : kind === 'translated' ? '翻译完成' : '翻译失败'
+  signal(kind === 'translation-error' ? 'notice' : 'complete')
   feedbackTimer = setTimeout(() => { feedbackText.value = '' }, 2600)
 }
 watch(() => props.previewFeedback, value => {
@@ -161,6 +173,15 @@ watch(() => props.previewFeedback, value => {
   clearTimeout(feedbackTimer)
   feedbackText.value = ''
   if (value.kind) showFeedback(value.kind)
+})
+watch(() => props.previewCue, value => {
+  if (!isDesktop && value) signal(value.kind)
+}, { flush: 'post' })
+watch(() => capsuleStatus.value.kind === 'working', (working, before) => {
+  if (working && !before) signal('loading')
+})
+watch(() => state.ui.wechatEvent, (event, previous) => {
+  if (event !== previous && state.ui.wechatEnabled && state.ui.wechatAttention) signal('notice')
 })
 function updateTheme(): void {
   dark.value = state.settings.theme === 'system' ? systemDark.matches : state.settings.theme === 'dark'
@@ -364,6 +385,7 @@ async function openSeparateTranslation(): Promise<void> {
 async function launch(id: string): Promise<void> {
   const application = state.apps.find(item => item.id === id)
   if (!application) return
+  signal('launch')
   if (await launchApp(application)) expand(false)
 }
 
@@ -526,9 +548,11 @@ onBeforeUnmount(() => {
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
     <div ref="panel" class="island solid-surface" :class="{ expanded, tucked: !revealed }"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
-      <GlassLight v-if="appearance.webgl !== false && glassAvailable && !tucked && !state.ui.islandReducedMotion && !reducedMotion"
-        :light-surface="!dark" :signal="taskSignal" :expanded="expanded" @unavailable="glassAvailable = false" />
-      <div class="light-gates" aria-hidden="true"><i /><i /><i /><i /></div>
+      <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" />
+      <GlassLight v-if="materialReady && glassAvailable"
+        :light-surface="!dark" :signal="taskSignal" :expanded="expanded" :quality="quality" :active="effectsActive" @unavailable="glassAvailable = false" />
+      <IslandParticles v-if="materialReady"
+        :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
       <button class="capsule" :class="{ 'has-feedback': capsuleStatus.kind !== 'idle' }" type="button" :aria-expanded="expanded"
         :aria-label="`${capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
@@ -582,7 +606,6 @@ onBeforeUnmount(() => {
             <ClipboardPopover v-if="page === 'clipboard'" />
             <TranslationPanel v-else-if="page === 'translation'" />
             <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
-            <CompareBoard v-else-if="page === 'compare'" />
             <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
           </div>
         </div>
@@ -616,12 +639,13 @@ onBeforeUnmount(() => {
 .island-hit-area.reduced { --geometry-time: 0ms; transition: none; }
 .island-hit-area.suppressed { --surface-inset: 0px; }
 .island-hit-area.desktop.suppressed { --geometry-time: 0ms; }
+/* Windows 立即释放外围鼠标热区，剩余可见轮廓仍能在 140×14 窗口内收成细线。 */
+.island-hit-area.desktop.suppressed:not(.reduced) > .island { --geometry-time: var(--collapse-time); }
 /* 预览的三种形态保持同一顶部位置，避免变形时整体上下漂移。 */
 .island-hit-area:not(.desktop) { --surface-inset: 2px; }
 .tuck-trigger { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; }
 .solid-surface {
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--island-outline), 0 10px 24px -10px var(--island-shadow);
+  background: transparent;
   isolation: isolate;
 }
 .island {
@@ -630,14 +654,6 @@ onBeforeUnmount(() => {
   transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
 .island.expanded { border-radius: 18px; }
-.light-gates { position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0; }
-.expanded > .light-gates { opacity:1; }
-.light-gates i { position:absolute; width:13px; height:13px; border:1px solid var(--text-3); opacity:0; transform:translate(var(--gate-x),var(--gate-y)); transition:opacity 180ms ease-out, transform 320ms var(--geometry-ease); }
-.light-gates i:nth-child(1) { top:5px; left:5px; border-right:0; border-bottom:0; border-radius:10px 0 0; --gate-x:-4px; --gate-y:-4px; }
-.light-gates i:nth-child(2) { top:5px; right:5px; border-left:0; border-bottom:0; border-radius:0 10px 0 0; --gate-x:4px; --gate-y:-4px; }
-.light-gates i:nth-child(3) { bottom:5px; right:5px; border-left:0; border-top:0; border-radius:0 0 10px; --gate-x:4px; --gate-y:4px; }
-.light-gates i:nth-child(4) { bottom:5px; left:5px; border-right:0; border-top:0; border-radius:0 0 0 10px; --gate-x:-4px; --gate-y:4px; }
-.expanded > .light-gates i { opacity:1; transform:none; }
 .island.tucked { border-radius: 5px; }
 .island.tucked .capsule { visibility: hidden; }
 .island.tucked :deep(.glass-light) { visibility: hidden; }

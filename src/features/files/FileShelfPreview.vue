@@ -2,9 +2,6 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import type { FilePreview, ShelfItem } from './shelf'
-import { putPreview } from '@/features/compare/state'
-import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
-import { pushToast, state } from '@/store'
 
 const props = defineProps<{ item: ShelfItem; preview: FilePreview | null; loading: boolean; error: string }>()
 const emit = defineEmits<{ close: []; reveal: []; pin: []; retry: [] }>()
@@ -38,15 +35,6 @@ const size = computed(() => {
 })
 const modified = computed(() => props.preview?.modifiedMs == null ? '' : new Date(props.preview.modifiedMs).toLocaleString('zh-CN', { hour12: false }))
 onMounted(() => back.value?.focus({ preventScroll: true }))
-async function compare(side: number): Promise<void> {
-  if (!props.preview) return
-  try {
-    const message = putPreview(side, props.item.name, props.preview)
-    if (isDesktop) await invokeHost('select_island_page', { page: 'compare', focus: true })
-    else { state.ui.islandPage = 'compare'; state.ui.panel = 'compare' }
-    emit('close'); pushToast(message, 'success')
-  } catch (e) { pushToast(String(e), 'error') }
-}
 function keydown(event: KeyboardEvent): void {
   if (event.isComposing || event.key !== 'Escape') return
   event.preventDefault(); event.stopPropagation(); emit('close')
@@ -95,7 +83,6 @@ function keydown(event: KeyboardEvent): void {
       <div v-else class="preview-placeholder"><Icon :name="item.isDir ? 'folder' : 'info'" :size="30" /><p>{{ preview.notice }}</p></div>
       <p v-if="preview.notice && ['image', 'text'].includes(preview.kind)" class="notice">{{ preview.notice }}</p>
     </template>
-    <div v-if="!loading && !error && preview && ['image', 'text'].includes(preview.kind)" class="send-compare"><span>放入对照台</span><button type="button" @click="compare(0)">左侧 A</button><button type="button" @click="compare(1)">右侧 B</button></div>
     <footer v-if="isImage" class="image-actions">
       <button type="button" class="info-toggle" :aria-expanded="showInfo" :aria-controls="`preview-info-${item.id}`" @click="showInfo = !showInfo"><Icon name="info" :size="15" />文件信息</button>
       <div>
@@ -118,7 +105,6 @@ function keydown(event: KeyboardEvent): void {
 </template>
 
 <style scoped>
-.send-compare { display:flex; align-items:center; gap:8px; padding:10px 0; border-top:1px solid var(--line); font-size:11px; }.send-compare span { margin-right:auto; color:var(--text-2); }.send-compare button { padding:6px 12px; border:1px solid var(--line-strong); border-radius:6px; }
 .file-preview { color: var(--text); padding: 4px 0; }
 header, footer, footer > div { display: flex; align-items: center; gap: 8px; }
 header { padding-bottom: 14px; }

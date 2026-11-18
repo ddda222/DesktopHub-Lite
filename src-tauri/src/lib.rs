@@ -16,7 +16,6 @@ mod desktop_features;
 mod file_shelf;
 mod icons;
 mod image_preview;
-mod compare;
 mod audio;
 mod config_format;
 mod config_transfer;
@@ -99,7 +98,37 @@ fn broadcast_apps(app: &AppHandle, config: &AppConfig) {
 
 fn hide_window(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
-        let _ = window.hide();
+        if window.hide().is_ok() && label == windows::BAR {
+            let _ = window.emit_to(label, "island-visibility", false);
+        }
+    }
+}
+
+fn display_window(window: &WebviewWindow) -> tauri::Result<()> {
+    let bar = window.label() == windows::BAR;
+    #[cfg(windows)]
+    let restoring = bar && !window.is_visible().unwrap_or(false);
+    window.show()?;
+    #[cfg(windows)]
+    if restoring {
+        // Tao 在显示 HWND 时可能重写窗口样式并清空 HRGN。显隐完成后重设
+        // 原来的命中区，包括不获取焦点的显示路径，即使 Vue 尺寸没有变化。
+        let app = window.app_handle().clone();
+        window.run_on_main_thread(move || {
+            if let Some(state) = app.try_state::<AppState>() {
+                windows::restore_bar_region(&app, &state.windows);
+            }
+        })?;
+    }
+    if bar { let _ = window.emit_to(windows::BAR, "island-visibility", true); }
+    Ok(())
+}
+
+fn reveal_bar(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(windows::BAR) {
+        if let Err(error) = display_window(&window) {
+            log_warn!("显示灵动岛失败：{error}");
+        }
     }
 }
 
@@ -109,7 +138,7 @@ fn show_window(app: &AppHandle, label: &str) {
         return;
     }
     if let Some(window) = app.get_webview_window(label) {
-        if let Err(error) = window.show() {
+        if let Err(error) = display_window(&window) {
             log_warn!("显示窗口 {label} 失败：{error}");
             return;
         }
@@ -1007,7 +1036,6 @@ pub fn run() {
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
             app.manage(image_preview::Previews::default());
-            app.manage(compare::Comparisons::default());
             app.manage(audio::AudioState::default());
             app.manage(config_transfer::ConfigurationTransfers::default());
             app.manage(file_shelf::ShelfHistory::default());
@@ -1047,6 +1075,8 @@ pub fn run() {
                 update_check_gate: tokio::sync::Mutex::new(()),
             });
 
+            #[cfg(windows)]
+            windows::install_bar_frame_guard(&handle);
             if let Err(error) = build_tray(&handle) {
                 crate::log_warn!("创建托盘失败：{error}");
             }
@@ -1071,7 +1101,7 @@ pub fn run() {
             }
             // 初始窗口不可见，先确认捕获排除再显示，避免重启时闪出未受保护的内容。
             if capture_privacy::prepare_to_show(&handle) {
-                if let Some(window) = handle.get_webview_window(windows::BAR) { let _ = window.show(); }
+                reveal_bar(&handle);
             } else {
                 let _ = open_settings(handle.clone());
             }
@@ -1094,13 +1124,14 @@ pub fn run() {
             let app = window.app_handle();
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
-                    if window.label().starts_with("image-preview-") || window.label().starts_with("compare-") { return; }
+                    if window.label().starts_with("image-preview-") { return; }
                     // 关闭只隐藏，退出走托盘菜单。
                     api.prevent_close();
                     if window.label() == windows::TRANSLATION { close_translation_window(app.clone()); }
+                    else if window.label() == windows::BAR { hide_window(app, windows::BAR); }
                     else { let _ = window.hide(); }
                 }
-                WindowEvent::Destroyed => { image_preview::forget(app, window.label()); compare::forget(app, window.label()); }
+                WindowEvent::Destroyed => { image_preview::forget(app, window.label()); }
                 WindowEvent::Moved(position) => {
                     if window.label() == windows::BAR {
                         // 程序布局也会发 Moved；动画过程中不能把每帧写入数据文件。
@@ -1174,9 +1205,6 @@ pub fn run() {
             file_shelf::reveal_shelf_file,
             file_shelf::drag_shelf_files,
             image_preview::open_image_preview,
-            compare::open_compare_window,
-            compare::compare_window_content,
-            compare::pin_compare_window,
             image_preview::image_preview_content,
             image_preview::pin_image_preview,
             current_window_label,

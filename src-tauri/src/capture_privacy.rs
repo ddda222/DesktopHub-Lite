@@ -30,7 +30,7 @@ pub fn apply(app: &AppHandle, hidden: bool) -> Result<(), String> {
 }
 
 pub fn hold_on_error(app: &AppHandle, error: String) {
-    if let Some(window) = app.get_webview_window(windows::BAR) { let _ = window.hide(); }
+    crate::hide_window(app, windows::BAR);
     app.state::<AppState>().ui.update(|ui| ui.island_capture_error = Some(error.clone()));
     crate::log_warn!("灵动岛屏幕共享隐藏设置失败：{error}");
     broadcast_ui(app);

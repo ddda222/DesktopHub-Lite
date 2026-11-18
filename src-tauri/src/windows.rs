@@ -233,27 +233,65 @@ fn scale_of(app: &AppHandle) -> f64 {
 }
 
 
-/// Tao 的顶层无边框窗口仍保留 WS_CAPTION，只通过 WM_NCCALCSIZE 隐藏标题栏。
-/// 透明 WebView 失焦重绘时可能露出这层系统装饰；灵动岛不使用原生标题栏和缩放控件。
+#[cfg(windows)]
+fn bar_style(style: u32) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+    };
+    style & !(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX).0
+}
+
+// 仅给灵动岛最外层 HWND 安装。在首次显示前处理 Tao 后续的样式重写，
+// 避免系统先把渐变标题画进透明背景，等 Focused 或下一次布局才清样式。
+#[cfg(windows)]
+pub fn install_bar_frame_guard(app: &AppHandle) {
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, STYLESTRUCT, WM_NCACTIVATE, WM_NCDESTROY, WM_NCPAINT, WM_STYLECHANGING,
+    };
+    unsafe extern "system" fn frame_proc(
+        hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, id: usize, _: usize,
+    ) -> LRESULT {
+        match msg {
+            WM_STYLECHANGING if wparam.0 as i32 == GWL_STYLE.0 && lparam.0 != 0 => {
+                let styles = &mut *(lparam.0 as *mut STYLESTRUCT);
+                styles.styleNew = bar_style(styles.styleNew);
+            }
+            WM_NCPAINT => return LRESULT(0),
+            // 让 Tao 正常更新激活与焦点状态，同时要求 DefWindowProc 跳过标题重绘。
+            WM_NCACTIVATE => return DefSubclassProc(hwnd, msg, wparam, LPARAM(-1)),
+            WM_NCDESTROY => { let _ = RemoveWindowSubclass(hwnd, Some(frame_proc), id); }
+            _ => {}
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+    let Some(window) = app.get_webview_window(BAR) else { return; };
+    let Ok(native) = window.hwnd() else { return; };
+    if !unsafe { SetWindowSubclass(HWND(native.0), Some(frame_proc), 1, 0) }.as_bool() {
+        crate::log_warn!("未能安装灵动岛无边框消息处理");
+    }
+    enforce_bar_frameless(app);
+}
+
+/// 清除 HWND 在应用安装消息处理之前已有的系统装饰。
 #[cfg(windows)]
 pub fn enforce_bar_frameless(app: &AppHandle) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_STYLE,
         SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-        WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
     };
     let Some(window) = app.get_webview_window(BAR) else { return; };
     let Ok(native) = window.hwnd() else { return; };
     let hwnd = HWND(native.0);
     unsafe {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        let decorations = (WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX).0 as isize;
-        let frameless = style & !decorations;
+        let frameless = bar_style(style as u32) as i32 as isize;
         // 没有变化就不触发系统重绘；保留透明、置顶、拖放和窗口可见性等其他样式。
-        if frameless == style { return; }
+        if frameless as u32 == style as u32 { return; }
         SetWindowLongPtrW(hwnd, GWL_STYLE, frameless);
-        if GetWindowLongPtrW(hwnd, GWL_STYLE) != frameless {
+        if GetWindowLongPtrW(hwnd, GWL_STYLE) as u32 != frameless as u32 {
             crate::log_warn!("清除灵动岛原生标题栏样式失败");
             return;
         }
@@ -262,6 +300,12 @@ pub fn enforce_bar_frameless(app: &AppHandle) {
             crate::log_warn!("刷新灵动岛无边框样式失败：{error}");
         }
     }
+}
+
+#[cfg(windows)]
+pub fn restore_bar_region(app: &AppHandle, handle: &WindowsHandle) {
+    *handle.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    place_bar(app, handle);
 }
 
 /// 恢复或计算图标条位置，并让窗口尺寸等于图标条尺寸。

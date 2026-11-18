@@ -9,13 +9,17 @@ import IslandEntry from '@/features/island/IslandEntry.vue'
 import { subscribeHostEvents } from '@/store'
 
 let unsubscribe: (() => void) | null = null
+let disposed = false
 
 onMounted(async () => {
   // 订阅 UI 状态与应用配置：别的窗口改了应用列表，图标条要立刻跟着变
-  unsubscribe = await subscribeHostEvents()
+  const stop = await subscribeHostEvents()
+  if (disposed) stop()
+  else unsubscribe = stop
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   unsubscribe?.()
 })
 

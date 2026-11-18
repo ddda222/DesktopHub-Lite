@@ -50,7 +50,7 @@ import type {
   TranslationSettings
 } from '@/lib/desktop/types'
 
-export type PanelName = 'clipboard' | 'translation' | 'files' | 'compare' | 'audio' | 'category' | 'overflow' | null
+export type PanelName = 'clipboard' | 'translation' | 'files' | 'audio' | 'category' | 'overflow' | null
 export type SettingsSection = 'apps' | 'clipboard' | 'translation' | 'general'
 
 export const state = reactive({
@@ -245,7 +245,7 @@ export async function bootstrap(): Promise<void> {
 function applyUiState(ui: UiState): void {
   state.ui.islandExpanded = ui.islandExpanded
   state.ui.islandAnchor = ui.islandAnchor
-  state.ui.islandPage = ui.islandPage
+  state.ui.islandPage = ['applications', 'clipboard', 'translation', 'files', 'audio'].includes(ui.islandPage) ? ui.islandPage : 'applications'
   state.ui.islandHoverMs = ui.islandHoverMs
   state.ui.islandLeaveMs = ui.islandLeaveMs
   state.ui.islandReducedMotion = ui.islandReducedMotion
@@ -257,7 +257,7 @@ function applyUiState(ui: UiState): void {
   state.ui.wechatStatus = ui.wechatStatus
   state.ui.wechatAttention = ui.wechatAttention
   state.ui.wechatEvent = ui.wechatEvent
-  state.ui.panel = ui.panel
+  state.ui.panel = ['clipboard', 'translation', 'files', 'audio', 'category', 'overflow'].includes(ui.panel ?? '') ? ui.panel : null
   state.ui.settingsOpen = ui.settingsOpen
   state.ui.paused = ui.paused
   state.ui.activeCategoryId = ui.activeCategoryId

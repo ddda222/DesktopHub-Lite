@@ -171,6 +171,6 @@ fn default_leave() -> u32 {
 pub fn valid_island_page(page: &str) -> bool {
     matches!(
         page,
-        PANEL_APPLICATIONS | PANEL_CLIPBOARD | PANEL_TRANSLATION | PANEL_FILES | "compare" | "audio"
+        PANEL_APPLICATIONS | PANEL_CLIPBOARD | PANEL_TRANSLATION | PANEL_FILES | "audio"
     )
 }

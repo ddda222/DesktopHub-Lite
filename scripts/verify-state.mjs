@@ -59,15 +59,10 @@ await test('配置恢复失败保留预览且可重试',async()=> {
   const api=subject(['apply'],{preview,busy,failed,feedback:{value:''},props:{blocked:false},state:{ui:{settingsOpen:true}},importButton:{value:null},nextTick:async(fn)=>fn?.(),invokeHost:async()=>{throw new Error('synthetic-write-failure')}},'',configurationSource)
   await api.apply();assert.equal(preview.value.token,'one');assert.equal(busy.value,null);assert.equal(failed.value,true)
 })
-const diffSource=fs.readFileSync(new URL('../src/features/compare/diff.ts',import.meta.url),'utf8')
-const diff=subject(['diffLines'],{},'',diffSource).diffLines
-for (const [name,left,right,kinds] of [
-  ['相同行','a\nb','a\nb',['same','same']],
-  ['换行格式','a\r\nb','a\nb',['same','same']],
-  ['插入行','a\nb','a\nx\nb',['same','added','same']],
-  ['删除行','a\nx\nb','a\nb',['same','removed','same']],
-  ['替换行','a\nx','a\ny',['same','changed']],
-  ['空文本','','',['same']]
-]) await test('文字对照：'+name,()=>assert.equal(JSON.stringify(diff(left,right).map(row=>row.kind)),JSON.stringify(kinds)))
-await test('文字对照：大文本使用有界降级',()=>{const lines=Array.from({length:600},(_,i)=>String(i));const changed=[...lines];changed[599]='changed';const result=diff(lines.join('\n'),changed.join('\n'));assert.equal(result.length,600);assert.equal(result[599].kind,'changed')})
+await test('旧页面状态回退应用且不保留空面板，调音台保持可用',()=> {
+  const state={ui:{},settings:{}}
+  const api=subject(['applyUiState'],{state})
+  api.applyUiState({islandPage:'compare',panel:'compare'});assert.equal(state.ui.islandPage,'applications');assert.equal(state.ui.panel,null)
+  api.applyUiState({islandPage:'audio',panel:'audio'});assert.equal(state.ui.islandPage,'audio');assert.equal(state.ui.panel,'audio')
+})
 if(failed)process.exitCode=1

@@ -15,7 +15,7 @@ const importButton = ref<HTMLButtonElement | null>(null)
 let sequence = 0
 let demoSignature = ''
 const signature = () => JSON.stringify([state.apps, state.categories, state.settings.theme, state.ui.islandAppearance])
-const displayValue = (value: string) => ({ dark: '深色', light: '浅色', system: '跟随系统', left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', compare: '对照台', audio: '调音台', true: '开启', false: '关闭', all: '全部' })[value] ?? value
+const displayValue = (value: string) => ({ dark: '深色', light: '浅色', system: '跟随系统', left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', true: '开启', false: '关闭', all: '全部' })[value] ?? value
 
 async function discard(token: string): Promise<void> {
   if (isDesktop) await invokeHost('cancel_configuration_import', { token })

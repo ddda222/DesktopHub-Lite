@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import StyleLight from './StyleLight.vue'
 import Icon from '@/components/Icon.vue'
 import AudioMixer from '@/features/audio/AudioMixer.vue'
-import CompareBoard from '@/features/compare/CompareBoard.vue'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
@@ -11,7 +10,7 @@ import { iconFor, launchApp, state, visibleApps } from '@/store'
 import type { StyleId } from './styles'
 const props = defineProps<{ variant: StyleId; expanded: boolean; line: boolean; light: boolean; webgl: boolean; reduced: boolean; pulse: number }>()
 const emit = defineEmits<{ expand: [value: boolean]; status: [text: string] }>()
-const page = ref('compare')
+const page = ref('audio')
 const orbit = ref(false)
 const playing = ref(false)
 const feedback = ref(false)
@@ -26,9 +25,8 @@ const tucked = computed(() => props.line && !props.expanded)
 const pages = [
   { id: 'applications', name: '应用', icon: 'grid' }, { id: 'clipboard', name: '剪贴板', icon: 'clipboard' },
   { id: 'translation', name: '翻译', icon: 'translate' }, { id: 'files', name: '文件中转', icon: 'folder' },
-  { id: 'compare', name: '对照台', icon: 'compare' }, { id: 'audio', name: '调音台', icon: 'volume' }
+  { id: 'audio', name: '调音台', icon: 'volume' }
 ] as const
-watch(() => state.ui.islandPage, value => { if (value === 'compare') page.value = value })
 watch(page, value => { const selected = pages.find(item => item.id === value); if (selected) state.ui.islandPage = selected.id })
 async function toggle(event: MouseEvent): Promise<void> {
   clearTimeout(leaveTimer)
@@ -54,7 +52,7 @@ function action(): void {
   else {
     emit('expand', true)
     requestAnimationFrame(() => { feedback.value = true })
-    if (props.variant === 'shutter') page.value = page.value === 'compare' ? 'audio' : 'compare'
+    if (props.variant === 'shutter') page.value = page.value === 'applications' ? 'audio' : 'applications'
   }
   feedbackTimer = setTimeout(() => { feedback.value = false }, 1800)
 }
@@ -90,7 +88,6 @@ onBeforeUnmount(() => { clearTimeout(leaveTimer); clearTimeout(feedbackTimer) })
         <div class="island-page">
           <div v-if="page === 'applications'" class="lab-apps"><button v-for="app in visibleApps" :key="app.id" :aria-label="app.name" @click="launchApp(app)"><img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" /><span v-else>{{ app.initials }}</span><small>{{ app.name }}</small></button></div>
           <div v-if="['clipboard', 'translation', 'files'].includes(page)" class="lab-feature"><ClipboardPopover v-if="page === 'clipboard'" /><TranslationPanel v-else-if="page === 'translation'" /><FileShelf v-else :drag-over="false" /></div>
-          <CompareBoard v-show="page === 'compare'" compact />
           <AudioMixer v-show="page === 'audio'" :active="page === 'audio' && expanded" />
         </div>
         <footer class="island-footer"><span class="mini-indicator" />{{ feedback ? '交互反馈已触发' : '本地网页演示' }}<span>⌘ / 工作随手可达</span></footer>

@@ -107,7 +107,7 @@ pub fn save_island_appearance(
     if anchor_changed { state.windows.set_bar_free_position(false); }
     windows::place_bar(&app, &state.windows);
     if previous.island_capture_error.is_some() {
-        if let Some(window) = app.get_webview_window(windows::BAR) { let _ = window.show(); }
+        crate::reveal_bar(&app);
     }
     broadcast_ui(&app);
     Ok(())

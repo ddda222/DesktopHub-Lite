@@ -154,7 +154,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
       <label class="keep-open"><input v-model="keepOpen" type="checkbox" />保持面板展开</label>
       <p class="lab-note" role="status">{{ demoNote }}</p>
       <p class="lab-help">试细线：顶部「场景」选最大化或全屏，鼠标移入立即展开，移开后收回。</p>
-      <small class="lab-scope">光轨舱门 · 中转文件与声音为模拟。对照台只读取你主动选择的图片，不上传内容。</small>
+      <small class="lab-scope">光轨舱门 · 中转文件与声音为模拟，不改变系统音量。</small>
     </aside>
     </div>
     <p class="preview-note">拖动胶囊或展开后的顶部握柄调整位置。<br />黑白实底、主题跟随与局部 WebGL 光晕。</p>

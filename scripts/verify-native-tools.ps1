@@ -5,7 +5,6 @@ $project = Split-Path -Parent $PSScriptRoot
 $target = 'D:\codex\DesktopHub-work\native-tools-check'
 New-Item -ItemType Directory -Path (Join-Path $target 'src') -Force | Out-Null
 $audio = Get-Content -LiteralPath (Join-Path $project 'src-tauri\src\audio.rs') -Raw
-$compare = Get-Content -LiteralPath (Join-Path $project 'src-tauri\src\compare.rs') -Raw
 function Section([string]$Source, [string]$Start, [string]$End) {
     $from = $Source.IndexOf($Start, [StringComparison]::Ordinal)
     if ($from -lt 0) { throw "缺少源码边界：$Start" }
@@ -17,11 +16,6 @@ $source = 'use serde::{Deserialize, Serialize};' + "`n"
 $source += Section $audio '#[derive(Clone, Serialize)]' 'async fn run'
 $source += Section $audio '#[cfg(windows)]' '#[cfg(not(windows))]'
 $source += Section $audio '#[cfg(test)]' ''
-$source += "`nmod file_preview { pub const IMAGE_LIMIT: u64 = 8 * 1024 * 1024; }`nmod compare { use serde::{Deserialize, Serialize};`n"
-$source += Section $compare '#[derive(Clone, Deserialize, Serialize)]' '#[derive(Default)]'
-$source += Section $compare 'fn validate(' '#[tauri::command]'
-$source += Section $compare '#[cfg(test)]' ''
-$source += "`n}`n"
 Set-Content -LiteralPath (Join-Path $target 'src\lib.rs') -Value $source -Encoding utf8
 @'
 [package]

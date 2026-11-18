@@ -32,7 +32,7 @@ pub struct PortablePreferences {
 }
 impl PortablePreferences {
     pub fn capture(ui: &UiState) -> Self {
-        Self { theme: ui.theme.clone(), active_category_id: ui.active_category_id.clone(), island_anchor: ui.island_anchor.clone(), island_page: ui.island_page.clone(), island_hover_ms: ui.island_hover_ms, island_leave_ms: ui.island_leave_ms, island_reduced_motion: ui.island_reduced_motion, scale: ui.island_appearance.scale, webgl: ui.island_appearance.webgl }
+        Self { theme: ui.theme.clone(), active_category_id: ui.active_category_id.clone(), island_anchor: ui.island_anchor.clone(), island_page: if crate::state::valid_island_page(&ui.island_page) { ui.island_page.clone() } else { crate::state::PANEL_APPLICATIONS.into() }, island_hover_ms: ui.island_hover_ms, island_leave_ms: ui.island_leave_ms, island_reduced_motion: ui.island_reduced_motion, scale: ui.island_appearance.scale, webgl: ui.island_appearance.webgl }
     }
     pub fn apply(&self, ui: &mut UiState) {
         ui.theme = self.theme.clone(); ui.active_category_id = self.active_category_id.clone();
@@ -77,7 +77,7 @@ impl ConfigurationBackup {
 }
 pub fn parse(bytes: &[u8]) -> Result<ConfigurationBackup, String> {
     if bytes.len() > MAX_BYTES { return Err("配置文件超过 2 MiB".into()); }
-    let backup: ConfigurationBackup = serde_json::from_slice(bytes).map_err(|_| "配置格式损坏、字段缺失或包含未支持的字段".to_string())?;
+    let mut backup: ConfigurationBackup = serde_json::from_slice(bytes).map_err(|_| "配置格式损坏、字段缺失或包含未支持的字段".to_string())?;
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "不是有效的 JSON 配置")?;
     fn keys(value: &serde_json::Value, allowed: &[&str]) -> Result<(), String> {
         let object = value.as_object().ok_or("配置结构无效")?;
@@ -87,6 +87,8 @@ pub fn parse(bytes: &[u8]) -> Result<ConfigurationBackup, String> {
     keys(&value["applications"], &["schemaVersion", "categories", "apps"])?;
     for category in value["applications"]["categories"].as_array().ok_or("分类结构无效")? { keys(category, &["id", "name"])?; }
     for app in value["applications"]["apps"].as_array().ok_or("应用结构无效")? { keys(app, &["id", "name", "target", "categoryId", "color", "initials", "hidden", "broken"])?; }
+    // 兼容旧版备份的已移除页面；其余未知页面仍严格拒绝。
+    if backup.preferences.island_page == "compare" { backup.preferences.island_page = crate::state::PANEL_APPLICATIONS.into(); }
     validate(&backup)?;
     Ok(backup)
 }
@@ -187,6 +189,15 @@ mod tests {
     fn bytes(value: &ConfigurationBackup) -> Vec<u8> { serde_json::to_vec(value).unwrap() }
     #[test] fn round_trip_preserves_portable_configuration() {
         let backup=sample(); let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert!(restored.applications.apps[0].broken.is_none());
+    }
+    #[test] fn removed_page_backups_restore_to_applications_without_an_empty_panel() {
+        let mut backup=sample();backup.preferences.island_page="compare".into();
+        let restored=parse(&bytes(&backup)).unwrap();assert_eq!(restored.preferences.island_page,"applications");
+        let mut ui=UiState::default();ui.island_expanded=true;ui.island_page="compare".into();ui.panel=Some("compare".into());
+        restored.preferences.apply(&mut ui);assert_eq!(ui.island_page,"applications");assert!(ui.panel.is_none());
+        assert!(!crate::state::valid_island_page("compare"));assert!(crate::state::valid_island_page("audio"));
+        backup.preferences.island_page="unknown-page".into();assert!(parse(&bytes(&backup)).is_err());
+        backup.preferences.island_page="audio".into();assert_eq!(parse(&bytes(&backup)).unwrap().preferences.island_page,"audio");
     }
     #[test] fn exporting_legacy_uncategorized_entries_normalizes_only_the_copy() {
         for category in ["", "deleted-category"] {

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN" data-shell="browser" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>光轨舱门 · DesktopHub Lite</title>
+  <link rel="stylesheet" href="/src/styles/tokens.css">
+  <link rel="stylesheet" href="/src/styles/base.css">
+  <style>
+    :root { --studio-paper: #f5f6f1; --studio-ink: #25352e; --studio-quiet: #526159; --studio-rule: #bac5ba; --studio-tint: #e1e8dc; --sky: #eff1e6; --horizon: #cfdbd1; --far: #c5d4c5; --near: #b7c8bc; }
+    :root[data-theme="dark"] { --studio-paper: #1d2422; --studio-ink: #e3ebe1; --studio-quiet: #aebdb0; --studio-rule: #49594f; --studio-tint: #33423a; --sky: #48574e; --horizon: #34443d; --far: #394a40; --near: #304137; }
+    html, body { height: auto; min-height: 100%; }
+    body { background: var(--studio-paper); overflow: auto; }
+    .sheet { max-width: 1020px; margin: auto; padding: clamp(18px,4vw,48px); color: var(--studio-ink); }
+    .mast, .stage-footer, .sequence, .events, .switches, .head { display: flex; align-items: center; }
+    .mast, .stage-footer, .head { justify-content: space-between; gap: 12px; }
+    .mast { border-bottom: 1px solid var(--studio-rule); padding-bottom: 12px; }
+    .mast strong { font-weight: 620; }
+    .folio, .eyebrow, .reading { font: 11px/1.4 var(--font-mono); letter-spacing: .1em; color: var(--studio-quiet); }
+    .head { margin: 22px 0 15px; align-items: end; }
+    .head h1 { font-size: clamp(25px,4vw,38px); line-height: 1.2; font-weight: 560; margin: 5px 0 0; letter-spacing: -.04em; }
+    .head small, .scene-note, .hint, .footnote { color: var(--studio-quiet); font-size: 12px; }
+    .stage { isolation: isolate; position: relative; min-height: 302px; height: auto; background: linear-gradient(125deg,var(--sky),var(--horizon)); border: 1px solid var(--studio-rule); border-radius: 10px; padding: 24px 0 61px; }
+    .ridge { position: absolute; inset: 0; height: 100%; width: 100%; pointer-events: none; }
+    .edge { position: absolute; inset: 25px 0 auto; border-top: 1px solid color-mix(in srgb,var(--studio-quiet) 30%,transparent); }
+    #specimen { position: relative; width: 100%; display: grid; grid-template-columns: minmax(0,1fr); justify-items: center; align-items: start; }
+    .stage-footer { position: absolute; bottom: 12px; left: 16px; right: 16px; pointer-events: none; }
+    .stage-footer .indicate { display: inline-flex; align-items: center; gap: 8px; }
+    .indicate:before { content: ""; width: 20px; height: 1px; background: currentColor; }
+    .bench { display: grid; grid-template-columns: minmax(270px,1.1fr) minmax(220px,1fr); gap: 18px 24px; margin-top: 17px; }
+    fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    legend { padding: 0; margin-bottom: 7px; font-weight: 590; }
+    .sequence, .events, .switches { flex-wrap: wrap; gap: 5px; }
+    .bench button { padding: 7px 11px; font-size: 13px; border-radius: 5px; color: inherit; border: 1px solid transparent; }
+    .sequence button, .bench button:hover { border-color: var(--studio-rule); }
+    .sequence button[aria-pressed="true"] { background: var(--studio-ink); color: var(--studio-paper); border-color: var(--studio-ink); }
+    .sequence span { margin-right: 5px; opacity: .7; font: 11px var(--font-mono); }
+    .events button { background: var(--studio-tint); }
+    .switches { margin-top: 16px; padding: 13px 0 0; border-top: 1px solid var(--studio-rule); gap: 12px 22px; }
+    .switches label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+    .switches input { accent-color: var(--studio-quiet); }
+    .hint { margin: 10px 0 0; min-height: 1.5em; }
+    .footnote { margin-top: 20px; }
+    .footnote a { color: inherit; }
+    .sheet :is(input,button,a):focus-visible { outline: 2px solid var(--studio-quiet); outline-offset: 2px; }
+    @media(max-width:650px) { .bench { grid-template-columns: 1fr; gap: 12px; } .sheet { padding: 14px 10px; } .head small { display: none; } }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <header class="mast"><strong>DesktopHub Lite</strong><span class="folio">MOTION STUDIES &nbsp; / &nbsp; 06</span></header>
+    <div class="head"><div><span class="eyebrow">LIGHT GATE</span><h1>光轨舱门</h1></div><small>沿同一条边，看光怎样转弯。</small></div>
+    <section class="stage" aria-label="可操作的灵动岛">
+      <svg class="ridge" viewBox="0 0 900 320" preserveAspectRatio="none" aria-hidden="true">
+        <path fill="var(--far)" d="M0 220 C95 215 145 145 238 164 S411 258 535 205 S748 152 900 170 V320 H0Z"/>
+        <path fill="var(--near)" d="M0 181 C147 153 189 262 338 258 S537 207 644 215 S801 243 900 176 V320 H0Z"/>
+        <path fill="none" stroke="var(--sky)" opacity=".46" d="M0 181 C147 153 189 262 338 258 S537 207 644 215 S801 243 900 176"/>
+      </svg>
+      <div class="edge"></div><div id="specimen"></div>
+      <div class="stage-footer"><span class="indicate reading" id="state-name">展开面板</span><span class="scene-note">交互样机 · 合成数据</span></div>
+    </section>
+    <div class="bench">
+      <fieldset><legend>形态</legend><div class="sequence">
+        <button type="button" data-state="line" aria-pressed="false"><span aria-hidden="true">01</span>细线</button>
+        <button type="button" data-state="compact" aria-pressed="false"><span aria-hidden="true">02</span>状态岛</button>
+        <button type="button" data-state="expanded" aria-pressed="true"><span aria-hidden="true">03</span>展开</button>
+      </div></fieldset>
+      <fieldset><legend>事件反馈</legend><div class="events">
+        <button type="button" data-cue="launch">启动</button><button type="button" data-cue="notice">通知</button>
+        <button type="button" data-cue="loading">加载</button><button type="button" data-cue="complete">完成</button>
+      </div></fieldset>
+    </div>
+    <div class="switches">
+      <label><input id="light" type="checkbox" checked>边缘特效</label>
+      <label><input id="reduced" type="checkbox">减少动态效果</label>
+      <label><input id="dark" type="checkbox">深色外观</label>
+    </div>
+    <p class="hint" id="hint" role="status">快速往返切换形态可观察反向接续；在岛内移动、按住和松开可查看响应。</p>
+    <p class="footnote">仅预览，不操作 Windows 应用或用户文件。<a href="/">返回完整交互预览</a></p>
+  </main>
+  <script type="module">
+    import { createApp, h, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+    import IslandEntry from './src/features/island/IslandEntry.vue'
+    import SettingsWindow from './src/features/settings/SettingsWindow.vue'
+    import { bootstrap, setTheme, state } from './src/store'
+    import { isDesktop } from './src/lib/desktop/desktop'
+    import { previewApps, previewIcons } from './src/mock/preview-icons'
+
+    if (isDesktop) throw new Error('样机仅可在浏览器中打开。')
+    await bootstrap()
+    const labels = { line: '细线避让', compact: '状态岛', expanded: '展开面板' }
+    const cues = { launch: '启动', notice: '通知', loading: '加载', complete: '完成' }
+    const stateButtons = document.querySelectorAll('[data-state]')
+    const hint = document.getElementById('hint')
+    const quiet = document.getElementById('reduced')
+    const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    state.apps = previewApps
+    state.icons = previewIcons
+    state.ui.islandExpanded = true
+    state.ui.fullscreenSuppressed = false
+    state.ui.islandAppearance.webgl = true
+    setTheme('light')
+    const app = createApp({
+      setup() {
+        const cue = ref()
+        const pinned = ref(true)
+        let sequence = 0
+        let frameObserver
+        const listeners = new AbortController()
+        const listen = (node, type, callback) => node.addEventListener(type, callback, { signal: listeners.signal })
+        function setShape(value) {
+          pinned.value = value === 'expanded'
+          state.ui.fullscreenSuppressed = value === 'line'
+          state.ui.islandExpanded = pinned.value
+        }
+        function syncMotion() {
+          quiet.disabled = systemMotion.matches
+          quiet.checked = systemMotion.matches || state.ui.islandReducedMotion
+        }
+        onMounted(() => {
+          stateButtons.forEach(button => listen(button, 'click', () => setShape(button.dataset.state)))
+          document.querySelectorAll('[data-cue]').forEach(button => listen(button, 'click', () => {
+            if (state.ui.fullscreenSuppressed && !state.ui.islandExpanded) setShape('compact')
+            const kind = button.dataset.cue
+            cue.value = { kind, sequence: ++sequence }
+            hint.textContent = '已模拟' + cues[kind] + '事件。切换「减少动态效果」可对比静态反馈。'
+          }))
+          listen(document.getElementById('light'), 'change', event => { state.ui.islandAppearance.webgl = event.target.checked })
+          listen(document.getElementById('dark'), 'change', event => setTheme(event.target.checked ? 'dark' : 'light'))
+          listen(quiet, 'change', () => { state.ui.islandReducedMotion = quiet.checked })
+          listen(systemMotion, 'change', syncMotion)
+          syncMotion()
+          frameObserver = new ResizeObserver(([entry]) => {
+            document.getElementById('specimen').style.zoom = Math.min(1, entry.contentRect.width / 504)
+          })
+          frameObserver.observe(document.querySelector('.stage'))
+        })
+        watchEffect(() => {
+          const shape = state.ui.islandExpanded ? 'expanded' : state.ui.fullscreenSuppressed ? 'line' : 'compact'
+          stateButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.state === shape)))
+          document.getElementById('state-name').textContent = labels[shape]
+        })
+        onBeforeUnmount(() => { listeners.abort(); frameObserver?.disconnect() })
+        return () => [h(IslandEntry, { previewCue: cue.value, previewKeepOpen: pinned.value }),
+          state.ui.settingsOpen ? h(SettingsWindow) : null]
+      }
+    })
+    app.mount('#specimen')
+    if (import.meta.hot) import.meta.hot.dispose(() => app.unmount())
+  </script>
+</body>
+</html>

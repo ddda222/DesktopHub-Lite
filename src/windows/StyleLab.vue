@@ -27,7 +27,7 @@ function stopCycle(): void { timers.forEach(clearTimeout); timers = []; cycleRun
 function selectStyle(index: number): void { stopCycle(); selected.value = index; status.value = islandStyles[index]!.motion }
 function setState(state: 'capsule' | 'expanded' | 'line'): void {
   stopCycle(); line.value = state === 'line'; expanded.value = state === 'expanded'
-  status.value = state === 'line' ? '移入细线立即展开，移开后收回；也可用 Tab 和 Enter 打开。' : state === 'capsule' ? '点击胶囊展开，轨道卫星可先选择一个入口。' : '现在可以切换对照台、调音台和原有功能。'
+  status.value = state === 'line' ? '移入细线立即展开，移开后收回；也可用 Tab 和 Enter 打开。' : state === 'capsule' ? '点击胶囊展开，轨道卫星可先选择一个入口。' : '现在可以切换调音台和原有功能。'
 }
 function replay(): void {
   stopCycle(); cycleRunning.value = true; line.value = false; expanded.value = false
@@ -61,7 +61,7 @@ onBeforeUnmount(() => { stopCycle(); darkSystem.removeEventListener('change', up
           <p class="interaction-status" role="status">{{ status }}</p>
         </section>
       </div>
-      <footer class="lab-footer"><p>先体验，再定稿。<span>候选样式不会改变桌面版设置。</span></p><p>对照台支持本地内容操作 · 声音调节和置顶属于网页演示</p></footer>
+      <footer class="lab-footer"><p>先体验，再定稿。<span>候选样式不会改变桌面版设置。</span></p><p>声音调节属于网页演示，不改变系统音量</p></footer>
     </main>
   </div>
 </template>
