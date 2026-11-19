@@ -8,6 +8,7 @@ export interface MailAccount { provider: MailProvider; address: string; status: 
 export interface MailNotice {
   id: string
   provider: MailProvider
+  address: string
   sender: string
   subject: string
   code: string | null

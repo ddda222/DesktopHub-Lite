@@ -46,15 +46,39 @@ struct Binding { address: String, key: String, cursor: Cursor }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Config {
-    accounts: BTreeMap<Provider, Binding>,
+    #[serde(deserialize_with = "read_bindings")]
+    accounts: BTreeMap<Provider, Vec<Binding>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     retired: Vec<String>,
+}
+
+// 旧版每个服务商直接保存一个绑定。转成列表时保留凭据标识和收件游标。
+fn read_bindings<'de, D: serde::Deserializer<'de>>(source: D) -> Result<BTreeMap<Provider, Vec<Binding>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored { List(Vec<Binding>), Single(Binding) }
+    let stored = BTreeMap::<Provider, Stored>::deserialize(source)?;
+    Ok(stored.into_iter().map(|(provider, value)| {
+        let entries = match value { Stored::List(entries) => entries, Stored::Single(entry) => vec![entry] };
+        (provider, entries)
+    }).collect())
+}
+
+impl Config {
+    fn bindings(&self, provider: Provider) -> &[Binding] {
+        self.accounts.get(&provider).map(Vec::as_slice).unwrap_or_default()
+    }
+
+    fn target(&self, provider: Provider, address: &str) -> Option<&Binding> {
+        self.bindings(provider).iter().find(|b| provider == Provider::Qq || b.address.eq_ignore_ascii_case(address))
+    }
 }
 
 #[derive(Clone, Serialize)]
 pub(crate) struct Notice {
     id: String,
     provider: Provider,
+    address: String,
     #[serde(flatten)]
     content: Content,
     #[serde(skip)]
@@ -64,8 +88,8 @@ pub(crate) struct Notice {
 #[derive(Default)]
 struct Runtime {
     config: Config,
-    status: BTreeMap<Provider, String>,
-    sockets: BTreeMap<Provider, TcpStream>,
+    status: BTreeMap<String, String>,
+    sockets: BTreeMap<String, TcpStream>,
     notices: VecDeque<Notice>,
     expiring: bool,
 }
@@ -113,13 +137,13 @@ fn changed(app: &AppHandle) { let _ = app.emit_to(BAR, "mail-notices-changed", (
 fn accounts_changed(app: &AppHandle) { let _ = app.emit_to(SETTINGS, "mail-accounts-changed", ()); }
 
 fn current(r: &Runtime, provider: Provider, key: &str) -> bool {
-    r.config.accounts.get(&provider).is_some_and(|b| b.key == key)
+    r.config.bindings(provider).iter().any(|b| b.key == key)
 }
 
-fn replace_runtime(r: &mut Runtime, provider: Provider) {
-    if let Some(socket) = r.sockets.remove(&provider) { let _ = socket.shutdown(Shutdown::Both); }
-    r.status.remove(&provider);
-    r.notices.retain(|n| n.provider != provider);
+fn disconnect_runtime(r: &mut Runtime, provider: Provider, old: &Binding) {
+    if let Some(socket) = r.sockets.remove(&old.key) { let _ = socket.shutdown(Shutdown::Both); }
+    r.status.remove(&old.key);
+    r.notices.retain(|n| n.provider != provider || !n.address.eq_ignore_ascii_case(&old.address));
 }
 
 #[derive(Serialize)]
@@ -129,9 +153,14 @@ pub(crate) struct Account { provider: Provider, address: String, status: String 
 pub(crate) fn mail_accounts(window: WebviewWindow, mail: State<'_, Mail>) -> Result<Vec<Account>, String> {
     require(&window, SETTINGS)?;
     let r = mail.lock();
-    Ok(r.config.accounts.iter().map(|(&provider, b)| Account {
-        provider, address: b.address.clone(), status: r.status.get(&provider).cloned().unwrap_or_else(|| "正在连接".into())
-    }).collect())
+    let mut accounts = Vec::new();
+    for (&provider, bindings) in &r.config.accounts {
+        for b in bindings {
+            accounts.push(Account { provider, address: b.address.clone(),
+                status: r.status.get(&b.key).cloned().unwrap_or_else(|| "正在连接".into()) });
+        }
+    }
+    Ok(accounts)
 }
 
 #[tauri::command]
@@ -150,23 +179,30 @@ fn bind(app: &AppHandle, provider: Provider, address: String, secret: String) ->
         return Err(String::from("请输入邮箱授权码或应用专用密码"));
     }
     let mail = app.state::<Mail>();
-    let expected = mail.lock().config.accounts.get(&provider).map(|b| b.key.clone());
+    let expected = mail.lock().config.target(provider, &address).map(|b| b.key.clone());
     let inbox = Inbox::connect(provider, &address, &secret)?;
     let mut r = mail.lock();
-    let old = r.config.accounts.get(&provider);
-    if old.map(|b| &b.key) != expected.as_ref() { return Err("邮箱设置已变化，请重新绑定".into()); }
-    let cursor = old.filter(|b| b.address.eq_ignore_ascii_case(&address) && b.cursor.validity == inbox.baseline.validity)
+    let old = r.config.target(provider, &address).cloned();
+    if old.as_ref().map(|b| &b.key) != expected.as_ref() { return Err("邮箱设置已变化，请重新绑定".into()); }
+    let cursor = old.as_ref().filter(|b| b.address.eq_ignore_ascii_case(&address) && b.cursor.validity == inbox.baseline.validity)
         .map(|b| b.cursor).unwrap_or(inbox.baseline);
     let key = uuid::Uuid::new_v4().to_string();
     let binding = Binding { address, key: key.clone(), cursor };
     let mut next = r.config.clone();
-    if let Some(previous) = next.accounts.insert(provider, binding.clone()) { next.retired.push(previous.key); }
+    let bindings = next.accounts.entry(provider).or_default();
+    if let Some(previous) = &old {
+        let slot = bindings.iter_mut().find(|b| b.key == previous.key).ok_or("邮箱设置已变化，请重试")?;
+        *slot = binding.clone();
+        next.retired.push(previous.key.clone());
+    } else {
+        bindings.push(binding.clone());
+    }
     entry(&key)?.set_password(&secret).map_err(|_| "无法保存邮箱凭据")?;
     if let Err(error) = persist(app, &mut r, next) {
         erase(&key)?;
         return Err(error);
     }
-    replace_runtime(&mut r, provider);
+    if let Some(previous) = &old { disconnect_runtime(&mut r, provider, previous); }
     clean_retired(app, &mut r);
     drop(r);
     mail.wake.notify_all();
@@ -177,17 +213,26 @@ fn bind(app: &AppHandle, provider: Provider, address: String, secret: String) ->
 }
 
 #[tauri::command]
-pub(crate) fn unbind_mail_account(window: WebviewWindow, app: AppHandle, provider: Provider) -> Result<(), String> {
+pub(crate) fn unbind_mail_account(window: WebviewWindow, app: AppHandle, provider: Provider, address: Option<String>) -> Result<(), String> {
     require(&window, SETTINGS)?;
     let mail = app.state::<Mail>();
     let mut r = mail.lock();
     let mut next = r.config.clone();
-    let Some(old) = next.accounts.remove(&provider) else { return Ok(()) };
-    next.retired.push(old.key);
+    let Some(bindings) = next.accounts.get_mut(&provider) else { return Ok(()) };
+    // 兼容旧界面的单账号解绑，多账号时必须明确指定地址。
+    let index = match address {
+        Some(address) => bindings.iter().position(|b| b.address.eq_ignore_ascii_case(&address)),
+        None if bindings.len() == 1 => Some(0),
+        None => return Err("请选择要解绑的邮箱".into()),
+    };
+    let Some(index) = index else { return Ok(()) };
+    let old = bindings.remove(index);
+    if bindings.is_empty() { next.accounts.remove(&provider); }
+    next.retired.push(old.key.clone());
     persist(&app, &mut r, next)?;
-    replace_runtime(&mut r, provider);
+    disconnect_runtime(&mut r, provider, &old);
     clean_retired(&app, &mut r);
-    let pending = !r.config.retired.is_empty();
+    let pending = r.config.retired.contains(&old.key);
     drop(r);
     mail.wake.notify_all();
     accounts_changed(&app);
@@ -229,7 +274,9 @@ pub(crate) fn start(app: AppHandle) {
     let mail = app.state::<Mail>();
     let mut r = mail.lock();
     clean_retired(&app, &mut r);
-    for (&provider, b) in &r.config.accounts { spawn_worker(app.clone(), provider, b.clone(), None); }
+    for (&provider, bindings) in &r.config.accounts {
+        for b in bindings { spawn_worker(app.clone(), provider, b.clone(), None); }
+    }
 }
 
 fn expire_notices(app: AppHandle) {
@@ -252,16 +299,17 @@ fn expire_notices(app: AppHandle) {
 fn commit(app: &AppHandle, provider: Provider, binding: &mut Binding, cursor: Cursor, content: Option<Content>) -> Result<(), &'static str> {
     let mail = app.state::<Mail>();
     let mut r = mail.lock();
-    if !current(&r, provider, &binding.key) { return Err("邮箱已解绑"); }
     let mut next = r.config.clone();
-    next.accounts.get_mut(&provider).unwrap().cursor = cursor;
+    let stored = next.accounts.get_mut(&provider).and_then(|bindings|
+        bindings.iter_mut().find(|b| b.key == binding.key)).ok_or("邮箱已解绑")?;
+    stored.cursor = cursor;
     persist(app, &mut r, next).map_err(|_| "无法保存收件进度")?;
     binding.cursor = cursor;
     if let Some(content) = content {
         if r.notices.len() >= 32 { r.notices.pop_front(); }
         r.notices.push_back(Notice {
             id: format!("{}-{}-{}", binding.key, cursor.validity, cursor.last),
-            provider, content, expires: Instant::now() + RETENTION,
+            provider, address: binding.address.clone(), content, expires: Instant::now() + RETENTION,
         });
         if !r.expiring { r.expiring = true; expire_notices(app.clone()); }
         drop(r);
@@ -274,8 +322,8 @@ fn status(app: &AppHandle, provider: Provider, key: &str, value: &str) -> bool {
     let mail = app.state::<Mail>();
     let mut r = mail.lock();
     if !current(&r, provider, key) { return false; }
-    if r.status.get(&provider).map(String::as_str) != Some(value) {
-        r.status.insert(provider, value.to_owned());
+    if r.status.get(key).map(String::as_str) != Some(value) {
+        r.status.insert(key.to_owned(), value.to_owned());
         drop(r);
         accounts_changed(app);
     }
@@ -294,7 +342,7 @@ fn synchronize(app: &AppHandle, provider: Provider, binding: &mut Binding, mut i
     {
         let mut r = mail.lock();
         if !current(&r, provider, &binding.key) { return Ok(()); }
-        r.sockets.insert(provider, inbox.socket.try_clone().map_err(|_| "无法监听收信连接")?);
+        r.sockets.insert(binding.key.clone(), inbox.socket.try_clone().map_err(|_| "无法监听收信连接")?);
     }
     if binding.cursor.validity != inbox.baseline.validity {
         commit(app, provider, binding, inbox.baseline, None)?;
@@ -338,7 +386,7 @@ fn spawn_worker(app: AppHandle, provider: Provider, mut binding: Binding, mut in
             {
                 let mut r = mail.lock();
                 if !current(&r, provider, &binding.key) { break; }
-                r.sockets.remove(&provider);
+                r.sockets.remove(&binding.key);
             }
             if error == inbox::AUTH || error == NO_SECRET {
                 status(&app, provider, &binding.key, error);

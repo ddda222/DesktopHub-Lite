@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { providerName, useMailList, type MailProvider, type MailAccount } from '@/features/mail/mail'
 import { pushToast } from '@/store'
 
 const providers: MailProvider[] = ['qq', 'gmail']
 const editing = ref<MailProvider | null>(null)
+const originalAddress = ref('')
 const address = ref('')
 const secret = ref('')
 const busy = ref(false)
 const error = ref('')
 const accounts = useMailList<MailAccount>('settings', 'mail_accounts', 'mail-accounts-changed', message => { error.value = message })
-const account = (p: MailProvider) => accounts.value.find(item => item.provider === p)
+const byProvider = computed(() => ({
+  qq: accounts.value.filter(item => item.provider === 'qq'),
+  gmail: accounts.value.filter(item => item.provider === 'gmail'),
+}))
 const secretLabel = (p: MailProvider) => p === 'qq' ? '授权码' : '应用专用密码'
 
 type SetupPage = 'qq-account' | 'qq-guide' | 'google-app-passwords' | 'google-two-step' | 'google-guide'
@@ -20,14 +24,20 @@ async function openSetupPage(page: SetupPage) {
   catch (e) { pushToast(String(e), 'error') }
 }
 
-function edit(provider: MailProvider | null) {
+function edit(provider: MailProvider | null, existingAddress = '') {
   editing.value = provider
-  address.value = provider ? account(provider)?.address ?? '' : ''
+  originalAddress.value = existingAddress
+  address.value = existingAddress
   secret.value = ''
   error.value = ''
 }
 async function save(provider: MailProvider) {
   if (busy.value || !isDesktop) return
+  if (provider === 'gmail' && !originalAddress.value && byProvider.value.gmail.some(item =>
+    item.address.toLowerCase() === address.value.trim().toLowerCase())) {
+    error.value = '这个邮箱已绑定，可以在对应账号旁点「重新绑定」。'
+    return
+  }
   busy.value = true
   error.value = ''
   try {
@@ -36,11 +46,11 @@ async function save(provider: MailProvider) {
   } catch (e) { error.value = String(e) }
   finally { busy.value = false }
 }
-async function disconnect(provider: MailProvider) {
+async function disconnect({ provider, address }: MailAccount) {
   if (busy.value || !isDesktop) return
   busy.value = true
   error.value = ''
-  try { await invokeHost('unbind_mail_account', { provider }); edit(null) }
+  try { await invokeHost('unbind_mail_account', { provider, address }); edit(null) }
   catch (e) { error.value = String(e) }
   finally { busy.value = false }
 }
@@ -56,14 +66,23 @@ async function disconnect(provider: MailProvider) {
       <div class="set-row mail-row">
         <div class="set-text">
           <strong class="set-label">{{ providerName[p] }}</strong>
-          <span class="set-desc">{{ account(p)?.address || '未绑定' }}</span>
-          <span v-if="account(p)" class="set-desc" role="status">{{ account(p)?.status }}</span>
+          <span v-if="!byProvider[p].length" class="set-desc">未绑定</span>
         </div>
         <div class="mail-buttons">
-          <button v-if="editing !== p" class="btn" type="button" :disabled="busy || !isDesktop" @click="edit(p)">{{ account(p) ? '重新绑定' : '绑定邮箱' }}</button>
+          <button v-if="(editing !== p || originalAddress) && (p === 'gmail' || !byProvider[p].length)" class="btn" type="button"
+            :disabled="busy || !isDesktop" @click="edit(p)">{{ p === 'gmail' ? '添加 Gmail 账号' : '绑定邮箱' }}</button>
           <button class="btn" type="button" :disabled="!isDesktop"
             @click="openSetupPage(p === 'qq' ? 'qq-account' : 'google-app-passwords')">{{ p === 'qq' ? '获取 QQ 授权码' : '创建应用专用密码' }}</button>
-          <button v-if="editing !== p && account(p)" class="btn" type="button" :disabled="busy" @click="disconnect(p)">解绑</button>
+        </div>
+      </div>
+      <div v-for="item in byProvider[p]" :key="item.address" class="set-row mail-row">
+        <div class="set-text">
+          <strong class="set-label mail-address">{{ item.address }}</strong>
+          <span class="set-desc" role="status">{{ item.status }}</span>
+        </div>
+        <div class="mail-buttons" role="group" :aria-label="item.address">
+          <button class="btn" type="button" :disabled="busy || !isDesktop" @click="edit(p, item.address)">重新绑定</button>
+          <button class="btn" type="button" :disabled="busy || !isDesktop" @click="disconnect(item)">解绑</button>
         </div>
       </div>
       <details class="mail-guide" :open="editing === p">
@@ -86,7 +105,8 @@ async function disconnect(provider: MailProvider) {
       </details>
       <form v-if="editing === p" class="mail-form" @submit.prevent="save(p)">
         <label class="field"><span class="field-label">邮箱地址</span>
-          <input v-model="address" class="control" type="email" required autocomplete="off" spellcheck="false" :disabled="busy" />
+          <input v-model="address" class="control" type="email" required autocomplete="off" spellcheck="false"
+            :readonly="p === 'gmail' && !!originalAddress" :disabled="busy" />
         </label>
         <label class="field"><span class="field-label">{{ secretLabel(p) }}</span>
           <input v-model="secret" class="control" type="password" required autocomplete="new-password" :disabled="busy" />
@@ -102,6 +122,7 @@ async function disconnect(provider: MailProvider) {
 
 <style scoped>
 .mail-row { flex-wrap: wrap; }
+.mail-address { overflow-wrap: anywhere; }
 .mail-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .mail-guide ol { margin: 4px 0 12px; padding-inline-start: 22px; list-style: decimal; font-size: 13px; line-height: 1.6; }
 .mail-guide li + li { margin-top: 4px; }

@@ -18,7 +18,7 @@ async function act(id: string, action: 'copy-code' | 'copy-link' | 'open-link' |
 <template>
   <section class="mail-list scroll-y" aria-label="新邮件">
     <article v-for="item in notices" :key="item.id" class="mail-item">
-      <header><span>{{ providerName[item.provider] }} · {{ item.sender || '未知发件人' }}</span>
+      <header><span>{{ item.provider === 'gmail' ? item.address : providerName[item.provider] }} · {{ item.sender || '未知发件人' }}</span>
         <button type="button" :disabled="busy" aria-label="移除这条邮件提醒" @click="act(item.id, 'dismiss')">移除</button>
       </header>
       <h3>{{ item.subject || '无主题邮件' }}</h3>
