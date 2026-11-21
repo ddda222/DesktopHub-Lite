@@ -20,6 +20,9 @@ impl PendingConfiguration {
 fn default_telemetry_mode() -> String {
     "smart".into()
 }
+fn default_motion_mode() -> String {
+    "glide".into()
+}
 fn default_true() -> bool {
     true
 }
@@ -36,6 +39,8 @@ pub struct PortablePreferences {
     pub island_reduced_motion: bool,
     pub scale: u32,
     pub webgl: bool,
+    #[serde(default = "default_motion_mode")]
+    pub motion: String,
     #[serde(default = "default_telemetry_mode")]
     pub telemetry_mode: String,
     #[serde(default = "default_true")]
@@ -57,6 +62,7 @@ impl PortablePreferences {
             island_reduced_motion: ui.island_reduced_motion,
             scale: ui.island_appearance.scale,
             webgl: ui.island_appearance.webgl,
+            motion: ui.island_appearance.motion.clone(),
             telemetry_mode: ui.island_appearance.telemetry_mode.clone(),
             telemetry_net: ui.island_appearance.telemetry_net,
             telemetry_cpu: ui.island_appearance.telemetry_cpu,
@@ -69,6 +75,7 @@ impl PortablePreferences {
         ui.island_hover_ms = self.island_hover_ms; ui.island_leave_ms = self.island_leave_ms;
         ui.island_reduced_motion = self.island_reduced_motion;
         ui.island_appearance.scale = self.scale; ui.island_appearance.webgl = self.webgl;
+        ui.island_appearance.motion = self.motion.clone();
         ui.island_appearance.telemetry_mode = self.telemetry_mode.clone();
         ui.island_appearance.telemetry_net = self.telemetry_net;
         ui.island_appearance.telemetry_cpu = self.telemetry_cpu;
@@ -151,6 +158,7 @@ pub fn validate(backup: &ConfigurationBackup) -> Result<(), String> {
         || !(100..=2000).contains(&p.island_hover_ms)
         || !(100..=4000).contains(&p.island_leave_ms)
         || !categories.contains(p.active_category_id.as_str())
+        || !crate::desktop_features::IslandAppearance::valid_motion_mode(&p.motion)
         || !crate::desktop_features::IslandAppearance::valid_telemetry_mode(&p.telemetry_mode)
         || (p.telemetry_mode != "off" && !p.telemetry_net && !p.telemetry_cpu && !p.telemetry_memory)
     {
@@ -190,7 +198,7 @@ pub fn describe(before: &ConfigurationBackup, after: &ConfigurationBackup) -> Ch
     let categories=counts(&before.applications.categories,&after.applications.categories,|v| &v.id);
     let mut preferences=Vec::new();
     let a=serde_json::to_value(&before.preferences).unwrap_or_default();let b=serde_json::to_value(&after.preferences).unwrap_or_default();
-    for (key,label) in [("theme","显示主题"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryMemory","微读数·内存")] {
+    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryMemory","微读数·内存")] {
         if a[key]!=b[key] { preferences.push(PreferenceChange{label:label.into(),before:a[key].as_str().map(str::to_owned).unwrap_or_else(||a[key].to_string()),after:b[key].as_str().map(str::to_owned).unwrap_or_else(||b[key].to_string())}); }
     }
     let mut app_details=Vec::new();
@@ -232,9 +240,13 @@ mod tests {
     }
     fn bytes(value: &ConfigurationBackup) -> Vec<u8> { serde_json::to_vec(value).unwrap() }
     #[test] fn round_trip_preserves_portable_configuration() {
-        for theme in ["midnight", "mecha", "scroll", "pixel"] {
+        for theme in ["midnight", "mecha", "scroll", "pixel", "blueprint", "neon", "clay"] {
             let mut backup=sample(); backup.preferences.theme=theme.into();
             let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert!(restored.applications.apps[0].broken.is_none()); assert_eq!(restored.preferences.theme,theme);
+        }
+        for motion in ["glide", "sweep", "bounce", "step", "flicker", "unroll"] {
+            let mut backup=sample(); backup.preferences.motion=motion.into();
+            let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert_eq!(restored.preferences.motion,motion);
         }
     }
     #[test] fn removed_page_backups_restore_to_applications_without_an_empty_panel() {
@@ -292,10 +304,15 @@ mod tests {
     #[test] fn legacy_backups_without_telemetry_fields_default_cleanly_and_invalid_combinations_fail() {
         let mut value=serde_json::to_value(sample()).unwrap();
         let prefs=value["preferences"].as_object_mut().unwrap();
-        prefs.remove("telemetryMode");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryMemory");
+        prefs.remove("motion");prefs.remove("telemetryMode");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryMemory");
         let restored=parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(restored.preferences.motion,"glide");
         assert_eq!(restored.preferences.telemetry_mode,"smart");
         assert!(restored.preferences.telemetry_net && restored.preferences.telemetry_cpu && restored.preferences.telemetry_memory);
+
+        let mut bad_motion=sample();
+        bad_motion.preferences.motion="warp".into();
+        assert!(parse(&bytes(&bad_motion)).is_err());
 
         let mut custom=sample();
         custom.preferences.telemetry_mode="always".into();

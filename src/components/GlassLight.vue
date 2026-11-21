@@ -5,11 +5,10 @@ import { createGlassPass } from '@/features/island/motion/glassRenderer'
 const props = withDefaults(defineProps<{
   lightSurface: boolean
   signal?: string
-  expanded?: boolean
   active?: boolean
   quality?: 'full' | 'low'
   cornerRadius?: number
-  palette?: 'cool' | 'amber' | 'vermilion' | 'lime'
+  palette?: 'cool' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'
 }>(), { active: true, quality: 'full', palette: 'cool' })
 const emit = defineEmits<{ unavailable: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -44,7 +43,6 @@ onMounted(() => {
   let tone = Number(props.lightSurface)
   let originX = .5, originY = 1
   let rippleStart = -Infinity
-  let openingStart = props.expanded ? performance.now() : -Infinity
   const enabled = () => !disposed && !!pass && props.active && inView && !document.hidden && !media.matches
 
   function schedule(): void {
@@ -55,7 +53,7 @@ onMounted(() => {
     cancelAnimationFrame(frame)
     clearTimeout(resizeTimer)
     frame = previous = 0
-    latestPaint = openingStart = rippleStart = -Infinity
+    latestPaint = rippleStart = -Infinity
     trim = true
     pressPending = false
     pointer = null
@@ -92,18 +90,20 @@ onMounted(() => {
     energy += (targetEnergy - energy) * follow
     tone += (Number(props.lightSurface) - tone) * follow
     const rippleAge = Math.min((now - rippleStart) / 680, 1)
-    const openingAge = Math.min((now - openingStart) / (props.expanded ? 380 : 230), 1)
     const cornerNow = props.cornerRadius ?? (parseFloat(getComputedStyle(surface!).borderTopLeftRadius) || corner)
     const paletteMap: Record<string, { base: [number, number, number]; rim: [number, number, number] } | undefined> = {
       amber: { base: [.96, .62, .08], rim: [1, .92, .56] },
       vermilion: { base: [.72, .24, .16], rim: [.92, .48, .36] },
       lime: { base: [.64, .9, .21], rim: [.98, .92, .25] },
+      chalk: { base: [.62, .8, 1], rim: [1, 1, 1] },
+      neon: { base: [1, .17, .84], rim: [0, .94, 1] },
+      candy: { base: [.94, .38, .48], rim: [1, .86, .55] },
     }
     const colors = paletteMap[props.palette ?? 'cool']
     pass.draw({ width, height, corner: cornerNow, lightX, lightY, energy, tone, rippleX: originX, rippleY: originY,
-      rippleAge, openingAge, direction: props.expanded ? 1 : -1, full, tintBase: colors?.base, tintRim: colors?.rim })
+      rippleAge, full, tintBase: colors?.base, tintRim: colors?.rim })
     const remaining = Math.abs(targetX-lightX) + Math.abs(targetY-lightY) + Math.abs(targetEnergy-energy) + Math.abs(Number(props.lightSurface)-tone)
-    if (remaining > .005 || rippleAge < 1 || openingAge < 1) {
+    if (remaining > .005 || rippleAge < 1) {
       previous = now
       schedule()
     } else previous = 0
@@ -118,6 +118,7 @@ onMounted(() => {
   }
   const press = (event: PointerEvent) => {
     if (!enabled() || !event.isPrimary || event.button !== 0) return
+    if (event.target instanceof Element && event.target.closest('.capsule, .collapse-action')) return
     pressPending = true
     follow(event)
   }
@@ -145,9 +146,6 @@ onMounted(() => {
   const stopActive = watch(() => props.active, sync)
   const stopTone = watch(() => [props.lightSurface, props.cornerRadius, props.palette], schedule)
   const stopQuality = watch(() => props.quality, () => { trim = true; schedule() })
-  const stopOpening = watch(() => props.expanded, () => {
-    if (enabled()) { openingStart = performance.now(); schedule() }
-  })
   const stopSignal = watch(() => props.signal, signal => {
     if (!enabled() || !signal || signal === 'idle') return
     originX = .5; originY = 1; rippleStart = performance.now(); schedule()
@@ -165,7 +163,7 @@ onMounted(() => {
     disposed = true
     pause()
     resize.disconnect(); intersection.disconnect()
-    stopActive(); stopTone(); stopQuality(); stopOpening(); stopSignal()
+    stopActive(); stopTone(); stopQuality(); stopSignal()
     media.removeEventListener('change', sync)
     document.removeEventListener('visibilitychange', sync)
     surface.removeEventListener('pointermove', follow)

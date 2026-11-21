@@ -8,6 +8,8 @@
  */
 import { computed, reactive, watch } from 'vue'
 import { host, newRequestId } from '@/lib/desktop/host'
+import { isDarkThemeMode } from '@/lib/themes'
+import { isMotionMode, type MotionMode } from '@/lib/motions'
 import {
   defaultIslandAppearance,
   dismissPanel,
@@ -24,6 +26,7 @@ import {
   pickApplicationTarget,
   readAppIcons,
   requestCategory,
+  requestMotion,
   requestPanel,
   requestSettings,
   requestTheme,
@@ -288,6 +291,9 @@ function applyUiState(ui: UiState): void {
   state.ui.islandLeaveMs = ui.islandLeaveMs
   state.ui.islandReducedMotion = ui.islandReducedMotion
   state.ui.islandAppearance = ui.islandAppearance
+  if (state.ui.islandAppearance && !isMotionMode(state.ui.islandAppearance.motion)) {
+    state.ui.islandAppearance.motion = 'glide'
+  }
   state.ui.mixerVisibility = ui.mixerVisibility
   state.ui.islandCaptureError = ui.islandCaptureError ?? null
   state.ui.translationPending = ui.translationPending ?? 0
@@ -947,13 +953,18 @@ export function setTheme(theme: HubSettings['theme']): void {
   else state.settings.theme = theme
 }
 
+export function setMotion(motion: MotionMode): void {
+  state.ui.islandAppearance.motion = motion
+  if (isDesktop) void requestMotion(motion).catch(error => pushToast(`保存动态效果失败：${String(error)}`, 'error'))
+}
+
 /* ---------- 主题落地 ---------- */
 
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
 
 export function isDarkTheme(theme: HubSettings['theme'] = state.settings.theme): boolean {
   if (theme === 'system') return prefersDark.matches
-  return theme === 'dark' || theme === 'midnight' || theme === 'mecha' || theme === 'pixel'
+  return isDarkThemeMode(theme)
 }
 
 function applyTheme(): void {

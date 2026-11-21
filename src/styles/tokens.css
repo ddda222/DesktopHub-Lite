@@ -342,3 +342,167 @@
   --island-hem-b: rgba(250, 204, 21, 0.85);
   --particle-color: #a3e635;
 }
+
+/* 蓝晒图纸（普鲁士蓝晒图底 + 粉笔白虚线框 + 柠檬黄尺寸标注与比例尺） */
+:root[data-theme='blueprint'] {
+  color-scheme: dark;
+  --r-bar: 2px;
+  --r-pop: 2px;
+  --r-card: 2px;
+  --r-tile: 1px;
+  --r-chip: 1px;
+  --dur-fast: 100ms;
+  --dur: 140ms;
+
+  --page-bg: #07192f;
+  --stage-1: #0d2b4e;
+  --stage-2: #07192f;
+
+  --bar-bg: rgba(11, 38, 71, 0.96);
+  --bar-border: rgba(224, 242, 254, 0.65);
+  --bar-shadow: 0 14px 36px rgba(3, 12, 26, 0.62);
+
+  --surface: #0b2647;
+  --surface-2: #11345f;
+  --surface-3: #174276;
+
+  --hover: rgba(186, 230, 253, 0.13);
+  --active: rgba(253, 224, 71, 0.22);
+
+  --text: #f0f9ff;
+  --text-2: #bae6fd;
+  --text-3: #88c6eb;
+
+  --line: rgba(186, 230, 253, 0.26);
+  --line-strong: rgba(224, 242, 254, 0.56);
+
+  --accent: #fde047;
+  --accent-hover: #fef08a;
+  --accent-weak: rgba(253, 224, 71, 0.18);
+  --accent-text: #08203e;
+
+  --danger: #fca5a5;
+  --danger-weak: rgba(252, 165, 165, 0.18);
+  --success: #6ee7b7;
+
+  --pop-bg: rgba(11, 38, 71, 0.99);
+  --pop-border: rgba(224, 242, 254, 0.62);
+  --pop-shadow: 0 22px 54px rgba(3, 12, 26, 0.72);
+
+  --thumb-bg: #153c6b;
+  --island-rim: rgba(224, 242, 254, 0.72);
+  --island-top-sheen: rgba(255, 255, 255, 0.24);
+  --island-hem-a: rgba(186, 230, 253, 0.26);
+  --island-hem-b: rgba(253, 224, 71, 0.8);
+  --particle-color: #fde047;
+}
+
+/* 霓虹夜行（深夜暗紫底 + 品红与电光青双色灯管 + 赛博街机灯牌） */
+:root[data-theme='neon'] {
+  color-scheme: dark;
+  --r-bar: 20px;
+  --r-pop: 16px;
+  --r-card: 12px;
+  --r-tile: 10px;
+  --r-chip: 8px;
+  --dur-fast: 105ms;
+  --dur: 150ms;
+
+  --page-bg: #090414;
+  --stage-1: #160a2c;
+  --stage-2: #080312;
+
+  --bar-bg: rgba(17, 9, 33, 0.95);
+  --bar-border: rgba(255, 43, 214, 0.55);
+  --bar-shadow: 0 0 22px rgba(255, 43, 214, 0.25), 0 16px 40px rgba(4, 1, 10, 0.72);
+
+  --surface: #120924;
+  --surface-2: #1b0e36;
+  --surface-3: #27154c;
+
+  --hover: rgba(0, 240, 255, 0.13);
+  --active: rgba(255, 43, 214, 0.24);
+
+  --text: #fdf4ff;
+  --text-2: #e9d5ff;
+  --text-3: #c084fc;
+
+  --line: rgba(255, 43, 214, 0.22);
+  --line-strong: rgba(0, 240, 255, 0.48);
+
+  --accent: #00f0ff;
+  --accent-hover: #67f7ff;
+  --accent-weak: rgba(0, 240, 255, 0.18);
+  --accent-text: #090414;
+
+  --danger: #ff4d8d;
+  --danger-weak: rgba(255, 77, 141, 0.2);
+  --success: #34f5c5;
+
+  --pop-bg: rgba(18, 9, 36, 0.99);
+  --pop-border: rgba(0, 240, 255, 0.45);
+  --pop-shadow: 0 0 28px rgba(255, 43, 214, 0.24), 0 24px 64px rgba(3, 1, 8, 0.78);
+
+  --thumb-bg: #241346;
+  --island-rim: #ff2bd6;
+  --island-top-sheen: rgba(0, 240, 255, 0.42);
+  --island-hem-a: rgba(255, 43, 214, 0.38);
+  --island-hem-b: rgba(0, 240, 255, 0.88);
+  --particle-color: #00f0ff;
+}
+
+/* 软糖黏土（杏仁奶油泥塑底 + 3D 蓬松凹凸高光 + 草莓珊瑚粉与糖果圆点） */
+:root[data-theme='clay'] {
+  color-scheme: light;
+  --r-bar: 24px;
+  --r-pop: 24px;
+  --r-card: 18px;
+  --r-tile: 16px;
+  --r-chip: 14px;
+  --dur-fast: 125ms;
+  --dur: 175ms;
+
+  --page-bg: #efe3d3;
+  --stage-1: #faf3e9;
+  --stage-2: #e7d7c3;
+
+  --bar-bg: rgba(251, 245, 236, 0.97);
+  --bar-border: rgba(196, 166, 138, 0.55);
+  --bar-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.9), inset 0 -3px 5px rgba(188, 152, 120, 0.35),
+    0 14px 34px rgba(124, 92, 65, 0.16);
+
+  --surface: #faf3e8;
+  --surface-2: #f1e5d6;
+  --surface-3: #e6d6c3;
+
+  --hover: rgba(239, 71, 111, 0.1);
+  --active: rgba(239, 71, 111, 0.18);
+
+  --text: #2b211a;
+  --text-2: #574538;
+  --text-3: #786252;
+
+  --line: rgba(168, 136, 108, 0.25);
+  --line-strong: rgba(168, 136, 108, 0.48);
+
+  --accent: #d9385e;
+  --accent-hover: #c0294e;
+  --accent-weak: rgba(217, 56, 94, 0.14);
+  --accent-text: #ffffff;
+
+  --danger: #d92d20;
+  --danger-weak: rgba(217, 45, 32, 0.12);
+  --success: #0b8a68;
+
+  --pop-bg: rgba(250, 243, 232, 0.99);
+  --pop-border: rgba(196, 166, 138, 0.6);
+  --pop-shadow: inset 0 3px 4px rgba(255, 255, 255, 0.92), inset 0 -4px 6px rgba(188, 152, 120, 0.36),
+    0 22px 52px rgba(124, 92, 65, 0.2);
+
+  --thumb-bg: #eadbc9;
+  --island-rim: rgba(196, 166, 138, 0.65);
+  --island-top-sheen: rgba(255, 255, 255, 0.95);
+  --island-hem-a: rgba(239, 71, 111, 0.22);
+  --island-hem-b: rgba(255, 209, 102, 0.72);
+  --particle-color: #ef476f;
+}

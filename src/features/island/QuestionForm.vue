@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { IslandQuestion, QuestionResponse } from './useApprovals'
+import type { ApprovalCard, IslandQuestion, QuestionResponse } from './useApprovals'
 
-const props = defineProps<{ questions: IslandQuestion[]; disabled: boolean }>()
+const props = defineProps<{ questions: IslandQuestion[]; source: ApprovalCard['source']; disabled: boolean }>()
 const emit = defineEmits<{ submit: [answers: QuestionResponse[]]; delegate: [] }>()
 // 父组件以请求编号作为 key；每张新卡都从空白回答开始。
 const drafts = ref(props.questions.map(() => ({ selected: [] as string[], text: '', skipped: false })))
-const ready = computed(() => drafts.value.every(d => d.skipped || d.selected.length || d.text.trim()))
+const completed = computed(() => drafts.value.filter(d => d.skipped || d.selected.length || d.text.trim()).length)
+const ready = computed(() => completed.value === drafts.value.length)
 
 function choose(index: number, label: string) {
   const d = drafts.value[index]
@@ -43,9 +44,14 @@ function submit() {
 
 <template>
   <form @submit.prevent="submit">
-    <div class="questions">
+    <div class="questions scroll-y">
       <fieldset v-for="(q, i) in questions" :key="q.id">
-        <legend><small v-if="q.header">{{ q.header }}</small>{{ q.question }}</legend>
+        <legend>
+          <small v-if="questions.length > 1 || q.header || q.options.length" class="question-meta">
+            <span v-if="questions.length > 1">第 {{ i + 1 }} 题</span><span v-if="q.header">{{ q.header }}</span><span v-if="q.options.length">{{ q.multiSelect ? '多选' : '单选' }}</span>
+          </small>
+          {{ q.question }}
+        </legend>
         <p v-if="q.detail">{{ q.detail }}</p>
         <label v-for="option in q.options" :key="option.label" class="choice">
           <input :type="q.multiSelect ? 'checkbox' : 'radio'" :name="'question-' + i"
@@ -60,7 +66,8 @@ function submit() {
       </fieldset>
     </div>
     <footer>
-      <button type="button" :disabled="disabled" @click="emit('delegate')">回 DSH 回答</button>
+      <button type="button" class="delegate" :disabled="disabled" @click="emit('delegate')">回 {{ source }} 回答</button>
+      <span v-if="questions.length > 1" class="progress">已处理 {{ completed }}/{{ questions.length }}</span>
       <button type="submit" class="submit" :disabled="disabled || !ready">提交回答</button>
     </footer>
   </form>
@@ -68,20 +75,28 @@ function submit() {
 
 <style scoped>
 form { display: grid; gap: 10px; min-width: 0; }
-.questions { max-height: 260px; overflow-y: auto; overscroll-behavior: contain; }
+.questions { max-height: 260px; }
 fieldset { min-width: 0; margin: 0; border: 0; padding: 2px; }
-fieldset + fieldset { margin-top: 12px; }
+fieldset + fieldset { margin-top: 14px; }
 legend, p, .choice { overflow-wrap: anywhere; white-space: pre-wrap; }
-legend { font-size: 15px; font-weight: 650; }
+legend { max-width: 100%; padding: 0; line-height: 1.45; font-size: 15px; font-weight: 650; }
+.question-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-bottom: 3px; }
 small { display: block; font-weight: 400; font-size: 12px; color: var(--text-2); }
 p { margin: 4px 0 6px; font-size: 13px; user-select: text; }
-.choice { display: flex; align-items: baseline; gap: 6px; padding: 4px 2px; cursor: pointer; }
-.choice input { flex: none; width: 15px; height: 15px; appearance: auto; }
+.choice { display: flex; align-items: flex-start; gap: 8px; padding: 5px 7px; margin-top: 3px; border: 1px solid transparent; border-radius: var(--r-chip); cursor: pointer; }
+.choice:hover { background: var(--hover); }
+.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-weak); color: var(--text); }
+.choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+.choice input { flex: none; width: 15px; height: 15px; margin: 3px 0 0; appearance: auto; accent-color: var(--accent); }
+.choice span { min-width: 0; }
 .skip { font-size: 12px; color: var(--text-2); }
-textarea { box-sizing: border-box; width: 100%; margin-top: 4px; padding: 6px; border: 1px solid var(--line-strong); border-radius: 6px; color: inherit; background: var(--surface-3); resize: vertical; user-select: text; }
-footer { display: flex; justify-content: space-between; gap: 8px; }
-button { padding: 5px 10px; min-height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; }
-button.submit { background: var(--surface-3); font-weight: 650; }
-button:disabled { opacity: .55; }
-:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+textarea { width: 100%; margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--r-tile); font: inherit; color: inherit; background: var(--surface-2); resize: vertical; user-select: text; }
+footer { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.progress { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+button { padding: 5px 10px; min-height: 32px; border: 1px solid var(--line-strong); border-radius: var(--r-chip); }
+button.delegate { margin-inline-end: auto; color: var(--text-2); border-color: transparent; font-size: 12px; }
+button.submit { background: var(--surface-2); font-weight: 650; }
+button:hover:enabled { background: var(--hover); }
+button:disabled { opacity: .55; cursor: default; }
+button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 </style>

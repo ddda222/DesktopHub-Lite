@@ -21,6 +21,9 @@ pub const THEME_MIDNIGHT: &str = "midnight";
 pub const THEME_MECHA: &str = "mecha";
 pub const THEME_SCROLL: &str = "scroll";
 pub const THEME_PIXEL: &str = "pixel";
+pub const THEME_BLUEPRINT: &str = "blueprint";
+pub const THEME_NEON: &str = "neon";
+pub const THEME_CLAY: &str = "clay";
 pub const THEME_SYSTEM: &str = "system";
 
 pub fn valid_theme(theme: &str) -> bool {
@@ -32,6 +35,9 @@ pub fn valid_theme(theme: &str) -> bool {
             | THEME_MECHA
             | THEME_SCROLL
             | THEME_PIXEL
+            | THEME_BLUEPRINT
+            | THEME_NEON
+            | THEME_CLAY
             | THEME_SYSTEM
     )
 }

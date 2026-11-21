@@ -429,6 +429,17 @@ fn set_theme(app: AppHandle, theme: String) -> Result<UiState, String> {
     Ok(next)
 }
 
+/// 切换独立动态效果，即时生效并广播到所有窗口。
+#[tauri::command]
+fn set_motion(app: AppHandle, motion: String) -> Result<UiState, String> {
+    if !desktop_features::IslandAppearance::valid_motion_mode(&motion) {
+        return Err(format!("未知动态效果：{motion}"));
+    }
+    let next = update_ui_preferences(&app, |ui| ui.island_appearance.motion = motion)?;
+    broadcast_ui(&app);
+    Ok(next)
+}
+
 /// 弹一条轻提示。提示由独立的 toast 窗口渲染，避免被图标条窗口裁掉。
 #[tauri::command]
 fn show_toast(app: AppHandle, message: String, kind: Option<String>) -> Result<(), String> {
@@ -1303,6 +1314,7 @@ pub fn run() {
             start_bar_drag,
             set_category,
             set_theme,
+            set_motion,
             selftest_windows,
             show_toast,
             hide_toast,

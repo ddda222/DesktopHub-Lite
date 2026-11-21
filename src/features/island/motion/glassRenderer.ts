@@ -9,8 +9,6 @@ export interface GlassFrame {
   rippleX: number
   rippleY: number
   rippleAge: number
-  openingAge: number
-  direction: number
   full: boolean
   tintBase?: [number, number, number]
   tintRim?: [number, number, number]
@@ -29,7 +27,7 @@ precision mediump float;
 #endif
 uniform vec2 size, bufferSize, light, origin;
 uniform vec3 tintBase, tintRim;
-uniform float corner, energy, tone, opening, ripple, direction, full;
+uniform float corner, energy, tone, ripple, full;
 float bell(float distance, float width) {
   float x = distance / width;
   return exp(-x*x);
@@ -45,19 +43,15 @@ void main() {
   float coverage = smoothstep(-.75,.35,depth) * (1.-smoothstep(.65*band,band,depth));
   float reach = clamp(min(size.x,size.y)*.42,48.,142.);
   float proximity = bell(length(point-light*size),reach) * energy;
-  float progress = clamp(opening,0.,1.);
-  float crest = 1.-(1.-progress)*(1.-progress);
   float angle = atan(uv.x-.5,uv.y-.5);
-  float pathAngle = direction > 0. ? abs(angle) : 3.14159-abs(angle);
-  float front = bell(pathAngle-crest*3.14159,.62) * (1.-smoothstep(.60,1.,progress));
   float wake = ripple < 1. ? bell(length(point-origin*size)-ripple*250.,12.)*(1.-ripple)*smoothstep(0.,.06,ripple) : 0.;
-  float focus = min(1.,proximity+front*.85+wake*.65);
+  float focus = min(1.,proximity+wake*.65);
   float rim = bell(depth-.95,.72);
   float ribbon = 0.;
   if (full>.5) {
-    float curvature = sin(angle*2.-progress*3.8+light.x*1.7);
-    float ridge = 1.6 + (1.+curvature)*(.65+front*1.1) + focus*.55;
-    ribbon = bell(depth-ridge,.78+front*.48) * (.3+front*.5);
+    float curvature = sin(angle*2.-3.8+light.x*1.7);
+    float ridge = 1.6 + (1.+curvature)*.65 + focus*.55;
+    ribbon = bell(depth-ridge,.78) * .3;
   }
   float halo = bell(depth,band*.46);
   float alpha = coverage * min(.86,(rim*.62+ribbon+halo*.26)*focus+rim*.08);
@@ -97,7 +91,7 @@ export function createGlassPass(gl: WebGLRenderingContext) {
   const location = {
     size: uniform('size'), bufferSize: uniform('bufferSize'), corner: uniform('corner'),
     light: uniform('light'), energy: uniform('energy'), tone: uniform('tone'), origin: uniform('origin'),
-    opening: uniform('opening'), ripple: uniform('ripple'), direction: uniform('direction'), full: uniform('full'),
+    ripple: uniform('ripple'), full: uniform('full'),
     tintBase: uniform('tintBase'), tintRim: uniform('tintRim')
   }
   gl.useProgram(program)
@@ -116,9 +110,7 @@ export function createGlassPass(gl: WebGLRenderingContext) {
       gl.uniform1f(location.energy, frame.energy)
       gl.uniform1f(location.tone, frame.tone)
       gl.uniform2f(location.origin, frame.rippleX, frame.rippleY)
-      gl.uniform1f(location.opening, frame.openingAge)
       gl.uniform1f(location.ripple, frame.rippleAge)
-      gl.uniform1f(location.direction, frame.direction)
       gl.uniform1f(location.full, Number(frame.full))
       const defaultBase: [number, number, number] = frame.tone > .5 ? [.22, .38, .66] : [.52, .73, .98]
       const defaultRim: [number, number, number] = frame.tone > .5 ? [.44, .58, .82] : [.91, .95, 1]

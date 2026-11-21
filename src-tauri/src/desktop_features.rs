@@ -20,6 +20,7 @@ pub struct IslandAppearance {
     pub opacity: u32,
     pub tint: String,
     pub preset: String,
+    pub motion: String,
     pub avoid_fullscreen: bool,
     pub auto_check_updates: bool,
     pub webgl: bool,
@@ -36,6 +37,7 @@ impl Default for IslandAppearance {
             opacity: 100,
             tint: String::new(),
             preset: "classic".into(),
+            motion: "glide".into(),
             avoid_fullscreen: true,
             auto_check_updates: false,
             webgl: true,
@@ -61,12 +63,19 @@ impl IslandAppearance {
         matches!(mode, "off" | "smart" | "always")
     }
 
+    pub fn valid_motion_mode(mode: &str) -> bool {
+        matches!(mode, "glide" | "sweep" | "bounce" | "step" | "flicker" | "unroll")
+    }
+
     pub fn has_any_telemetry_metric(&self) -> bool {
         self.telemetry_net || self.telemetry_cpu || self.telemetry_memory
     }
 
     pub fn normalized_on_load(mut self) -> Self {
         self = self.solid();
+        if !Self::valid_motion_mode(&self.motion) {
+            self.motion = "glide".into();
+        }
         if !Self::valid_telemetry_mode(&self.telemetry_mode) {
             self.telemetry_mode = "smart".into();
         }
@@ -94,6 +103,9 @@ pub fn save_island_appearance(
         || !matches!(anchor.as_str(), "left" | "center" | "right")
     {
         return Err("无效的外观参数".into());
+    }
+    if !IslandAppearance::valid_motion_mode(&appearance.motion) {
+        return Err("无效的动态效果模式".into());
     }
     if !IslandAppearance::valid_telemetry_mode(&appearance.telemetry_mode) {
         return Err("无效的胶囊微读数模式".into());

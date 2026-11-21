@@ -1,4 +1,5 @@
-export type ThemeMode = 'system' | 'light' | 'dark' | 'midnight' | 'mecha' | 'scroll' | 'pixel'
+import type { ThemeMode } from '@/lib/themes'
+export type { ThemeMode }
 
 export interface Category {
   id: string

@@ -26,6 +26,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
 import { isDarkTheme, pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
+import { isMotionMode, MOTION_TIMINGS, type MotionMode } from '@/lib/motions'
 
 const props = defineProps<{
   previewFeedback?: { kind: string; sequence: number }
@@ -55,19 +56,27 @@ function resolveVariant(mode = state.settings.theme): IslandVariant {
   if (mode === 'mecha') return 'mecha'
   if (mode === 'scroll') return 'scroll'
   if (mode === 'pixel') return 'pixel'
+  if (mode === 'blueprint') return 'blueprint'
+  if (mode === 'neon') return 'neon'
+  if (mode === 'clay') return 'clay'
   return 'standard'
 }
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 const dark = ref(isDarkTheme())
 const variant = ref<IslandVariant>(resolveVariant())
 const telemetry = computed(() => variant.value === 'telemetry')
-const glassPalette = computed<'cool' | 'amber' | 'vermilion' | 'lime'>(() => {
+const glassPalette = computed<'cool' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'>(() => {
   if (variant.value === 'mecha') return 'amber'
   if (variant.value === 'scroll') return 'vermilion'
   if (variant.value === 'pixel') return 'lime'
+  if (variant.value === 'blueprint') return 'chalk'
+  if (variant.value === 'neon') return 'neon'
+  if (variant.value === 'clay') return 'candy'
   return 'cool'
 })
-const scanSeq = ref(0)
+/** 霓虹招牌与软糖表情随胶囊状态切换，只做装饰，读屏仍以状态文字为准。 */
+const neonSign = computed(() => ({ working: '加班中', paused: '打烊', feedback: '好嘞', mail: '来信', approval: '请示', files: '寄存' } as Record<string, string>)[capsuleStatus.value.kind] ?? '营业中')
+const clayFace = computed(() => ({ working: '•̀ᴗ•́', paused: '-ᴗ-', feedback: '^ᴗ^', mail: '•o•', approval: '•﹏•', files: '•ᴗ•' } as Record<string, string>)[capsuleStatus.value.kind] ?? 'ᵔᴗᵔ')
 const hostExpanded = computed(() => state.ui.islandExpanded)
 const mailNotices = useMailList<MailNotice>('bar', 'mail_notices', 'mail-notices-changed', message => pushToast(message, 'error'))
 const mailSelected = ref(false)
@@ -86,20 +95,18 @@ const suppressed = computed(() => state.ui.fullscreenSuppressed)
 const hoverClosing = ref(false)
 const expanded = computed(() => !!approval.value || (hostExpanded.value && !hoverClosing.value))
 watch([mailNotices, viewingMail, expanded, approval], ([items, selected, open, prompt]) => {
+  if (!items.length) mailSelected.value = false
   const ids = items.map(item => item.id)
   seenMail.value = selected && open && !prompt ? ids : seenMail.value.filter(id => ids.includes(id))
 })
 // 避让只决定收起形态；细线也能悬停展开。
 const tucked = computed(() => suppressed.value && !expanded.value)
-const expandMs = 340
-const collapseMs = 195
+const expandMs = computed(() => MOTION_TIMINGS[motionMode.value].expandMs)
+const collapseMs = computed(() => MOTION_TIMINGS[motionMode.value].collapseMs)
 const geometryMoving = ref(false)
 const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(systemMotion.matches)
 const motionReduced = computed(() => state.ui.islandReducedMotion || reducedMotion.value)
-watch(expanded, (value, previous) => {
-  if (value && !previous && (telemetry.value || variant.value === 'mecha') && !motionReduced.value) scanSeq.value++
-})
 const materialRequested = computed(() => state.ui.islandAppearance.webgl !== false)
 const { active: effectsActive, cue, signal, quality, plainMaterial } = useIslandEffects(panel, tucked, motionReduced, materialRequested)
 const shape = computed(() => tucked.value ? 'line' : expanded.value ? 'expanded' : 'compact')
@@ -188,6 +195,10 @@ function setReadingExplanation(active: boolean) {
 const keepTaskOpen = computed(() => !viewingMail.value &&
   (page.value === 'translation' || (page.value === 'clipboard' && readingExplanation.value)))
 const appearance = computed(() => state.ui.islandAppearance)
+const motionMode = computed<MotionMode>(() => {
+  const raw = appearance.value.motion
+  return isMotionMode(raw) ? raw : 'glide'
+})
 const materialAllowed = computed(() => materialRequested.value && !motionReduced.value && !plainMaterial.value)
 const materialReady = ref(false)
 watch([effectsActive, materialAllowed], ([active, allowed]) => {
@@ -208,7 +219,10 @@ const visibleWidth = computed(() => {
       telemetry: [[158, 136], [204, 184], [256, 234]],
       scroll: [[178, 156], [226, 206], [278, 256]],
       mecha: [[190, 168], [240, 220], [292, 270]],
-      pixel: [[204, 182], [258, 238], [312, 290]]
+      pixel: [[204, 182], [258, 238], [312, 290]],
+      blueprint: [[196, 174], [248, 228], [300, 280]],
+      neon: [[200, 178], [252, 232], [304, 284]],
+      clay: [[176, 156], [226, 206], [278, 258]]
     }
     const [base, floor] = table[variant.value][Math.min(2, Math.max(0, count - 1))]
     return Math.min(availableWidth.value - 24, Math.max(floor, Math.round(base * scale.value)))
@@ -217,17 +231,22 @@ const visibleWidth = computed(() => {
   if (variant.value === 'telemetry') return (idle ? 148 : 186) * scale.value
   if (variant.value === 'mecha' || variant.value === 'pixel') return (idle ? 176 : 208) * scale.value
   if (variant.value === 'scroll') return (idle ? 164 : 196) * scale.value
+  if (variant.value === 'blueprint' || variant.value === 'neon') return (idle ? 184 : 216) * scale.value
+  if (variant.value === 'clay') return (idle ? 168 : 200) * scale.value
   return (idle ? 128 : 168) * scale.value
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
-const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, scroll: 9, pixel: 9 }
-const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, scroll: 34, pixel: 36 }
+const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, scroll: 9, pixel: 9, blueprint: 8, neon: 6, clay: 8 }
+const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, scroll: 34, pixel: 36, blueprint: 34, neon: 34, clay: 36 }
 const visibleHeight = computed(() => expanded.value
   ? Math.min(44 + (approval.value ? 0 : chromeHeight.value) + (!approval.value && !viewingMail.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value), window.screen.availHeight - 60)
   : (suppressed.value ? lineHeights[variant.value] : compactHeights[variant.value]) * scale.value)
 const cornerRadius = computed(() => {
   if (variant.value === 'mecha' || variant.value === 'scroll' || variant.value === 'pixel') return 4
-  const base = expanded.value ? (telemetry.value ? 12 : 18) : tucked.value ? (telemetry.value ? 4 : 5) : (telemetry.value ? 10 : 24)
+  if (variant.value === 'blueprint') return 2
+  const base = expanded.value
+    ? (telemetry.value ? 12 : variant.value === 'clay' ? 28 : variant.value === 'neon' ? 20 : 18)
+    : tucked.value ? (telemetry.value ? 4 : 5) : (telemetry.value ? 10 : 24)
   return Math.min(base, visibleHeight.value / 2, visibleWidth.value / 2)
 })
 const bounds = computed(() => ({
@@ -242,8 +261,8 @@ const viewportStyle = computed(() => ({
 const rootStyle = computed(() => ({
   width: `${bounds.value.width}px`,
   height: `${bounds.value.height}px`,
-  '--collapse-time': `${collapseMs}ms`,
-  '--expand-time': `${expandMs}ms`,
+  '--collapse-time': `${collapseMs.value}ms`,
+  '--expand-time': `${expandMs.value}ms`,
   '--content-width': `${expandedWidth.value - 24}px`,
   '--capsule-height': `${compactHeights[variant.value] * scale.value}px`,
   '--page-index': Math.max(0, sections.findIndex(section => section.value === page.value)),
@@ -346,7 +365,7 @@ function reserveGeometry(): void {
     viewportSize.value = { ...bounds.value }
     geometryMoving.value = false
     queueGeometry()
-  }, (expanded.value ? expandMs : collapseMs) + 50)
+  }, (expanded.value ? expandMs.value : collapseMs.value) + 50)
 }
 
 watch([bounds, () => state.ui.islandReducedMotion, reducedMotion], reserveGeometry)
@@ -418,7 +437,7 @@ function startHoverClose(): void {
     if (!hoverClosing.value) return
     if (hovering.value || editing()) cancelHoverClose()
     else expand(false)
-  }, collapseMs + 34)
+  }, collapseMs.value + 34)
 }
 
 function scheduleHoverOpen(): void {
@@ -707,19 +726,18 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" class="island-viewport" :class="`anchor-${state.ui.islandAnchor}`" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
-    :class="[{ expanded, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed }, `variant-${variant}`]"
+    :class="[{ expanded, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed }, `variant-${variant}`, `motion-${motionMode}`]"
     :style="rootStyle" aria-label="顶部灵动岛"
     @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
-    <div ref="panel" class="island solid-surface" :class="[{ expanded, tucked: !revealed, telemetry }, `variant-${variant}`]"
+    <div ref="panel" class="island solid-surface" :data-motion="motionMode" :class="[{ expanded, tucked: !revealed, telemetry }, `variant-${variant}`, `motion-${motionMode}`]"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
       <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" />
       <GlassLight v-if="materialReady && glassAvailable"
-        :light-surface="!dark" :signal="taskSignal" :expanded="expanded" :quality="quality" :active="effectsActive" :corner-radius="cornerRadius" :palette="glassPalette" @unavailable="glassAvailable = false" />
+        :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :corner-radius="cornerRadius" :palette="glassPalette" @unavailable="glassAvailable = false" />
       <IslandParticles v-if="materialReady"
-        :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" />
-      <span v-if="(telemetry || variant === 'mecha') && scanSeq && expanded && !motionReduced" :key="scanSeq" class="telemetry-scan" aria-hidden="true" />
+        :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" :motion="motionMode" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
       <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
         :title="!expanded && capsuleStatus.tooltip ? capsuleStatus.tooltip : undefined"
@@ -731,6 +749,9 @@ onBeforeUnmount(() => {
           <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
           <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : capsuleStatus.kind === 'telemetry' ? '巡' : '安' }}</span>
           <span v-else-if="variant === 'pixel' && !expanded" class="pixel-hp">♥HP</span>
+          <span v-else-if="variant === 'blueprint' && !expanded" class="bp-tag">图 01</span>
+          <span v-else-if="variant === 'neon' && !expanded" class="neon-sign">{{ neonSign }}</span>
+          <span v-else-if="variant === 'clay' && !expanded" class="clay-face">{{ clayFace }}</span>
           <span class="capsule-label" :class="{ 'is-telemetry': capsuleStatus.kind === 'telemetry' }">
             <template v-if="capsuleStatus.kind === 'telemetry' && telemetryReadout">
               <template v-for="(seg, idx) in telemetryReadout.segments" :key="idx">
@@ -745,6 +766,9 @@ onBeforeUnmount(() => {
           <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
           <span v-else-if="variant === 'scroll' && !expanded" class="scroll-knot" />
           <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
+          <span v-else-if="variant === 'blueprint' && !expanded" class="bp-scale">1:1</span>
+          <span v-else-if="variant === 'neon' && !expanded" class="neon-hours">24H</span>
+          <span v-else-if="variant === 'clay' && !expanded" class="clay-dots"><i /><i /><i /></span>
         </span>
         <span class="grip" aria-hidden="true" />
       </button>
@@ -761,7 +785,7 @@ onBeforeUnmount(() => {
               </button>
             </nav>
             <div class="tools">
-              <button v-if="mailNotices.length" class="round-action" type="button" :title="mailSummary || '最近邮件'" :aria-label="mailSummary || '最近邮件'" :aria-pressed="viewingMail" @click="mailSelected = !viewingMail"><Icon name="mail" :size="19" /></button>
+              <button v-if="mailNotices.length" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="mailSelected = !viewingMail"><Icon name="mail" :size="19" /></button>
               <button v-if="!viewingMail && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="19" /></button>
               <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="21" /></button>
               <button class="round-action collapse-action" type="button" title="收起" aria-label="收起灵动岛" @click="expand(false)"><Icon name="chevron-down" :size="20" /></button>
@@ -813,6 +837,9 @@ onBeforeUnmount(() => {
 .island-viewport > .island-hit-area { position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
 .island-viewport.anchor-left > .island-hit-area { left: 0; transform: none; }
 .island-viewport.anchor-right > .island-hit-area { left: auto; right: 0; transform: none; }
+.island-hit-area, .island {
+  --size-transition: width var(--geometry-time) var(--width-ease, var(--geometry-ease)), height var(--geometry-time) var(--height-ease, var(--geometry-ease));
+}
 .island-hit-area {
   --geometry-time: var(--expand-time);
   --geometry-ease: cubic-bezier(.2, .9, .25, 1);
@@ -821,7 +848,7 @@ onBeforeUnmount(() => {
   --surface-inset: 2px;
   position: relative;
   flex: none;
-  transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), opacity 110ms;
+  transition: var(--size-transition), opacity 110ms;
 }
 .island-hit-area.dark { --island-shadow: rgb(0 0 0 / .5); --island-outline: rgb(255 255 255 / .14); }
 .island-hit-area.expanded { --surface-inset: 12px; }
@@ -844,7 +871,7 @@ onBeforeUnmount(() => {
   position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%);
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   box-shadow: inset 0 1px 0 var(--island-top-sheen);
-  transition: width var(--geometry-time) var(--geometry-ease), height var(--geometry-time) var(--geometry-ease), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
+  transition: var(--size-transition), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
 .island.expanded { border-radius: 18px; }
 .island.tucked { border-radius: 5px; box-shadow: none; }
@@ -854,11 +881,11 @@ onBeforeUnmount(() => {
   position: relative; z-index: 3; display: flex; align-items: center; justify-content: center;
   height: 24px; width: 156px; margin: 0 auto; white-space: nowrap; font-size: 12px;
   cursor: grab; touch-action: none; user-select: none;
+  transition: height var(--geometry-time) var(--height-ease, var(--geometry-ease)), opacity 110ms ease-out 40ms;
 }
 .capsule:active { transform: none; }
 .window-dragging .capsule { cursor: grabbing; }
 .island:not(.expanded) .capsule { height: var(--capsule-height); width: 100%; }
-.island-hit-area:not(.desktop) .island .capsule { transition: opacity 110ms ease-out 40ms; }
 .island-hit-area:not(.desktop) .island.tucked .capsule {
   visibility: visible;
   opacity: 0;
@@ -867,32 +894,32 @@ onBeforeUnmount(() => {
 .capsule-text {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px;
   font-weight: 600; letter-spacing: .22px; font-variant-numeric: tabular-nums; color: var(--text);
-  transition: opacity 110ms ease-out 55ms, transform 150ms var(--geometry-ease);
+  transition: opacity calc(var(--geometry-time) * .46) ease-out calc(var(--geometry-time) * .42), transform calc(var(--geometry-time) * .78) var(--geometry-ease);
 }
-.expanded .capsule-text:not(.feedback) { opacity: 0; transform: translateY(-3px) scale(.96); transition: opacity 65ms ease-out, transform 90ms ease-out; }
+.expanded .capsule-text:not(.feedback) { opacity: 0; transform: translateY(-3px) scale(.96); transition: opacity calc(var(--geometry-time) * .22) ease-out, transform calc(var(--geometry-time) * .32) ease-out; }
 .capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }
 .capsule-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .grip {
   position: absolute; width: 32px; height: 3px; border-radius: 8px;
   background: currentColor; opacity: 0; transform: scaleX(.72);
-  transition: opacity 85ms ease-out, transform 130ms var(--geometry-ease);
+  transition: opacity calc(var(--geometry-time) * .36) ease-out, transform calc(var(--geometry-time) * .52) var(--geometry-ease);
 }
-.expanded .grip { opacity: .28; transform: scaleX(1); transition: opacity 130ms ease-out 75ms, transform 180ms var(--geometry-ease) 55ms; }
+.expanded .grip { opacity: .28; transform: scaleX(1); transition-delay: calc(var(--geometry-time) * .18); }
 .expanded .capsule:hover .grip { opacity: .62; transform: scaleX(1.12); }
 .capsule.has-feedback .grip { opacity: 0; }
 .expanded-content {
-  position: relative; z-index: 3; width: var(--content-width); max-height: calc(100% - 24px);
-  overflow: hidden; padding: 0 18px 18px; opacity: 0;
-  transform: translateY(-6px); clip-path: inset(0 0 100% round 18px);
-  transition: opacity 95ms ease-out, transform var(--collapse-time) var(--geometry-ease), clip-path var(--collapse-time) var(--geometry-ease);
+  --content-gutter: 18px;
+  position: relative; z-index: 3; width: 100%; max-height: calc(100% - 24px);
+  overflow: hidden; padding: 0 var(--content-gutter) 18px;
 }
-.expanded .expanded-content {
-  overflow-y: auto; opacity: 1; transform: none; clip-path: inset(0 round 18px);
-  transition: opacity 170ms ease-out 35ms, transform var(--expand-time) var(--geometry-ease), clip-path var(--expand-time) var(--geometry-ease);
-}
+.expanded .expanded-content { overflow-y: auto; }
 .moving .expanded-content { overflow-y: hidden; }
 .island-chrome { display: flow-root; }
-.island-content { width: 100%; }
+/* 工具栏随外壳分配可用宽度，正文维持最终列宽，开合途中不会反复换行。 */
+.island-content {
+  position: relative; left: 50%; translate: -50% 0;
+  width: calc(var(--content-width) - 2 * var(--content-gutter));
+}
 .ordinary-pane { display: contents; }
 .island-pane-enter-active { transition: opacity 150ms cubic-bezier(.2, .9, .25, 1), transform 160ms cubic-bezier(.2, .9, .25, 1); }
 .island-pane-leave-active { transition: opacity 85ms ease-out, transform 85ms ease-out; }
@@ -909,6 +936,7 @@ onBeforeUnmount(() => {
 }
 .collapse-action svg { transform: rotate(180deg); }
 .round-action:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
+.tools .round-action[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
 .categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 80px; overflow-y: auto; margin: 0 0 10px; padding: 2px; }
 .categories button { flex: none; padding: 5px 12px; border-radius: 20px; border: 1px solid transparent; min-height: 32px; font-size: 13px; color: var(--text-2); }
 .categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line-strong); }
@@ -987,8 +1015,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .feature-pane :deep(.seg-btn.is-active) { box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 2px rgb(0 0 0 / .06); }
 .feature-pane :deep(.textarea) { border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color 120ms ease, box-shadow 120ms ease; }
 .feature-pane :deep(.textarea:focus-visible) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
-.compact .expanded-content { padding-inline: 18px; }
-.narrow .expanded-content { padding-inline: 14px; }
+.narrow .expanded-content { --content-gutter: 14px; }
 .narrow .categories { gap: 2px; }
 .narrow .categories button { padding: 5px 10px; }
 
@@ -996,12 +1023,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @keyframes telemetryPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: .42; transform: scale(.8); }
-}
-@keyframes telemetrySweep {
-  0% { transform: translateX(-80px); opacity: 0; }
-  20% { opacity: 1; }
-  80% { opacity: 1; }
-  100% { transform: translateX(520px); opacity: 0; }
 }
 .island.telemetry { border-radius: 10px; }
 .island.telemetry.expanded { border-radius: 12px; }
@@ -1016,11 +1037,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .telemetry-led.telemetry { background: var(--accent); box-shadow: 0 0 9px var(--accent); animation-duration: 1.5s; }
 .telemetry-led.feedback { background: var(--success); box-shadow: 0 0 8px var(--success); animation: none; }
 .telemetry-led.paused { background: var(--text-3); box-shadow: none; animation: none; opacity: .75; }
-.telemetry-scan {
-  position: absolute; inset: 0 auto 0 0; width: 84px; z-index: 2; pointer-events: none;
-  background: linear-gradient(90deg, transparent, rgba(109, 182, 255, .24), transparent);
-  animation: telemetrySweep 460ms cubic-bezier(.22, .61, .36, 1) forwards;
-}
 .telemetry .grip { height: 2px; width: 34px; border-radius: 1px; background: var(--accent); }
 .telemetry .mode-selection {
   border-radius: 6px;
@@ -1108,7 +1124,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   clip-path: polygon(13px 0, calc(100% - 13px) 0, 100% 13px, 100% calc(100% - 13px), calc(100% - 13px) 100%, 13px 100%, 0 calc(100% - 13px), 0 13px);
 }
 .island.variant-mecha.tucked { clip-path: none; }
-.variant-mecha .telemetry-scan { background: linear-gradient(90deg, transparent, rgba(245, 158, 11, .3), transparent); }
 .variant-mecha:not(.expanded) .capsule-text { width: 100%; justify-content: space-between; padding: 0 12px; font-family: var(--font-mono); font-size: 12px; }
 .mecha-badge {
   padding: 1px 5px; font-size: 10px; font-weight: 800; letter-spacing: .04em;
@@ -1301,3 +1316,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .fixed-search .feature-pane { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .fixed-search .feature-pane :deep(.pop) { height: 420px; min-height: 0; max-height: 420px; }
 </style>
+
+<!-- 蓝晒图纸、霓虹夜行与软糖黏土三套大胆主题的灵动岛外形 -->
+<style scoped src="./bold-variants.css"></style>
+
+<!-- 6 套独立于外观主题的灵动岛动态效果 -->
+<style scoped src="./motion-variants.css"></style>

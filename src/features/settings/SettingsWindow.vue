@@ -24,10 +24,13 @@ import {
   closeSettings,
   pushToast,
   setPaused,
+  setMotion,
   setTheme,
   state,
 } from '@/store'
 import type { ThemeMode, TranslateDirection } from '@/lib/desktop/types'
+import { THEME_LABELS, THEME_MODES } from '@/lib/themes'
+import { isMotionMode, MOTION_DESCRIPTIONS, MOTION_LABELS, MOTION_MODES, type MotionMode } from '@/lib/motions'
 import { translationProviderPresets } from '@/lib/desktop/providers'
 import { isDesktop } from '@/lib/desktop/desktop'
 import { useWindowDrag } from '@/lib/useWindowDrag'
@@ -58,15 +61,12 @@ const sections: { id: SettingsSection; label: string }[] = [
   { id: 'approvals', label: '智能体连接' }
 ]
 
-const themeOptions: { value: ThemeMode; label: string }[] = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
-  { value: 'midnight', label: '星舰仪表' },
-  { value: 'mecha', label: '琥珀重工' },
-  { value: 'scroll', label: '海棠书卷' },
-  { value: 'pixel', label: '像素掌机' }
-]
+const themeOptions: { value: ThemeMode; label: string }[] = THEME_MODES.map(value => ({ value, label: THEME_LABELS[value] }))
+const motionOptions: { value: MotionMode; label: string }[] = MOTION_MODES.map(value => ({ value, label: MOTION_LABELS[value] }))
+const currentMotion = computed<MotionMode>(() => {
+  const raw = state.ui.islandAppearance.motion
+  return isMotionMode(raw) ? raw : 'glide'
+})
 
 const directionOptions: { value: TranslateDirection; label: string }[] = [
   { value: 'zh-en', label: '中 → 英' },
@@ -608,6 +608,30 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
                         :value="opt.value"
                         :checked="state.settings.theme === opt.value"
                         @change="onThemeChange(opt.value)"
+                      />
+                      <span>{{ opt.label }}</span>
+                    </label>
+                  </span>
+                </div>
+                <div class="set-row set-row-stack">
+                  <span class="set-text">
+                    <span class="set-label">动态效果</span>
+                    <span class="set-desc">独立于显示主题自由搭配：{{ MOTION_DESCRIPTIONS[currentMotion] }}</span>
+                  </span>
+                  <span class="seg" role="radiogroup" aria-label="动态效果">
+                    <label
+                      v-for="opt in motionOptions"
+                      :key="opt.value"
+                      class="seg-item"
+                      :class="{ 'is-on': currentMotion === opt.value }"
+                    >
+                      <input
+                        class="sr-only"
+                        type="radio"
+                        name="settings-motion"
+                        :value="opt.value"
+                        :checked="currentMotion === opt.value"
+                        @change="setMotion(opt.value)"
                       />
                       <span>{{ opt.label }}</span>
                     </label>

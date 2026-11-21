@@ -1,0 +1,142 @@
+/* 外壳负责裁切。工具栏和正文保持展开时的排版，沿各自的过渡衔接到胶囊。 */
+.island-chrome,
+.island-content {
+  opacity: 0;
+  transform-origin: 50% 0;
+  transition: opacity calc(var(--geometry-time) * .42) ease-out,
+              transform calc(var(--geometry-time) * .72) var(--content-ease, var(--geometry-ease));
+}
+.island-chrome { transform: translateY(-4px); }
+.island:not(.expanded) .island-chrome { transition-delay: calc(var(--geometry-time) * .1); }
+.island-content { transform: var(--folded-content, translateY(-8px)); }
+.island.expanded .island-chrome,
+.island.expanded .island-content {
+  opacity: 1;
+  transform: none;
+}
+.island.expanded .island-chrome { transition-delay: var(--toolbar-delay, 20ms); }
+.island.expanded .island-content { transition-delay: var(--body-delay, 52ms); }
+
+/* 柔和舒展：从胶囊的中心向两侧舒展，底边稍后跟上。 */
+.island-hit-area.motion-glide.expanded {
+  --width-ease: cubic-bezier(.18, .82, .22, 1);
+  --height-ease: cubic-bezier(.32, .58, .24, 1);
+}
+.island-hit-area.motion-glide:not(.expanded) {
+  --width-ease: cubic-bezier(.38, .04, .35, 1);
+  --height-ease: cubic-bezier(.26, .74, .34, 1);
+}
+
+/* 分段展开：先把胶囊拉成横条，再放下内容；收起时先合上高度。 */
+.island-hit-area.motion-sweep.expanded {
+  --width-ease: linear(0, .48 12%, .86 26%, 1 44%, 1);
+  --height-ease: linear(0, .02 24%, .10 36%, .56 56%, .89 76%, 1);
+  --toolbar-delay: 68ms;
+  --body-delay: 106ms;
+}
+.island-hit-area.motion-sweep:not(.expanded) {
+  --width-ease: linear(0, .03 30%, .17 46%, .82 78%, 1);
+  --height-ease: cubic-bezier(.13, .91, .2, 1);
+}
+.motion-sweep .mode-selection {
+  transition-duration: 140ms;
+  transition-timing-function: cubic-bezier(.12, 1, .22, 1);
+}
+.motion-sweep .island-pane-enter-active {
+  transition: opacity 130ms cubic-bezier(.16, 1, .3, 1), transform 145ms cubic-bezier(.16, 1, .3, 1);
+}
+.motion-sweep .island-pane-enter-from { opacity: 0; transform: translateX(-18px); }
+.motion-sweep .island-pane-leave-to { opacity: 0; transform: translateX(14px); }
+
+/* 轻弹回落：横向先到位，下缘轻轻越过终点再收稳，工具栏不随外壳拉伸。 */
+.island-hit-area.motion-bounce.expanded {
+  --width-ease: cubic-bezier(.16, .92, .24, 1);
+  --height-ease: linear(0, .11 8%, .6 23%, .95 38%, 1.018 48%, .973 66%, 1 85%, 1);
+  --content-ease: cubic-bezier(.2, 1.24, .38, 1);
+}
+.island-hit-area.motion-bounce:not(.expanded) {
+  --width-ease: cubic-bezier(.46, .04, .38, 1);
+  --height-ease: cubic-bezier(.2, .86, .28, 1);
+  --folded-content: translateY(-10px) scale(.97);
+}
+.motion-bounce .mode-selection {
+  transition-duration: 340ms;
+  transition-timing-function: cubic-bezier(.34, 1.72, .58, 1);
+}
+.motion-bounce .island-pane-enter-active {
+  transition: opacity 200ms ease-out, transform 340ms cubic-bezier(.34, 1.68, .56, 1);
+}
+.motion-bounce .island-pane-enter-from { opacity: 0; transform: translateY(16px) scale(.88); }
+.motion-bounce .island-pane-leave-to { opacity: 0; transform: translateY(-10px) scale(.94); }
+
+/* 逐级开合：宽与高错开半拍进位，台阶落在真实边界上。 */
+.island-hit-area.motion-step {
+  --half-step: linear(0, 0 12.5%, .25 12.5%, .25 37.5%, .5 37.5%, .5 62.5%, .75 62.5%, .75 87.5%, 1 87.5%, 1);
+  --folded-content: translateY(-4px);
+}
+.island-hit-area.motion-step.expanded {
+  --width-ease: steps(4, jump-start);
+  --height-ease: var(--half-step);
+  --content-ease: steps(4, jump-end);
+}
+.island-hit-area.motion-step:not(.expanded) {
+  --width-ease: steps(4, jump-end);
+  --height-ease: var(--half-step);
+}
+.motion-step .mode-selection {
+  transition-duration: 210ms;
+  transition-timing-function: steps(4, end);
+}
+.motion-step .capsule-text,
+.motion-step .grip {
+  transition-timing-function: steps(3, end);
+}
+.motion-step .island-pane-enter-active {
+  transition: opacity 220ms steps(4, end), transform 220ms steps(4, end);
+}
+.motion-step .island-pane-leave-active {
+  transition: opacity 130ms steps(3, end), transform 130ms steps(3, end);
+}
+.motion-step .island-pane-enter-from { opacity: 0; transform: translateY(14px); }
+.motion-step .island-pane-leave-to { opacity: 0; transform: translateY(-10px); }
+
+/* 快速开合：四边同时到位，功能按钮在第一拍就可辨认。 */
+.island-hit-area.motion-flicker {
+  --toolbar-delay: 0ms;
+  --body-delay: 0ms;
+  --folded-content: none;
+  --width-ease: cubic-bezier(.12, .84, .2, 1);
+  --height-ease: var(--width-ease);
+}
+.motion-flicker .mode-selection {
+  transition-duration: 165ms;
+  transition-timing-function: cubic-bezier(.16, 1, .3, 1);
+}
+.motion-flicker .island-pane-enter-active {
+  transition: opacity 120ms ease-out, transform 150ms cubic-bezier(.16, 1, .3, 1);
+}
+.motion-flicker .island-pane-enter-from { opacity: 0; transform: translateY(3px); }
+
+/* 垂直抽展：底边先向下打开，两侧随后展开；正文只随可见区域露出。 */
+.island-hit-area.motion-unroll {
+  --folded-content: none;
+  --toolbar-delay: 44ms;
+  --body-delay: 124ms;
+}
+.island-hit-area.motion-unroll.expanded {
+  --width-ease: cubic-bezier(.35, .22, .28, 1);
+  --height-ease: cubic-bezier(.18, .86, .28, 1);
+}
+.island-hit-area.motion-unroll:not(.expanded) {
+  --width-ease: cubic-bezier(.2, .78, .32, 1);
+  --height-ease: cubic-bezier(.54, .08, .44, 1);
+}
+.motion-unroll .mode-selection {
+  transition-duration: 280ms;
+  transition-timing-function: cubic-bezier(.22, .68, .18, 1);
+}
+.motion-unroll .island-pane-enter-active {
+  transition: opacity 260ms cubic-bezier(.22, .68, .18, 1), transform 280ms cubic-bezier(.22, .68, .18, 1);
+}
+.motion-unroll .island-pane-enter-from { opacity: 0; transform: translateY(-14px); }
+.motion-unroll .island-pane-leave-to { opacity: 0; transform: translateY(10px); }

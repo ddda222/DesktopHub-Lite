@@ -9,13 +9,23 @@ const controls = '.capsule, .app-tile, .mode-nav button, .round-action'
 const spring = (): Spring => ({ value: 0, velocity: 0, target: 0 })
 const bound = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value))
 
-export function advanceSpring(axis: Spring, seconds: number): boolean {
+type MotionPhysicsProfile = { damping: number; omega: number; pressScale: number; stepPx: number }
+const MOTION_PROFILES: Record<string, MotionPhysicsProfile> = {
+  glide: { damping: 18, omega: 12, pressScale: 0.07, stepPx: 0 },
+  sweep: { damping: 24, omega: 16, pressScale: 0.05, stepPx: 0 },
+  bounce: { damping: 10, omega: 18, pressScale: 0.11, stepPx: 0 },
+  step: { damping: 26, omega: 14, pressScale: 0.08, stepPx: 1.5 },
+  flicker: { damping: 15, omega: 15, pressScale: 0.07, stepPx: 0 },
+  unroll: { damping: 20, omega: 9, pressScale: 0.05, stepPx: 0 }
+}
+
+export function advanceSpring(axis: Spring, seconds: number, damping = 18, omega = 12): boolean {
   const offset = axis.value - axis.target
-  const decay = Math.exp(-18 * seconds)
-  const cos = Math.cos(12 * seconds), sin = Math.sin(12 * seconds)
-  const phase = (axis.velocity + 18 * offset) / 12
+  const decay = Math.exp(-damping * seconds)
+  const cos = Math.cos(omega * seconds), sin = Math.sin(omega * seconds)
+  const phase = (axis.velocity + damping * offset) / omega
   axis.value = axis.target + decay * (offset * cos + phase * sin)
-  axis.velocity = decay * (axis.velocity * cos - (18 * phase + 12 * offset) * sin)
+  axis.velocity = decay * (axis.velocity * cos - (damping * phase + omega * offset) * sin)
   if (Math.abs(axis.value - axis.target) > .002 || Math.abs(axis.velocity) > .03) return true
   axis.value = axis.target
   axis.velocity = 0
@@ -57,6 +67,7 @@ export function createIslandPhysics(panel: HTMLElement) {
     }
     const seconds = Math.min(.064, Math.max(0, now - previous) / 1000)
     previous = now
+    const profile = MOTION_PROFILES[panel.dataset.motion || 'glide'] ?? MOTION_PROFILES.glide
     let moving = false
     for (const effect of effects.values()) {
       const { visual, x, y, press: depth } = effect
@@ -67,14 +78,18 @@ export function createIslandPhysics(panel: HTMLElement) {
         if (press?.effect === effect) press = undefined
         continue
       }
-      const mx = advanceSpring(x, seconds), my = advanceSpring(y, seconds), mp = advanceSpring(depth, seconds)
+      const mx = advanceSpring(x, seconds, profile.damping, profile.omega)
+      const my = advanceSpring(y, seconds, profile.damping, profile.omega)
+      const mp = advanceSpring(depth, seconds, profile.damping, profile.omega)
       if (!mx && !my && !mp && !x.value && !y.value && !depth.value) {
         visual.style.transform = effect.original
         if (current !== effect && press?.effect !== effect) effects.delete(visual)
         continue
       }
-      const tilt = effect.card ? 'perspective(120px) rotateX(' + (-y.value * 2).toFixed(2) + 'deg) rotateY(' + (x.value * 1.6).toFixed(2) + 'deg) ' : ''
-      visual.style.transform = 'translate3d(' + x.value.toFixed(2) + 'px,' + y.value.toFixed(2) + 'px,0) ' + tilt + 'scale(' + (1 - depth.value * .07).toFixed(3) + ')' + effect.restTransform
+      const tx = profile.stepPx > 0 ? Math.round(x.value / profile.stepPx) * profile.stepPx : x.value
+      const ty = profile.stepPx > 0 ? Math.round(y.value / profile.stepPx) * profile.stepPx : y.value
+      const tilt = effect.card ? 'perspective(120px) rotateX(' + (-ty * 2).toFixed(2) + 'deg) rotateY(' + (tx * 1.6).toFixed(2) + 'deg) ' : ''
+      visual.style.transform = 'translate3d(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px,0) ' + tilt + 'scale(' + (1 - depth.value * profile.pressScale).toFixed(3) + ')' + effect.restTransform
       moving ||= mx || my || mp
     }
     if (moving) frame = requestAnimationFrame(tick)

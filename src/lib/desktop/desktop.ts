@@ -12,6 +12,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen as tauriListen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AppConfig, MixerVisibility } from '@/lib/desktop/types'
+import type { MotionMode } from '@/lib/motions'
 
 /** 是否运行在 Tauri 桌面外壳里；false 表示浏览器里的交互样稿。 */
 export const isDesktop: boolean =
@@ -39,6 +40,7 @@ export interface IslandAppearance {
   opacity: number
   tint: string
   preset: 'classic' | 'glass'
+  motion: MotionMode
   avoidFullscreen: boolean
   autoCheckUpdates: boolean
   webgl: boolean
@@ -55,6 +57,7 @@ export function defaultIslandAppearance(): IslandAppearance {
     opacity: 100,
     tint: '',
     preset: 'classic',
+    motion: 'glide',
     avoidFullscreen: true,
     autoCheckUpdates: false,
     webgl: true,
@@ -197,6 +200,12 @@ export async function requestCategory(categoryId: string): Promise<void> {
 export async function requestTheme(theme: string): Promise<void> {
   if (!isDesktop) return
   await invokeHost('set_theme', { theme })
+}
+
+/** 切换灵动岛独立动态效果（跨窗口状态）。 */
+export async function requestMotion(motion: MotionMode): Promise<void> {
+  if (!isDesktop) return
+  await invokeHost('set_motion', { motion })
 }
 
 /** 弹一条轻提示。提示由独立的 toast 窗口渲染。 */

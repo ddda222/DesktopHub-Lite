@@ -22,6 +22,10 @@ function discardDraft(): void {
   reducedMotion.value = state.ui.islandReducedMotion; applied.value = signature(); feedback.value = ''; failed.value = false
 }
 watch(() => JSON.stringify([state.ui.islandAppearance, state.ui.islandAnchor, state.ui.islandHoverMs, state.ui.islandLeaveMs, state.ui.islandReducedMotion]), () => { if (!dirty.value && !saving.value) discardDraft() })
+watch(() => state.ui.islandAppearance.motion, motion => {
+  if (dirty.value) appearance.value.motion = motion
+  else if (!saving.value) discardDraft()
+})
 const wechatBusy = ref(false)
 const startupBusy = ref(false)
 const startupError = ref('')

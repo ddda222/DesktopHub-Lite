@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { IslandCue } from './useIslandEffects'
 import { createMotes, FLOW_HEIGHT, flowDuration, paintFlow, type FlowPointer } from './particleFlow'
 
-const props = defineProps<{ cue: IslandCue | null; active: boolean; dark: boolean; quality: 'full' | 'low' }>()
+const props = defineProps<{ cue: IslandCue | null; active: boolean; dark: boolean; quality: 'full' | 'low'; motion?: string }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 let ctx: CanvasRenderingContext2D | null = null
 let frame = 0
@@ -69,7 +69,7 @@ function start(cue: IslandCue | null): void {
       }
       const particleColor = getComputedStyle(surface!).getPropertyValue('--particle-color').trim()
       context!.setTransform(bufferWidth / width, 0, 0, density, 0, 0)
-      paintFlow(context!, motes, cue!.kind, Math.max(0, progress), width, Math.min(.05, (now - previous) / 1000), pointer, props.dark, particleColor)
+      paintFlow(context!, motes, cue!.kind, Math.max(0, progress), width, Math.min(.05, (now - previous) / 1000), pointer, props.dark, particleColor, props.motion)
       previous = now
     }
     frame = requestAnimationFrame(render)
@@ -100,9 +100,9 @@ onBeforeUnmount(() => {
 .island-particles {
   position: absolute;
   inset: 0 0 auto;
-  z-index: 2;
+  z-index: 6;
   width: 100%;
-  height: 22px;
+  height: 44px;
   pointer-events: none;
 }
 </style>

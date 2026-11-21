@@ -2,6 +2,8 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { state } from '@/store'
+import { isThemeMode, THEME_LABELS } from '@/lib/themes'
+import { isMotionMode, MOTION_LABELS } from '@/lib/motions'
 
 const props = defineProps<{ blocked: boolean }>()
 type Counts = { before: number; after: number; added: number; removed: number; changed: number; reordered: boolean }
@@ -15,7 +17,7 @@ const importButton = ref<HTMLButtonElement | null>(null)
 let sequence = 0
 let demoSignature = ''
 const signature = () => JSON.stringify([state.apps, state.categories, state.settings.theme, state.ui.islandAppearance])
-const displayValue = (value: string) => ({ dark: '深色', light: '浅色', midnight: '星舰仪表', mecha: '琥珀重工', scroll: '海棠书卷', pixel: '像素掌机', system: '跟随系统', left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', true: '开启', false: '关闭', all: '全部' })[value] ?? value
+const displayValue = (value: string) => (isThemeMode(value) ? THEME_LABELS[value] : isMotionMode(value) ? MOTION_LABELS[value] : ({ left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', true: '开启', false: '关闭', all: '全部' } as Record<string, string>)[value]) ?? value
 
 async function discard(token: string): Promise<void> {
   if (isDesktop) await invokeHost('cancel_configuration_import', { token })
@@ -72,7 +74,8 @@ async function apply(): Promise<void> {
       feedback.value = `配置已恢复。原配置备份：${result.backupPath}`
     } else {
       if (demoSignature !== signature()) throw new Error('预览后配置已变化，请重新预览')
-      state.settings.theme = (['light', 'dark', 'midnight', 'mecha', 'scroll', 'pixel', 'system'].includes(preview.value.changes.preferences[0]?.after ?? '') ? preview.value.changes.preferences[0]!.after : 'light') as typeof state.settings.theme
+      const nextTheme = preview.value.changes.preferences[0]?.after ?? ''
+      state.settings.theme = isThemeMode(nextTheme) ? nextTheme : 'light'
       feedback.value = '演示完成：仅切换当前网页主题，未写入本机配置或创建备份。'
     }
     preview.value = null

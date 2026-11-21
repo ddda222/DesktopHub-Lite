@@ -5,6 +5,7 @@ import { LogicalSize } from '@tauri-apps/api/dpi'
 import Icon from '@/components/Icon.vue'
 import { invokeHost, isDesktop, onUiState, readUiState, windowLabel, type UiState } from '@/lib/desktop/desktop'
 import { state } from '@/store'
+import { isThemeMode } from '@/lib/themes'
 
 const props = defineProps<{ demoContent?: { dataUri: string; name: string } }>()
 const emit = defineEmits<{ close: []; resize: [size: { width: number; height: number }] }>()
@@ -38,7 +39,7 @@ function measureScale(): void {
     (canvas.value.clientHeight - 32) / original.value.height) * 100)
 }
 function syncTheme(ui: UiState): void {
-  if (['light', 'dark', 'midnight', 'mecha', 'scroll', 'pixel', 'system'].includes(ui.theme)) state.settings.theme = ui.theme as typeof state.settings.theme
+  if (isThemeMode(ui.theme)) state.settings.theme = ui.theme
 }
 async function readImage(): Promise<void> {
   error.value = ''; imageFailed.value = false; loaded.value = false; preview.value = null

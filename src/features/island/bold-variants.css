@@ -1,0 +1,477 @@
+/* ============================================================================
+ * 05 蓝晒图纸（variant-blueprint）：工程晒图网格、套准十字、尺寸标注线与手绘粉笔框
+ * ============================================================================ */
+.island.variant-blueprint {
+  border-radius: 2px;
+  box-shadow: none;
+}
+.variant-blueprint:not(.expanded) .capsule-text {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: .04em;
+}
+.variant-blueprint:not(.expanded) .capsule-label.is-telemetry {
+  padding: 1px 6px;
+  font-size: 11.5px;
+}
+.variant-blueprint:not(.expanded) .tel-pre { color: #bae6fd; }
+.variant-blueprint:not(.expanded) .tel-pre.accent { color: #fde047; }
+.bp-tag {
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  color: #0b2545;
+  background: #fde047;
+  border: 1px solid #fef08a;
+}
+.bp-scale {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fde047;
+  border: 1px dashed rgba(253, 224, 71, .65);
+}
+.variant-blueprint .grip {
+  width: 42px;
+  height: 4px;
+  border-radius: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(224, 242, 254, .8) 0 1px, transparent 1px 5px),
+    linear-gradient(to bottom, transparent 3px, rgba(224, 242, 254, .75) 3px);
+}
+.variant-blueprint.expanded .expanded-content {
+  padding-bottom: 22px;
+}
+.variant-blueprint .toolbar {
+  border-bottom: 1px dashed rgba(186, 230, 253, .38);
+}
+.variant-blueprint .mode-selection {
+  border-radius: 1px;
+  background:
+    repeating-linear-gradient(-45deg, rgba(253, 224, 71, .16) 0 4px, transparent 4px 8px),
+    rgba(253, 224, 71, .1);
+  box-shadow: inset 0 0 0 1.25px #fde047;
+}
+.variant-blueprint .mode-nav .selected,
+.variant-blueprint .mode-nav .selected svg {
+  color: #fde047;
+}
+.variant-blueprint .round-action {
+  border-radius: 1px;
+  border: 1px dashed rgba(186, 230, 253, .38);
+}
+.variant-blueprint .round-action:hover {
+  border-style: solid;
+  border-color: #fde047;
+  color: #fde047;
+  background: rgba(253, 224, 71, .12);
+}
+.variant-blueprint .categories button {
+  border-radius: 1px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px dashed rgba(186, 230, 253, .34);
+}
+.variant-blueprint .categories .selected {
+  background: #fde047;
+  color: #092241;
+  border-style: solid;
+  border-color: #fef08a;
+  box-shadow: none;
+}
+.variant-blueprint .app-tile {
+  position: relative;
+  border-radius: 1px;
+  background: rgba(14, 52, 96, .58);
+  border: 1px dashed rgba(186, 230, 253, .42);
+}
+.variant-blueprint .app-tile::before,
+.variant-blueprint .app-tile::after {
+  content: '';
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-color: rgba(253, 224, 71, .75);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.variant-blueprint .app-tile::before {
+  top: 2px;
+  left: 2px;
+  border-top: 1.5px solid #fde047;
+  border-left: 1.5px solid #fde047;
+}
+.variant-blueprint .app-tile::after {
+  right: 2px;
+  bottom: 2px;
+  border-right: 1.5px solid #fde047;
+  border-bottom: 1.5px solid #fde047;
+}
+.variant-blueprint .app-tile:hover {
+  border-style: solid;
+  border-color: #fde047;
+  background: rgba(18, 66, 120, .82);
+}
+.variant-blueprint .app-tile:hover::before,
+.variant-blueprint .app-tile:hover::after {
+  opacity: 1;
+}
+.variant-blueprint .feature-pane {
+  --r-chip: 1px;
+  --r-tile: 2px;
+  font-family: var(--font-mono);
+}
+.variant-blueprint .feature-pane :deep(.search),
+.variant-blueprint .feature-pane :deep(.pause),
+.variant-blueprint .feature-pane :deep(.seg),
+.variant-blueprint .feature-pane :deep(.seg-btn),
+.variant-blueprint .feature-pane :deep(.snippet-input),
+.variant-blueprint .feature-pane :deep(.snippet-select),
+.variant-blueprint .feature-pane :deep(.textarea) {
+  border-radius: 1px;
+  border: 1px dashed rgba(186, 230, 253, .45);
+  background: rgba(8, 33, 63, .65);
+}
+.variant-blueprint .feature-pane :deep(.search:focus-within),
+.variant-blueprint .feature-pane :deep(.textarea:focus-visible) {
+  border-style: solid;
+  border-color: #fde047;
+  box-shadow: 0 0 0 1px rgba(253, 224, 71, .4);
+}
+.variant-blueprint .feature-pane :deep(.seg-btn.is-active) {
+  background: #fde047;
+  color: #092241;
+  border: 1px solid #fef08a;
+  box-shadow: none;
+}
+.variant-blueprint .feature-pane :deep(.row) {
+  border-radius: 1px;
+  border-bottom: 1px dashed rgba(186, 230, 253, .3);
+}
+.variant-blueprint .feature-pane :deep(.row:hover) {
+  box-shadow: inset 3px 0 0 #fde047;
+}
+.variant-blueprint .feature-pane :deep(.row.is-active) {
+  background: rgba(253, 224, 71, .16);
+  box-shadow: inset 3px 0 0 #fde047, inset 0 0 0 1px rgba(253, 224, 71, .42);
+}
+
+/* ============================================================================
+ * 06 霓虹夜行（variant-neon）：街头霓虹灯箱、双色电光光管与斜切卡座
+ * ============================================================================ */
+.island.variant-neon {
+  border-radius: 24px;
+  box-shadow:
+    inset 0 0 14px rgba(255, 43, 214, .18),
+    0 0 18px rgba(255, 43, 214, .22),
+    0 0 28px rgba(0, 240, 255, .14);
+}
+.island.variant-neon.expanded {
+  border-radius: 20px;
+}
+.island.variant-neon.tucked {
+  border-radius: 3px;
+  box-shadow: 0 0 10px rgba(0, 240, 255, .45);
+}
+.variant-neon:not(.expanded) .capsule-text {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 11px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.variant-neon:not(.expanded) .capsule-label.is-telemetry {
+  padding: 1px 6px;
+  font-size: 11.5px;
+}
+.variant-neon:not(.expanded) .tel-pre { color: #00f0ff; }
+.variant-neon:not(.expanded) .tel-pre.accent { color: #ff2bd6; }
+.neon-sign {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  color: #fff5fd;
+  background: rgba(255, 43, 214, .22);
+  border: 1px solid #ff2bd6;
+  box-shadow: 0 0 8px rgba(255, 43, 214, .65), inset 0 0 6px rgba(255, 43, 214, .35);
+}
+.neon-hours {
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #00f0ff;
+  border: 1px solid rgba(0, 240, 255, .62);
+  text-shadow: 0 0 6px rgba(0, 240, 255, .75);
+}
+.variant-neon .grip {
+  width: 38px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff2bd6, #00f0ff);
+  box-shadow: 0 0 8px rgba(0, 240, 255, .75);
+}
+.variant-neon .toolbar {
+  border-bottom: 1px solid transparent;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    linear-gradient(90deg, #ff2bd6, #00f0ff) border-box;
+}
+.variant-neon .mode-selection {
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(255, 43, 214, .28), rgba(0, 240, 255, .22));
+  box-shadow:
+    inset 0 0 0 1.25px #00f0ff,
+    0 0 12px rgba(0, 240, 255, .36);
+  transform: translateX(var(--sel-x, 2px)) skewX(-8deg);
+}
+.variant-neon .mode-nav .selected,
+.variant-neon .mode-nav .selected svg {
+  color: #00f0ff;
+  filter: drop-shadow(0 0 5px rgba(0, 240, 255, .65));
+}
+.variant-neon .round-action {
+  border-radius: 9px;
+  border: 1px solid rgba(255, 43, 214, .32);
+}
+.variant-neon .round-action:hover {
+  border-color: #00f0ff;
+  color: #00f0ff;
+  background: rgba(0, 240, 255, .14);
+  box-shadow: 0 0 10px rgba(0, 240, 255, .32);
+}
+.variant-neon .categories button {
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid rgba(255, 43, 214, .28);
+}
+.variant-neon .categories .selected {
+  background: linear-gradient(90deg, #ff2bd6, #c026d3);
+  color: #ffffff;
+  border-color: #ff80e5;
+  box-shadow: 0 0 12px rgba(255, 43, 214, .55);
+}
+.variant-neon .app-tile {
+  position: relative;
+  border-radius: 10px;
+  background: rgba(25, 14, 44, .88);
+  border: 1px solid rgba(255, 43, 214, .28);
+  box-shadow: inset 0 1px 0 rgba(0, 240, 255, .28);
+}
+.variant-neon .app-tile:hover {
+  border-color: #00f0ff;
+  background: rgba(36, 20, 64, .95);
+  box-shadow:
+    inset 0 -2px 0 #ff2bd6,
+    0 0 12px rgba(0, 240, 255, .38);
+}
+.variant-neon .feature-pane {
+  --r-chip: 8px;
+  --r-tile: 10px;
+}
+.variant-neon .feature-pane :deep(.search),
+.variant-neon .feature-pane :deep(.pause),
+.variant-neon .feature-pane :deep(.seg),
+.variant-neon .feature-pane :deep(.textarea) {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 43, 214, .34);
+  background: rgba(16, 8, 30, .78);
+}
+.variant-neon .feature-pane :deep(.search:focus-within),
+.variant-neon .feature-pane :deep(.textarea:focus-visible) {
+  border-color: #00f0ff;
+  box-shadow: 0 0 12px rgba(0, 240, 255, .35), inset 0 0 0 1px rgba(0, 240, 255, .35);
+}
+.variant-neon .feature-pane :deep(.seg-btn.is-active) {
+  background: linear-gradient(90deg, rgba(255, 43, 214, .32), rgba(0, 240, 255, .26));
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #00f0ff, 0 0 10px rgba(255, 43, 214, .35);
+}
+.variant-neon .feature-pane :deep(.row) {
+  border-radius: 9px;
+  border-bottom: 1px solid rgba(255, 43, 214, .18);
+}
+.variant-neon .feature-pane :deep(.row:hover) {
+  box-shadow: inset 3px 0 0 #00f0ff;
+  background: rgba(0, 240, 255, .09);
+}
+.variant-neon .feature-pane :deep(.row.is-active) {
+  background: rgba(255, 43, 214, .18);
+  box-shadow: inset 3px 0 0 #ff2bd6, 0 0 12px rgba(255, 43, 214, .22);
+}
+
+/* ============================================================================
+ * 07 软糖黏土（variant-clay）：3D 蓬松泥塑高光、糖果积木按键与果冻表情胶囊
+ * ============================================================================ */
+.island.variant-clay {
+  border-radius: 24px;
+  box-shadow:
+    inset 0 3px 5px rgba(255, 255, 255, .92),
+    inset 0 -4px 7px rgba(188, 152, 120, .38),
+    0 12px 26px rgba(124, 92, 65, .18);
+}
+.island.variant-clay.expanded {
+  border-radius: 28px;
+}
+.island.variant-clay.tucked {
+  border-radius: 8px;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, .9), inset 0 -2px 3px rgba(188, 152, 120, .4);
+}
+.variant-clay:not(.expanded) .capsule-text {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-weight: 700;
+}
+.clay-face {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffffff;
+  background: linear-gradient(180deg, #ff7a8a 0%, #ef476f 100%);
+  box-shadow:
+    inset 0 1.5px 2px rgba(255, 255, 255, .65),
+    inset 0 -2px 3px rgba(168, 32, 64, .38),
+    0 2px 5px rgba(239, 71, 111, .28);
+}
+.clay-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.clay-dots i {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ffd166;
+  box-shadow: inset 0 1.5px 1.5px rgba(255, 255, 255, .85), inset 0 -1.5px 2px rgba(160, 110, 20, .35);
+}
+.clay-dots i:first-child { background: #ef476f; }
+.clay-dots i:last-child { background: #06d6a0; }
+.variant-clay .grip {
+  width: 36px;
+  height: 5px;
+  border-radius: 999px;
+  background: #e2cfb9;
+  box-shadow: inset 0 1px 2px rgba(130, 96, 68, .35), 0 1px 0 rgba(255, 255, 255, .9);
+}
+.variant-clay .toolbar {
+  border-bottom: 2px dotted rgba(168, 136, 108, .35);
+}
+.variant-clay .mode-selection {
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ff7a8a 0%, #ef476f 100%);
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, .62),
+    inset 0 -3px 5px rgba(163, 30, 62, .38),
+    0 4px 10px rgba(239, 71, 111, .28);
+}
+.variant-clay .mode-nav .selected,
+.variant-clay .mode-nav .selected svg {
+  color: #ffffff;
+}
+.variant-clay .round-action {
+  border-radius: 14px;
+  background: #fdf8f0;
+  border: 1px solid rgba(205, 178, 150, .55);
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, .95),
+    inset 0 -2px 4px rgba(188, 152, 120, .32),
+    0 3px 6px rgba(140, 105, 78, .12);
+}
+.variant-clay .round-action:hover {
+  background: #fffcf7;
+  border-color: #ef476f;
+  color: #ef476f;
+}
+.variant-clay .categories button {
+  border-radius: 999px;
+  font-weight: 600;
+  background: #fdf8f0;
+  border: 1px solid rgba(205, 178, 150, .55);
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, .92),
+    inset 0 -2px 4px rgba(188, 152, 120, .28),
+    0 2px 5px rgba(140, 105, 78, .1);
+}
+.variant-clay .categories .selected {
+  background: linear-gradient(180deg, #ff7a8a 0%, #ef476f 100%);
+  color: #ffffff;
+  border-color: #e63963;
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, .62),
+    inset 0 -3px 4px rgba(163, 30, 62, .35),
+    0 3px 8px rgba(239, 71, 111, .28);
+}
+.variant-clay .app-tile {
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fffdf9 0%, #f5ebe0 100%);
+  border: 1px solid rgba(205, 178, 150, .55);
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, .95),
+    inset 0 -3px 5px rgba(188, 152, 120, .35),
+    0 4px 9px rgba(140, 105, 78, .14);
+}
+.variant-clay .app-tile:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #faefe2 100%);
+  border-color: #ef476f;
+  transform: translateY(-1px);
+}
+.variant-clay .app-tile:active {
+  transform: translateY(1px) scale(.96);
+}
+.variant-clay .feature-pane {
+  --r-chip: 14px;
+  --r-tile: 16px;
+}
+.variant-clay .feature-pane :deep(.search),
+.variant-clay .feature-pane :deep(.pause),
+.variant-clay .feature-pane :deep(.seg),
+.variant-clay .feature-pane :deep(.textarea) {
+  border-radius: 16px;
+  background: #f0e4d4;
+  border: 1px solid rgba(196, 166, 138, .55);
+  box-shadow:
+    inset 0 2px 4px rgba(148, 114, 84, .22),
+    0 1px 0 rgba(255, 255, 255, .85);
+}
+.variant-clay .feature-pane :deep(.seg-btn) {
+  border-radius: 13px;
+}
+.variant-clay .feature-pane :deep(.seg-btn.is-active) {
+  background: linear-gradient(180deg, #ff7a8a 0%, #ef476f 100%);
+  color: #ffffff;
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, .6),
+    inset 0 -2px 4px rgba(163, 30, 62, .35),
+    0 2px 6px rgba(239, 71, 111, .26);
+}
+.variant-clay .feature-pane :deep(.seg-btn.is-active .seg-count) {
+  background: rgba(255, 255, 255, .26);
+  color: #ffffff;
+}
+.variant-clay .feature-pane :deep(.row) {
+  border-radius: 16px;
+  margin-bottom: 5px;
+  background: #fdf8f0;
+  border: 1px solid rgba(205, 178, 150, .48);
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, .9),
+    inset 0 -2px 4px rgba(188, 152, 120, .24);
+}
+.variant-clay .feature-pane :deep(.row.is-active) {
+  background: #ffe8ee;
+  border-color: #ef476f;
+  box-shadow:
+    inset 0 2px 2px rgba(255, 255, 255, .85),
+    inset 3px 0 0 #ef476f;
+}
