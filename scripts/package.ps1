@@ -56,7 +56,7 @@ try {
     }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'PORTABLE.md') -Destination (Join-Path $packageDirectory '使用说明.md')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'integrations') -Destination $packageDirectory -Recurse
-    $releaseNotes = if ($ReleaseNotesFile) { $ReleaseNotesFile } else { Join-Path (Split-Path -Parent $projectRoot) "docs\releases\lite-v$version.md" }
+    $releaseNotes = if ($ReleaseNotesFile) { $ReleaseNotesFile } else { Join-Path $projectRoot "docs\releases\lite-v$version.md" }
     if (Test-Path -LiteralPath $releaseNotes) { Copy-Item -LiteralPath $releaseNotes -Destination (Join-Path $packageDirectory '更新说明.md') }
     $sourceCommit = & git -C $projectRoot rev-parse HEAD
     if ($LASTEXITCODE -ne 0) { throw '无法读取源码提交号' }

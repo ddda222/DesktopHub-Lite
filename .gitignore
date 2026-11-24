@@ -1,0 +1,35 @@
+# 依赖与构建产物
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+
+# 本地配置、凭据与运行期个人数据
+.env
+.env.*
+!.env.example
+!.env.template
+*.pfx
+*.p12
+*.pem
+*.key
+id_rsa
+id_ed25519
+**/settings*.json
+**/settings*.json.bak
+**/clipboard/
+!src/features/clipboard/
+!src/features/clipboard/**
+**/clipboard-index*.json
+**/window-state*.json
+**/animation-status*.json
+**/animation-diagnostics*.jsonl
+
+# 诊断转储与临时录屏
+*.mp4
+*.webm
+*.avi
+*.stg
+*.etl
+*.dmp
