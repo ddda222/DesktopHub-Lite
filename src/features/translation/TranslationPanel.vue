@@ -4,9 +4,8 @@
  *
  * 安全与产品约束：
  * - 手动提交：输入、粘贴都不会自动发请求，只有点「翻译」或按 Ctrl/Cmd + Enter 才提交。
- * - 原文去向常驻可见：提交按钮下方固定一行，写明当前服务商名称与地址。
  * - 结果来自 MockHost，界面必须标「样稿模拟结果」，不能让人以为真实翻译成功。
- * - 密钥正文永不读取、永不显示，界面只知道「已保存 / 未保存」。
+ * - 密钥正文永不读取、永不显示。
  */
 import { computed } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
@@ -20,7 +19,6 @@ import {
   state,
   submitTranslation
 } from '@/store'
-import { findProvider } from '@/lib/desktop/providers'
 
 const props = defineProps<{ standalone?: boolean }>()
 function dismiss(): void {
@@ -47,24 +45,12 @@ const MAX_CHARS = 5000
 /** 接近上限的提示阈值 */
 const NEAR_LIMIT = 4500
 
-/**
- * 服务商展示信息来自预设表：当前配置里的 providerId 找不到时回退到最后一个预设，
- * 保证模板里读 name / baseUrl 不会碰到 undefined。
- */
-const FALLBACK_PROVIDER = { name: '未选择服务商', baseUrl: '未配置地址' }
-const provider = computed(() => {
-  const id = state.translationSettings.providerId
-  if (!id) return FALLBACK_PROVIDER
-  const item = findProvider(id)
-  return { name: item.name, baseUrl: state.translationSettings.baseUrl || item.baseUrl }
-})
 const status = computed(() => state.translation.status)
 const isLoading = computed(() => state.translation.status === 'loading')
 const count = computed(() => state.translation.source.length)
 const hasSource = computed(() => state.translation.source.length > 0)
 const nearLimit = computed(() => count.value > NEAR_LIMIT)
 const atLimit = computed(() => count.value >= MAX_CHARS)
-const hasSecret = computed(() => state.translationSettings.hasSecret)
 const resultText = computed(() => state.translation.result?.text ?? '')
 const resultMeta = computed(() => {
   const result = state.translation.result
@@ -96,6 +82,16 @@ function onSourceInput(event: Event): void {
     const pos = Math.min(caret, state.translation.source.length)
     el.setSelectionRange(pos, pos)
   }
+}
+
+const latestClipText = computed(() =>
+  state.clips.find(item => item.kind === 'text' && !!item.text?.trim())?.text ?? ''
+)
+
+function fillFromLatestClip(): void {
+  if (!latestClipText.value) return
+  setTranslationSource(latestClipText.value)
+  state.translation.filledFromClip = true
 }
 
 function onClear(): void {
@@ -163,7 +159,16 @@ function onPanelKeydown(event: KeyboardEvent): void {
       <div class="source">
         <div class="source-head">
           <span class="label">原文</span>
-          <button v-if="hasSource" class="link-btn" type="button" @click="onClear">清空</button>
+          <div class="source-head-actions">
+            <button
+              v-if="latestClipText"
+              class="link-btn"
+              type="button"
+              title="将最近一条文本剪贴板填入原文框（仍需手动点翻译）"
+              @click="fillFromLatestClip"
+            >填入最新剪贴板</button>
+            <button v-if="hasSource" class="link-btn" type="button" @click="onClear">清空</button>
+          </div>
         </div>
 
         <div v-if="state.translation.filledFromClip" class="chip-row">
@@ -199,20 +204,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
           {{ isLoading ? '翻译中…' : '翻译' }}
         </button>
         <span class="hint">Ctrl / ⌘ + Enter 提交</span>
-      </div>
-
-      <!-- 原文去向：常驻说明，不能只在设置里出现 -->
-      <div class="notice">
-        <Icon class="notice-icon" name="info" :size="13" />
-        <div class="notice-body">
-          <p class="notice-main">
-            原文发送到 <strong>{{ provider.name }}</strong> · {{ provider.baseUrl }}
-          </p>
-          <p class="notice-sub">
-            <i class="state-dot" :class="{ 'is-on': hasSecret }" aria-hidden="true" />
-            密钥{{ hasSecret ? '已保存' : '未保存' }}<span v-if="!isDesktop"> · 浏览器样稿不会发出真实网络请求</span>
-          </p>
-        </div>
       </div>
 
       <div v-if="status !== 'idle'" class="result">
@@ -313,6 +304,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   min-height: 0;
   padding: var(--space-3) var(--space-4);
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
@@ -366,6 +359,12 @@ function onPanelKeydown(event: KeyboardEvent): void {
   align-items: center;
   justify-content: space-between;
   min-height: 20px;
+}
+
+.source-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .label {
@@ -579,64 +578,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
   }
 }
 
-/* 原文去向说明 */
-.notice {
-  display: flex;
-  gap: 7px;
-  padding: 7px 9px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-chip);
-}
-
-.notice-icon {
-  flex: none;
-  margin-top: 2px;
-  color: var(--text-3);
-}
-
-.notice-body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-
-.notice-main {
-  margin: 0;
-  color: var(--text-2);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.notice-main strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.notice-sub {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0;
-  color: var(--text-3);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
-
-.state-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  background: var(--text-3);
-  border-radius: 50%;
-}
-
-.state-dot.is-on {
-  background: var(--success);
-}
-
 /* 结果 */
 .result {
   display: flex;
@@ -682,6 +623,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   max-height: 5.8em;
   margin: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   color: var(--text);
   font-size: var(--text-base);
   line-height: 1.6;

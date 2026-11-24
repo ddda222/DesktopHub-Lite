@@ -89,6 +89,7 @@ onBeforeUnmount(() => { disposed = true; clearInterval(timer) })
   <div class="panel">
     <h3 class="panel-title">调音台</h3>
     <p class="hint">选择在灵动岛显示的声音条目。新设备和新应用默认显示，开关即时生效。</p>
+    <p class="hint">{{ isDesktop ? '应用播放声音后会出现在调音台中。声音配置按应用和输出设备匹配（包含隐藏条目，跳过未运行的应用），仅在点击预设时应用，不会调整系统总音量。' : '当前为网页合成会话演示，可体验独立音量、静音与配置切换，不会改变 Windows 系统音量。' }}</p>
     <p v-if="readError" class="inline-feedback error" role="alert">读取失败：{{ readError }} <button class="btn" type="button" @click="refresh">重试</button></p>
     <p v-else-if="!snapshot" class="hint" role="status">正在识别声音设备和应用…</p>
     <p v-if="saveError" class="inline-feedback error" role="alert">{{ saveError }}</p>

@@ -24,7 +24,11 @@
 
   --dur-fast: 120ms;
   --dur: 170ms;
-  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring-soft: linear(0, 0.38 12%, 0.78 24%, 1.032 42%, 0.992 64%, 1.004 82%, 1);
+  --ease: var(--ease-out);
 
   --z-bar: 30;
   --z-pop: 40;
@@ -505,4 +509,58 @@
   --island-hem-a: rgba(239, 71, 111, 0.22);
   --island-hem-b: rgba(255, 209, 102, 0.72);
   --particle-color: #ef476f;
+}
+
+/* 液态琉璃（深海玄晶高对比实底 + 菲涅尔冷白折射棱边 + 青紫微色散光晕） */
+:root[data-theme='liquid'] {
+  color-scheme: dark;
+  --r-bar: 26px;
+  --r-pop: 22px;
+  --r-card: 16px;
+  --r-tile: 13px;
+  --r-chip: 999px;
+  --dur-fast: 115ms;
+  --dur: 170ms;
+
+  --page-bg: #070b14;
+  --stage-1: #0e1729;
+  --stage-2: #060a12;
+
+  --bar-bg: rgba(13, 20, 34, 0.96);
+  --bar-border: rgba(190, 226, 255, 0.36);
+  --bar-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36), 0 18px 46px rgba(2, 6, 16, 0.72);
+
+  --surface: #0d1422;
+  --surface-2: #141f34;
+  --surface-3: #1c2a45;
+
+  --hover: rgba(147, 213, 255, 0.14);
+  --active: rgba(147, 213, 255, 0.24);
+
+  --text: #f3f8ff;
+  --text-2: #b9cde6;
+  --text-3: #839ab8;
+
+  --line: rgba(186, 224, 255, 0.16);
+  --line-strong: rgba(196, 232, 255, 0.36);
+
+  --accent: #7dd3fc;
+  --accent-hover: #bae6fd;
+  --accent-weak: rgba(125, 211, 252, 0.18);
+  --accent-text: #061321;
+
+  --danger: #fb7185;
+  --danger-weak: rgba(251, 113, 133, 0.18);
+  --success: #34d399;
+
+  --pop-bg: rgba(13, 20, 34, 0.98);
+  --pop-border: rgba(196, 232, 255, 0.38);
+  --pop-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36), 0 24px 64px rgba(2, 6, 16, 0.78);
+
+  --thumb-bg: #182640;
+  --island-rim: rgba(214, 240, 255, 0.56);
+  --island-top-sheen: rgba(255, 255, 255, 0.55);
+  --island-hem-a: rgba(125, 211, 252, 0.35);
+  --island-hem-b: rgba(196, 160, 255, 0.82);
+  --particle-color: #7dd3fc;
 }

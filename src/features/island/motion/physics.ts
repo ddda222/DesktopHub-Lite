@@ -2,24 +2,25 @@ type Spring = { value: number; velocity: number; target: number }
 type Visual = HTMLElement | SVGElement
 type Effect = {
   control: HTMLButtonElement; visual: Visual; original: string; restTransform: string; card: boolean
-  x: Spring; y: Spring; press: Spring
+  x: Spring; y: Spring; hover: Spring; press: Spring
 }
 
 const controls = '.capsule, .app-tile, .mode-nav button, .round-action'
 const spring = (): Spring => ({ value: 0, velocity: 0, target: 0 })
 const bound = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value))
 
-type MotionPhysicsProfile = { damping: number; omega: number; pressScale: number; stepPx: number }
+type MotionPhysicsProfile = { damping: number; omega: number; pressScale: number }
+// 全系采用准临界高阻尼比（ζ >= 0.97），避免图标在鼠标划过与离开时出现过冲反弹或阶梯跳格。
 const MOTION_PROFILES: Record<string, MotionPhysicsProfile> = {
-  glide: { damping: 18, omega: 12, pressScale: 0.07, stepPx: 0 },
-  sweep: { damping: 24, omega: 16, pressScale: 0.05, stepPx: 0 },
-  bounce: { damping: 10, omega: 18, pressScale: 0.11, stepPx: 0 },
-  step: { damping: 26, omega: 14, pressScale: 0.08, stepPx: 1.5 },
-  flicker: { damping: 15, omega: 15, pressScale: 0.07, stepPx: 0 },
-  unroll: { damping: 20, omega: 9, pressScale: 0.05, stepPx: 0 }
+  glide: { damping: 28, omega: 6, pressScale: 0.05 },
+  sweep: { damping: 30, omega: 6, pressScale: 0.045 },
+  bounce: { damping: 24, omega: 6, pressScale: 0.055 },
+  step: { damping: 30, omega: 5, pressScale: 0.05 },
+  flicker: { damping: 32, omega: 6, pressScale: 0.05 },
+  unroll: { damping: 26, omega: 5, pressScale: 0.045 }
 }
 
-export function advanceSpring(axis: Spring, seconds: number, damping = 18, omega = 12): boolean {
+export function advanceSpring(axis: Spring, seconds: number, damping = 28, omega = 6): boolean {
   const offset = axis.value - axis.target
   const decay = Math.exp(-damping * seconds)
   const cos = Math.cos(omega * seconds), sin = Math.sin(omega * seconds)
@@ -43,7 +44,7 @@ export function createIslandPhysics(panel: HTMLElement) {
     lastX: number; lastY: number; time: number; vx: number; vy: number } | undefined
 
   const releaseEffect = (effect: Effect) => {
-    effect.x.target = effect.y.target = effect.press.target = 0
+    effect.x.target = effect.y.target = effect.hover.target = effect.press.target = 0
   }
   function reset() {
     cancelAnimationFrame(frame)
@@ -59,10 +60,14 @@ export function createIslandPhysics(panel: HTMLElement) {
     if (pending) {
       const { effect, x, y } = pending
       pending = undefined
-      const rect = effect.control.getBoundingClientRect()
-      if (rect.width && rect.height) {
-        effect.x.target = bound((x - rect.left) / rect.width * 2 - 1, 1) * 2.5
-        effect.y.target = bound((y - rect.top) / rect.height * 2 - 1, 1) * 2
+      // 仅应用图标卡片保留极轻微的稳重微浮与微倾，导航栏与工具栏图标保持居中零晃动。
+      if (effect.card) {
+        const rect = effect.control.getBoundingClientRect()
+        if (rect.width && rect.height) {
+          effect.x.target = bound((x - rect.left) / rect.width * 2 - 1, 1) * 0.35
+          effect.y.target = bound((y - rect.top) / rect.height * 2 - 1, 1) * 0.25
+        }
+        effect.hover.target = 1
       }
     }
     const seconds = Math.min(.064, Math.max(0, now - previous) / 1000)
@@ -70,7 +75,7 @@ export function createIslandPhysics(panel: HTMLElement) {
     const profile = MOTION_PROFILES[panel.dataset.motion || 'glide'] ?? MOTION_PROFILES.glide
     let moving = false
     for (const effect of effects.values()) {
-      const { visual, x, y, press: depth } = effect
+      const { visual, x, y, hover, press: depth } = effect
       if (!panel.contains(visual)) {
         visual.style.transform = effect.original
         effects.delete(visual)
@@ -80,17 +85,25 @@ export function createIslandPhysics(panel: HTMLElement) {
       }
       const mx = advanceSpring(x, seconds, profile.damping, profile.omega)
       const my = advanceSpring(y, seconds, profile.damping, profile.omega)
+      const mh = advanceSpring(hover, seconds, profile.damping, profile.omega)
       const mp = advanceSpring(depth, seconds, profile.damping, profile.omega)
-      if (!mx && !my && !mp && !x.value && !y.value && !depth.value) {
+      if (!mx && !my && !mh && !mp && !x.value && !y.value && !hover.value && !depth.value) {
         visual.style.transform = effect.original
         if (current !== effect && press?.effect !== effect) effects.delete(visual)
         continue
       }
-      const tx = profile.stepPx > 0 ? Math.round(x.value / profile.stepPx) * profile.stepPx : x.value
-      const ty = profile.stepPx > 0 ? Math.round(y.value / profile.stepPx) * profile.stepPx : y.value
-      const tilt = effect.card ? 'perspective(120px) rotateX(' + (-ty * 2).toFixed(2) + 'deg) rotateY(' + (tx * 1.6).toFixed(2) + 'deg) ' : ''
-      visual.style.transform = 'translate3d(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px,0) ' + tilt + 'scale(' + (1 - depth.value * profile.pressScale).toFixed(3) + ')' + effect.restTransform
-      moving ||= mx || my || mp
+      const tx = x.value
+      const ty = y.value
+      const tilt = effect.card
+        ? 'perspective(480px) rotateX(' + (-ty * 1.8).toFixed(2) + 'deg) rotateY(' + (tx * 1.6).toFixed(2) + 'deg) '
+        : ''
+      const scale = 1 + hover.value * 0.03 * (1 - depth.value) - depth.value * profile.pressScale
+      visual.style.transform =
+        'translate3d(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px,0) ' +
+        tilt +
+        'scale(' + scale.toFixed(3) + ')' +
+        effect.restTransform
+      moving ||= mx || my || mh || mp
     }
     if (moving) frame = requestAnimationFrame(tick)
   }
@@ -113,7 +126,7 @@ export function createIslandPhysics(panel: HTMLElement) {
     if (!effect) {
       const base = getComputedStyle(visual).transform
       effect = { control, visual, original: visual.style.transform, restTransform: base === 'none' ? '' : ' ' + base,
-        card: control.classList.contains('app-tile'), x: spring(), y: spring(), press: spring() }
+        card: control.classList.contains('app-tile'), x: spring(), y: spring(), hover: spring(), press: spring() }
       effects.set(visual, effect)
     }
     current = effect

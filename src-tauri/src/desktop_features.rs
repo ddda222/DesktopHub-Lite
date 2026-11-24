@@ -29,6 +29,7 @@ pub struct IslandAppearance {
     pub telemetry_net: bool,
     pub telemetry_cpu: bool,
     pub telemetry_memory: bool,
+    pub show_app_names: bool,
 }
 impl Default for IslandAppearance {
     fn default() -> Self {
@@ -46,6 +47,7 @@ impl Default for IslandAppearance {
             telemetry_net: true,
             telemetry_cpu: true,
             telemetry_memory: true,
+            show_app_names: true,
         }
     }
 }
@@ -242,10 +244,17 @@ pub fn start_fullscreen_watch(app: AppHandle) {
 }
 
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+const APPROVED_RUN_KEY: PCWSTR =
+    w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run");
 const RUN_VALUE: PCWSTR = w!("DesktopHubLite");
+const APPROVED_ENABLED_BYTES: [u8; 12] = [0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+fn current_exe_path() -> Result<std::path::PathBuf, String> {
+    std::env::current_exe().map_err(|_| "未找到当前程序".into())
+}
 
 fn current_command() -> Result<String, String> {
-    let path = std::env::current_exe().map_err(|_| "未找到当前程序")?;
+    let path = current_exe_path()?;
     let path = path.to_str().ok_or("程序路径不是有效 Unicode")?;
     Ok(format!("\"{path}\""))
 }
@@ -277,37 +286,255 @@ fn read_startup_command() -> Result<Option<String>, String> {
     }
 }
 
-#[derive(Serialize)]
+fn read_startup_approved_bytes() -> Result<Option<Vec<u8>>, String> {
+    let mut data = [0u8; 64];
+    let mut bytes = data.len() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            APPROVED_RUN_KEY,
+            RUN_VALUE,
+            RRF_RT_REG_BINARY,
+            None,
+            Some(data.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+    match status.0 {
+        0 => Ok(Some(data[..(bytes as usize).min(data.len())].to_vec())),
+        2 | 3 => Ok(None),
+        _ => Err(format!("无法读取系统启动审批状态（Windows 错误 {}）", status.0)),
+    }
+}
+
+// === STARTUP_CORE_START ===
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartupStatus {
     pub enabled: bool,
     pub conflict: bool,
+    pub stale: bool,
+    pub system_disabled: bool,
+}
+
+/// 解析注册表启动命令中的可执行文件路径（支持带引号与不带引号格式）。
+pub fn parse_startup_exe_path(raw: &str) -> Option<std::path::PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let exe_path = if let Some(rest) = trimmed.strip_prefix('"') {
+        rest.split('"').next()?
+    } else {
+        trimmed.split_whitespace().next()?
+    };
+    let clean = exe_path.trim();
+    if clean.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(clean))
+    }
+}
+
+fn normalize_win_path_key(path: &std::path::Path) -> String {
+    let raw = path.to_string_lossy();
+    let stripped = raw.strip_prefix(r"\\?\").unwrap_or(&raw);
+    stripped
+        .chars()
+        .map(|ch| if ch == '/' { '\\' } else { ch.to_ascii_lowercase() })
+        .collect()
+}
+
+pub fn paths_match_win(a: &std::path::Path, b: &std::path::Path) -> bool {
+    normalize_win_path_key(a) == normalize_win_path_key(b)
+}
+
+/// 判断 `Explorer\StartupApproved\Run` 二进制值是否表示被系统/任务管理器禁用（首字节最低位为 1，如 0x01/0x03）。
+pub fn is_startup_approved_disabled(bytes: Option<&[u8]>) -> bool {
+    bytes.and_then(|b| b.first()).is_some_and(|flag| flag & 1 != 0)
+}
+
+/// 综合评估当前程序路径、注册表 Run 命令、目标文件存活状态与系统审批状态。
+pub fn evaluate_startup_status(
+    current_exe: &std::path::Path,
+    actual_command: Option<&str>,
+    actual_target_exists: bool,
+    approved_bytes: Option<&[u8]>,
+) -> StartupStatus {
+    let Some(raw) = actual_command else {
+        return StartupStatus {
+            enabled: false,
+            conflict: false,
+            stale: false,
+            system_disabled: false,
+        };
+    };
+    let system_disabled = is_startup_approved_disabled(approved_bytes);
+    let Some(actual_exe) = parse_startup_exe_path(raw) else {
+        return StartupStatus {
+            enabled: false,
+            conflict: false,
+            stale: true,
+            system_disabled,
+        };
+    };
+    if paths_match_win(&actual_exe, current_exe) {
+        return StartupStatus {
+            enabled: !system_disabled,
+            conflict: false,
+            stale: false,
+            system_disabled,
+        };
+    }
+    if actual_target_exists {
+        StartupStatus {
+            enabled: false,
+            conflict: true,
+            stale: false,
+            system_disabled: false,
+        }
+    } else {
+        StartupStatus {
+            enabled: false,
+            conflict: false,
+            stale: true,
+            system_disabled,
+        }
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn missing_run_entry_reports_disabled_without_conflict() {
+        let cur = Path::new(r"D:\apply\DesktopHub-Lite\DesktopHub-Lite.exe");
+        assert_eq!(
+            evaluate_startup_status(cur, None, false, None),
+            StartupStatus {
+                enabled: false,
+                conflict: false,
+                stale: false,
+                system_disabled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn matching_exe_respects_startup_approved_flag() {
+        let cur = Path::new(r"D:\apply\DesktopHub-Lite\DesktopHub-Lite.exe");
+        let cmd = Some(r#""d:\Apply\DesktopHub-Lite\DesktopHub-Lite.exe""#);
+        // 未设置 StartupApproved 时视为正常启用
+        assert_eq!(
+            evaluate_startup_status(cur, cmd, true, None),
+            StartupStatus {
+                enabled: true,
+                conflict: false,
+                stale: false,
+                system_disabled: false,
+            }
+        );
+        // 0x02 表示显式启用
+        let enabled_bytes = [0x02u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(
+            evaluate_startup_status(cur, cmd, true, Some(&enabled_bytes)),
+            StartupStatus {
+                enabled: true,
+                conflict: false,
+                stale: false,
+                system_disabled: false,
+            }
+        );
+        // 0x03 表示在任务管理器/系统设置中被禁用
+        let disabled_bytes = [0x03u8, 0, 0, 0, 0x05, 0xF4, 0x08, 0x46, 0xBF, 0x7B, 0xDD, 0x01];
+        assert_eq!(
+            evaluate_startup_status(cur, cmd, true, Some(&disabled_bytes)),
+            StartupStatus {
+                enabled: false,
+                conflict: false,
+                stale: false,
+                system_disabled: true,
+            }
+        );
+    }
+
+    #[test]
+    fn deleted_old_package_path_is_stale_and_recoverable_not_conflict() {
+        let cur = Path::new(r"D:\apply\DesktopHub-Lite\DesktopHub-Lite.exe");
+        let old_deleted = Some(
+            r#""D:\codex\DesktopHub-work\packages\DesktopHub-Lite-0.1.3-win-x64-20261121-101518\DesktopHub-Lite.exe""#,
+        );
+        let disabled_bytes = [0x03u8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+        assert_eq!(
+            evaluate_startup_status(cur, old_deleted, false, Some(&disabled_bytes)),
+            StartupStatus {
+                enabled: false,
+                conflict: false,
+                stale: true,
+                system_disabled: true,
+            }
+        );
+    }
+
+    #[test]
+    fn existing_other_path_keeps_conflict_protection() {
+        let cur = Path::new(r"D:\apply\DesktopHub-Lite\DesktopHub-Lite.exe");
+        let other_live = Some(r#""D:\other\DesktopHub-Lite\DesktopHub-Lite.exe""#);
+        assert_eq!(
+            evaluate_startup_status(cur, other_live, true, None),
+            StartupStatus {
+                enabled: false,
+                conflict: true,
+                stale: false,
+                system_disabled: false,
+            }
+        );
+    }
+}
+// === STARTUP_CORE_END ===
+
+/// 只读解析当前 Windows 登录启动项指向的旧版程序所在目录，供数据目录自动发现使用。
+pub fn startup_exe_dir() -> Option<std::path::PathBuf> {
+    let raw = read_startup_command().ok()??;
+    parse_startup_exe_path(&raw)?.parent().map(|p| p.to_path_buf())
 }
 
 #[tauri::command]
 pub fn startup_status() -> Result<StartupStatus, String> {
-    let expected = current_command()?;
+    let current_exe = current_exe_path()?;
     let actual = read_startup_command()?;
-    Ok(StartupStatus {
-        enabled: actual.as_ref() == Some(&expected),
-        conflict: actual.is_some_and(|value| value != expected),
-    })
+    let target_exists = actual
+        .as_deref()
+        .and_then(parse_startup_exe_path)
+        .is_some_and(|p| p.is_file());
+    let approved = read_startup_approved_bytes()?;
+    Ok(evaluate_startup_status(
+        &current_exe,
+        actual.as_deref(),
+        target_exists,
+        approved.as_deref(),
+    ))
 }
 
 #[tauri::command]
 pub fn set_startup_enabled(enabled: bool) -> Result<StartupStatus, String> {
     let status = startup_status()?;
     if status.conflict {
-        return Err("已存在其他路径的 DesktopHub Lite 自启项；未覆盖或删除".into());
+        return Err("已存在其他有效路径的 DesktopHub Lite 自启项；未覆盖或删除".into());
     }
-    if enabled == status.enabled {
+    if enabled && status.enabled {
+        return Ok(status);
+    }
+    if !enabled && !status.enabled && !status.stale && !status.system_disabled {
         return Ok(status);
     }
 
-    let command = HSTRING::from(current_command()?);
-    let bytes = (command.len() as u32 + 1) * 2;
-    let result = unsafe {
-        if enabled {
+    if enabled {
+        let command = HSTRING::from(current_command()?);
+        let bytes = (command.len() as u32 + 1) * 2;
+        let run_res = unsafe {
             RegSetKeyValueW(
                 HKEY_CURRENT_USER,
                 RUN_KEY,
@@ -316,12 +543,40 @@ pub fn set_startup_enabled(enabled: bool) -> Result<StartupStatus, String> {
                 Some(command.as_ptr().cast()),
                 bytes,
             )
-        } else {
-            RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE)
+        };
+        if run_res.0 != 0 {
+            return Err(format!("无法写入自启项（Windows 错误 {}）", run_res.0));
         }
-    };
-    if result.0 != 0 {
-        return Err(format!("无法修改自启项（Windows 错误 {}）", result.0));
+        // 同步将 StartupApproved\Run 置为启用态，解除任务管理器/系统设置残留的 0x03 禁用拦截。
+        let approve_res = unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                APPROVED_RUN_KEY,
+                RUN_VALUE,
+                REG_BINARY.0,
+                Some(APPROVED_ENABLED_BYTES.as_ptr().cast()),
+                APPROVED_ENABLED_BYTES.len() as u32,
+            )
+        };
+        if approve_res.0 != 0 {
+            return Err(format!(
+                "无法恢复系统启动审批启用状态（Windows 错误 {}）",
+                approve_res.0
+            ));
+        }
+    } else {
+        let del_run = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE) };
+        if !matches!(del_run.0, 0 | 2 | 3) {
+            return Err(format!("无法移除自启项（Windows 错误 {}）", del_run.0));
+        }
+        let del_approved =
+            unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, APPROVED_RUN_KEY, RUN_VALUE) };
+        if !matches!(del_approved.0, 0 | 2 | 3) {
+            crate::log_warn!(
+                "清理 StartupApproved 启动审批记录失败（Windows 错误 {}）",
+                del_approved.0
+            );
+        }
     }
     startup_status()
 }

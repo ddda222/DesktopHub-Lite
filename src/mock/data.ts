@@ -61,6 +61,11 @@ const minute = 60_000
 
 export const clips: ClipItem[] = [
   {
+    id: 'clip-color-01', kind: 'text', group: '工作', note: '液态琉璃主强调色', favorite: true,
+    text: '#7DD3FC',
+    copiedAt: now - 25_000
+  },
+  {
     id: 'clip-dev-json', kind: 'text', group: '代码', note: '接口响应样例', favorite: true,
     text: '{"requestId":9007199254740993,"code":200,"data":{"name":"示例项目","enabled":true,"roles":["developer","reviewer"],"items":[]},"message":"success"}',
     copiedAt: now - minute
@@ -168,11 +173,16 @@ export const clips: ClipItem[] = [
 
 export const groups = ['未分组', '工作', '代码', '图片']
 
-export const snippetGroups = ['未分组', '工作', '代码', '回复']
+export const snippetGroups = ['未分组', '账密', '工作', '代码', '回复']
+
+export const mockSnippetPasswords: Record<string, string> = {
+  'snip-cred-demo': 'DemoPass#2026'
+}
 
 export const snippets: SnippetItem[] = [
   {
     id: 'snip-daily-report',
+    kind: 'text',
     title: '研发日报抬头',
     content: '【{{date}} {{weekday}} 研发进度】\n1. 今日完成：\n2. 明日计划：\n3. 风险与协作：',
     group: '工作',
@@ -181,6 +191,7 @@ export const snippets: SnippetItem[] = [
   },
   {
     id: 'snip-code-quote',
+    kind: 'text',
     title: '代码块引用包装',
     content: '定位记录（{{time}}）：\n```\n{{clipboard}}\n```',
     group: '代码',
@@ -188,7 +199,19 @@ export const snippets: SnippetItem[] = [
     updatedAt: now - minute * 18
   },
   {
+    id: 'snip-cred-demo',
+    kind: 'credential',
+    title: '测试环境管理后台',
+    content: '内网联调测试账号',
+    account: 'demo-admin@example.com',
+    hasPassword: true,
+    group: '账密',
+    pinned: false,
+    updatedAt: now - minute * 30
+  },
+  {
     id: 'snip-reply-ack',
+    kind: 'text',
     title: '收到确认与排期回复',
     content: '已收到，正在核对上下文与复现条件，稍后同步处理结论。',
     group: '回复',
@@ -197,6 +220,7 @@ export const snippets: SnippetItem[] = [
   },
   {
     id: 'snip-git-check',
+    kind: 'text',
     title: '提交前空白与构建自检',
     content: 'git diff --check && pnpm --dir next run build',
     group: '代码',

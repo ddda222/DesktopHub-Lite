@@ -1,0 +1,722 @@
+/* ==========================================================================
+   液态玻璃与光影流体设置空间（Liquid Glass & Reactive Shader UI）
+   VisionOS 级极简折射玻璃悬浮面板 + 全屏 3D GLSL 液态流体舞台
+   ========================================================================== */
+
+.studio-deck {
+  --deck-ink: rgba(248, 251, 255, 0.96);
+  --deck-ink-2: rgba(226, 236, 252, 0.72);
+  --deck-ink-3: rgba(206, 220, 242, 0.48);
+  --deck-glass: rgba(16, 22, 36, 0.44);
+  --deck-panel: rgba(255, 255, 255, 0.065);
+  --deck-well: rgba(8, 12, 22, 0.34);
+  --deck-line: rgba(255, 255, 255, 0.14);
+  --deck-line-strong: rgba(255, 255, 255, 0.26);
+  --deck-specular: rgba(255, 255, 255, 0.36);
+  --deck-accent: #7dd3fc;
+  --deck-accent-soft: rgba(125, 211, 252, 0.22);
+  --deck-accent-ink: #061321;
+  --deck-key-bg: rgba(255, 255, 255, 0.08);
+  --deck-key-hover: rgba(255, 255, 255, 0.15);
+  --deck-radius: 18px;
+  --deck-mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  position: relative;
+  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--deck-ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 浅色 / 书卷 / 黏土主题：通透冰晶白玻璃 */
+.studio-deck.is-light-scene {
+  --deck-ink: rgba(18, 23, 34, 0.94);
+  --deck-ink-2: rgba(24, 30, 44, 0.68);
+  --deck-ink-3: rgba(24, 30, 44, 0.44);
+  --deck-glass: rgba(255, 255, 255, 0.52);
+  --deck-panel: rgba(255, 255, 255, 0.5);
+  --deck-well: rgba(255, 255, 255, 0.42);
+  --deck-line: rgba(20, 26, 38, 0.1);
+  --deck-line-strong: rgba(20, 26, 38, 0.18);
+  --deck-specular: rgba(255, 255, 255, 0.88);
+  --deck-accent: #2563eb;
+  --deck-accent-soft: rgba(37, 99, 235, 0.14);
+  --deck-accent-ink: #ffffff;
+  --deck-key-bg: rgba(255, 255, 255, 0.62);
+  --deck-key-hover: rgba(255, 255, 255, 0.86);
+}
+
+/* ---------- 顶部真实可操作灵动岛悬浮轨道 ---------- */
+.floating-island-rail {
+  position: fixed;
+  top: 14px;
+  left: 24px;
+  right: 24px;
+  z-index: 30;
+  display: flex;
+  align-items: flex-start;
+  pointer-events: none;
+  transition: justify-content 260ms ease;
+}
+
+.floating-island-slot {
+  pointer-events: auto;
+}
+
+/* ---------- 左侧悬浮液态玻璃面板 ---------- */
+.glass-drawer {
+  position: fixed;
+  top: 66px;
+  left: 24px;
+  bottom: 24px;
+  width: min(468px, calc(100vw - 48px));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border-radius: 26px;
+  background: var(--deck-glass);
+  border: 1px solid var(--deck-line-strong);
+  box-shadow:
+    inset 0 1px 0 var(--deck-specular),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 28px 72px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(28px) saturate(1.55);
+  -webkit-backdrop-filter: blur(28px) saturate(1.55);
+  overflow: hidden;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 260ms ease;
+}
+
+.glass-drawer.is-peeking {
+  opacity: 0.06;
+  pointer-events: none;
+  transform: translateX(-28px) scale(0.985);
+}
+
+.drawer-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--deck-line);
+}
+
+.drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+
+.drawer-orb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #ffffff 0%, var(--deck-accent) 52%, rgba(15, 23, 42, 0.45) 100%);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.75), 0 4px 14px var(--deck-accent-soft);
+  flex: none;
+}
+
+.drawer-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.drawer-sub {
+  font-size: 11px;
+  color: var(--deck-ink-2);
+}
+
+.drawer-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.deck-link-pill {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--deck-line);
+  background: var(--deck-key-bg);
+  color: var(--deck-ink-2);
+  text-decoration: none;
+  font-size: 11.5px;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.deck-link-pill:hover {
+  background: var(--deck-key-hover);
+  color: var(--deck-ink);
+  border-color: var(--deck-line-strong);
+}
+
+/* ---------- 胶囊导航栏 ---------- */
+.deck-tabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--deck-line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.deck-tab {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--deck-ink-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background 180ms ease, color 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+
+.deck-tab:hover {
+  background: var(--deck-key-bg);
+  color: var(--deck-ink);
+}
+
+.deck-tab:active {
+  transform: scale(0.95);
+}
+
+.deck-tab.is-active {
+  background: var(--deck-key-hover);
+  border-color: var(--deck-line-strong);
+  box-shadow: inset 0 1px 0 var(--deck-specular);
+  color: var(--deck-ink);
+  font-weight: 700;
+}
+
+/* ---------- 内容滚动区 ---------- */
+.deck-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 18px 22px;
+}
+
+.deck-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.deck-section-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.deck-section-head p {
+  margin: 3px 0 0;
+  font-size: 11.5px;
+  color: var(--deck-ink-2);
+}
+
+.deck-card {
+  padding: 14px;
+  border-radius: var(--deck-radius);
+  background: var(--deck-panel);
+  border: 1px solid var(--deck-line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.deck-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.deck-card-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.deck-card-sub {
+  font-size: 11px;
+  color: var(--deck-ink-2);
+}
+
+/* ---------- 10 套光学材质球色卡 ---------- */
+.theme-matrix {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.theme-swatch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--deck-line);
+  background: var(--deck-key-bg);
+  color: var(--deck-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), background 160ms ease, border-color 160ms ease, box-shadow 180ms ease;
+}
+
+.theme-swatch:hover {
+  transform: translateY(-1px);
+  background: var(--deck-key-hover);
+  border-color: var(--deck-line-strong);
+}
+
+.theme-swatch:active {
+  transform: scale(0.96);
+}
+
+.theme-swatch.is-active {
+  background: var(--deck-key-hover);
+  border-color: var(--deck-accent);
+  box-shadow: inset 0 1px 0 var(--deck-specular), 0 0 0 2px var(--deck-accent-soft);
+}
+
+.swatch-orb {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.55), 0 3px 10px rgba(0, 0, 0, 0.22);
+}
+
+.swatch-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.swatch-name {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.swatch-tag {
+  font-size: 10px;
+  color: var(--deck-ink-3);
+}
+
+/* ---------- 6 套动效液态曲线按钮 ---------- */
+.motion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.motion-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 11px;
+  border-radius: 14px;
+  border: 1px solid var(--deck-line);
+  background: var(--deck-key-bg);
+  color: var(--deck-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 120ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.motion-pad:hover {
+  background: var(--deck-key-hover);
+  border-color: var(--deck-line-strong);
+}
+
+.motion-pad:active {
+  transform: scale(0.96);
+}
+
+.motion-pad.is-active {
+  background: var(--deck-accent-soft);
+  border-color: var(--deck-accent);
+  box-shadow: inset 0 1px 0 var(--deck-specular);
+}
+
+.motion-pad-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.motion-ms {
+  font-family: var(--deck-mono);
+  font-size: 10px;
+  color: var(--deck-ink-2);
+}
+
+.motion-curve {
+  width: 100%;
+  height: 20px;
+}
+
+.motion-curve path {
+  fill: none;
+  stroke: var(--deck-ink-2);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+}
+
+.motion-pad.is-active .motion-curve path {
+  stroke: var(--deck-accent);
+}
+
+/* ---------- 玻璃推子与柔滑开关 ---------- */
+.fader-box {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--deck-well);
+  border: 1px solid var(--deck-line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fader-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fader-readout {
+  font-family: var(--deck-mono);
+  color: var(--deck-accent);
+  font-weight: 700;
+}
+
+.deck-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.deck-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--deck-line-strong);
+}
+
+.deck-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6.5px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--deck-accent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  transition: transform 140ms ease;
+}
+
+.deck-slider:hover::-webkit-slider-thumb {
+  transform: scale(1.14);
+}
+
+.fader-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--deck-mono);
+  font-size: 10px;
+  color: var(--deck-ink-3);
+}
+
+.toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mech-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: 1px solid var(--deck-line);
+  background: var(--deck-key-bg);
+  color: var(--deck-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease;
+}
+
+.mech-toggle:hover {
+  background: var(--deck-key-hover);
+}
+
+.mech-toggle:active {
+  transform: scale(0.985);
+}
+
+.mech-toggle.is-on {
+  border-color: var(--deck-accent);
+  background: var(--deck-accent-soft);
+}
+
+.mech-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mech-title {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.mech-desc {
+  font-size: 11px;
+  color: var(--deck-ink-2);
+}
+
+.mech-switch {
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 99px;
+  padding: 3px;
+  background: var(--deck-well);
+  border: 1px solid var(--deck-line-strong);
+  display: flex;
+  align-items: center;
+  transition: background 180ms ease, border-color 180ms ease;
+}
+
+.mech-toggle.is-on .mech-switch {
+  background: var(--deck-accent);
+  border-color: var(--deck-accent);
+}
+
+.mech-knob {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.22);
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mech-toggle.is-on .mech-knob {
+  transform: translateX(18px);
+}
+
+/* ---------- 玻璃胶囊按钮 & 分段控件 ---------- */
+.deck-btn {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--deck-line-strong);
+  background: var(--deck-key-bg);
+  color: var(--deck-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  transition: transform 110ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.deck-btn:hover:not(:disabled) {
+  background: var(--deck-key-hover);
+  border-color: var(--deck-accent);
+}
+
+.deck-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.deck-btn.is-primary {
+  background: var(--deck-accent);
+  border-color: var(--deck-accent);
+  color: var(--deck-accent-ink);
+}
+
+.deck-btn.is-sm {
+  height: 27px;
+  padding: 0 11px;
+  font-size: 11.5px;
+}
+
+.deck-btn.is-danger {
+  color: #fb7185;
+}
+
+.deck-seg {
+  display: inline-flex;
+  width: 100%;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--deck-well);
+  border: 1px solid var(--deck-line);
+  gap: 3px;
+}
+
+.deck-seg-btn {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--deck-ink-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 180ms ease, color 160ms ease;
+}
+
+.deck-seg-btn.is-active {
+  background: var(--deck-key-hover);
+  color: var(--deck-ink);
+  box-shadow: inset 0 1px 0 var(--deck-specular), 0 2px 8px rgba(0, 0, 0, 0.14);
+  font-weight: 700;
+}
+
+/* ---------- 抽屉底栏 ---------- */
+.drawer-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--deck-line);
+  background: var(--deck-well);
+}
+
+.drawer-footer-note {
+  font-size: 11px;
+  color: var(--deck-ink-2);
+}
+
+/* ---------- 右下角：极简液态玻璃光学实况胶囊 ---------- */
+.stage-hud-bottom {
+  position: fixed;
+  right: 26px;
+  bottom: 24px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: min(440px, calc(100vw - 530px));
+}
+
+.hud-reaction-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--deck-glass);
+  border: 1px solid var(--deck-line-strong);
+  box-shadow: inset 0 1px 0 var(--deck-specular), 0 14px 36px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(22px) saturate(1.5);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.hud-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--deck-accent);
+  box-shadow: 0 0 12px var(--deck-accent);
+  flex: none;
+}
+
+.hud-quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.hud-chip-btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--deck-line-strong);
+  background: var(--deck-glass);
+  color: var(--deck-ink);
+  box-shadow: inset 0 1px 0 var(--deck-specular);
+  backdrop-filter: blur(20px) saturate(1.4);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 110ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.hud-chip-btn:hover {
+  border-color: var(--deck-accent);
+  background: var(--deck-key-hover);
+}
+
+.hud-chip-btn:active {
+  transform: scale(0.95);
+}
+
+.hud-chip-btn.is-active {
+  background: var(--deck-accent);
+  border-color: var(--deck-accent);
+  color: var(--deck-accent-ink);
+}
+
+@media (max-width: 960px) {
+  .glass-drawer {
+    top: auto;
+    bottom: 14px;
+    left: 14px;
+    right: 14px;
+    width: auto;
+    height: 54vh;
+  }
+
+  .stage-hud-bottom {
+    top: 66px;
+    bottom: auto;
+    right: 14px;
+    max-width: calc(100vw - 28px);
+  }
+}

@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import GlassLight from '@/components/GlassLight.vue'
 import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
 import IslandParticles from './motion/IslandParticles.vue'
 import ApprovalPrompt from './ApprovalPrompt.vue'
+import OcrResultPanel from '@/features/ocr/OcrResultPanel.vue'
 import MailNotices from '@/features/mail/MailNotices.vue'
 import { providerName, useMailList, type MailNotice } from '@/features/mail/mail'
 import { useApprovals } from './useApprovals'
 import { useIslandEffects, type IslandCue } from './motion/useIslandEffects'
+import { advanceSpring } from './motion/physics'
+import {
+  computeDismissPull,
+  shouldAutoCollapseOnWindowBlur,
+  shouldCommitDismiss,
+  shouldKeepTranslationOpen
+} from './dismissGesture'
 import {
   buildTelemetryReadout,
   countTelemetryMetrics,
@@ -25,7 +33,23 @@ import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
 import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
-import { isDarkTheme, pushToast, iconFor, launchApp, openSettings, setCategory, state, visibleApps } from '@/store'
+import {
+  applyOcrError,
+  applyOcrResult,
+  closeOcrPanel,
+  type OcrResultEvent,
+  runClipboardOcr,
+  startScreenOcr,
+  isDarkTheme,
+  pushToast,
+  iconFor,
+  launchApp,
+  openSettings,
+  setCategory,
+  setPaused,
+  state,
+  visibleApps
+} from '@/store'
 import { isMotionMode, MOTION_TIMINGS, type MotionMode } from '@/lib/motions'
 
 const props = defineProps<{
@@ -33,6 +57,7 @@ const props = defineProps<{
   previewKeepOpen?: boolean
   previewCue?: IslandCue
   previewTelemetry?: TelemetrySnapshot | null
+  previewMail?: MailNotice[]
 }>()
 const element = ref<HTMLElement | null>(null)
 const viewport = ref<HTMLElement | null>(null)
@@ -52,6 +77,7 @@ const windowDrag = useWindowDrag(viewport, {
 })
 const panel = ref<HTMLElement | null>(null)
 function resolveVariant(mode = state.settings.theme): IslandVariant {
+  if (mode === 'liquid') return 'liquid'
   if (mode === 'midnight') return 'telemetry'
   if (mode === 'mecha') return 'mecha'
   if (mode === 'scroll') return 'scroll'
@@ -65,7 +91,8 @@ const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 const dark = ref(isDarkTheme())
 const variant = ref<IslandVariant>(resolveVariant())
 const telemetry = computed(() => variant.value === 'telemetry')
-const glassPalette = computed<'cool' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'>(() => {
+const glassPalette = computed<'cool' | 'liquid' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'>(() => {
+  if (variant.value === 'liquid') return 'liquid'
   if (variant.value === 'mecha') return 'amber'
   if (variant.value === 'scroll') return 'vermilion'
   if (variant.value === 'pixel') return 'lime'
@@ -75,14 +102,38 @@ const glassPalette = computed<'cool' | 'amber' | 'vermilion' | 'lime' | 'chalk' 
   return 'cool'
 })
 /** 霓虹招牌与软糖表情随胶囊状态切换，只做装饰，读屏仍以状态文字为准。 */
-const neonSign = computed(() => ({ working: '加班中', paused: '打烊', feedback: '好嘞', mail: '来信', approval: '请示', files: '寄存' } as Record<string, string>)[capsuleStatus.value.kind] ?? '营业中')
-const clayFace = computed(() => ({ working: '•̀ᴗ•́', paused: '-ᴗ-', feedback: '^ᴗ^', mail: '•o•', approval: '•﹏•', files: '•ᴗ•' } as Record<string, string>)[capsuleStatus.value.kind] ?? 'ᵔᴗᵔ')
+const neonSign = computed(() => ({ working: '加班中', paused: '打烊', feedback: '好嘞', mail: '来信', approval: '请示', files: '寄存', 'quick-ocr': '识字' } as Record<string, string>)[capsuleStatus.value.kind] ?? '营业中')
+const clayFace = computed(() => ({ working: '•̀ᴗ•́', paused: '-ᴗ-', feedback: '^ᴗ^', mail: '•o•', approval: '•﹏•', files: '•ᴗ•', 'quick-ocr': '•̀ω•́' } as Record<string, string>)[capsuleStatus.value.kind] ?? 'ᵔᴗᵔ')
 const hostExpanded = computed(() => state.ui.islandExpanded)
-const mailNotices = useMailList<MailNotice>('bar', 'mail_notices', 'mail-notices-changed', message => pushToast(message, 'error'))
+const hostMailNotices = useMailList<MailNotice>('bar', 'mail_notices', 'mail-notices-changed', message => pushToast(message, 'error'))
+const mailNotices = computed(() => (isDesktop ? hostMailNotices.value : (props.previewMail?.length ? props.previewMail : hostMailNotices.value)))
 const mailSelected = ref(false)
 const viewingMail = computed(() => mailSelected.value && mailNotices.value.length > 0)
 const seenMail = ref<string[]>([])
 const newMail = computed(() => mailNotices.value.filter(item => !seenMail.value.includes(item.id)))
+const quickMailCode = computed(() => newMail.value.find(item => !!item.code?.trim()) ?? null)
+const copyingQuickCode = ref(false)
+interface QuickImageOcrPayload {
+  clipId: string
+  width?: number | null
+  height?: number | null
+}
+const quickOcrClip = ref<QuickImageOcrPayload | null>(null)
+const hoveringQuickAction = ref(false)
+const pinned = ref(false)
+const quickMenuOpen = ref(false)
+const previewVolume = ref(72)
+let volumeBusy = false
+const appSearch = ref('')
+const appSearchEl = ref<HTMLInputElement | null>(null)
+const showAppNames = computed(() => state.ui.islandAppearance.showAppNames !== false)
+const filteredApps = computed(() => {
+  const q = appSearch.value.trim().toLowerCase()
+  if (!q) return visibleApps.value
+  return visibleApps.value.filter(app =>
+    app.name.toLowerCase().includes(q) || app.target.toLowerCase().includes(q)
+  )
+})
 const mailSummary = computed(() => {
   const [first] = newMail.value
   if (!first) return ''
@@ -143,6 +194,9 @@ watch(tucked, value => {
 const telemetryReadout = computed(() =>
   telemetryActive.value ? buildTelemetryReadout(telemetrySample.value, telemetryPrefs.value) : null
 )
+const showQuickOcr = computed(() =>
+  !expanded.value && !tucked.value && !approval.value && !quickMenuOpen.value && !!quickOcrClip.value
+)
 const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: string; icon: IconName | null; kind: string }>(() => {
   if (approval.value) return { text: approval.value.kind === 'approval' ? '待审批' : '有提问', ariaText: approval.value.title, icon: 'info', kind: 'approval' }
   if (receivingFiles.value) return { text: '松开暂存', icon: 'folder', kind: 'working' }
@@ -150,8 +204,15 @@ const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: stri
   const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
   if (pending) return { text: pending > 1 ? `翻译中 · ${pending}` : '翻译中', icon: 'translate', kind: 'working' }
   if (feedbackText.value) return { text: feedbackText.value, icon: feedbackText.value === '翻译失败' ? 'info' : 'check', kind: 'feedback' }
-  if (mailSummary.value) return { text: mailSummary.value, icon: 'mail', kind: 'mail' }
-  if (state.ui.paused) return { text: '记录已暂停', icon: 'pause', kind: 'paused' }
+  if (showQuickOcr.value) {
+    return {
+      text: '已截屏',
+      ariaText: '检测到新截图，可点击右侧识字按钮识别文字',
+      tooltip: '刚捕获新截图 · 点击右侧「识字」直接提取文字',
+      icon: 'image',
+      kind: 'quick-ocr'
+    }
+  }
   if (telemetryReadout.value) {
     return {
       text: telemetryReadout.value.text,
@@ -161,9 +222,24 @@ const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: stri
       kind: 'telemetry'
     }
   }
-  if (shelf.entries.length) return { text: `暂存 ${shelf.entries.length > 999 ? '999+' : shelf.entries.length} 项`, icon: 'folder', kind: 'files' }
   return { text: clockText.value, icon: null, kind: 'idle' }
 })
+/** 收起态右侧副舱徽标：与时钟/微读数并存，不再互相挤掉。 */
+const capsuleBadges = computed<{ id: string; icon: IconName; text: string; title: string; tone?: 'accent' | 'paused' }[]>(() => {
+  if (expanded.value || tucked.value || approval.value || receivingFiles.value || shelf.busy || feedbackText.value || showQuickOcr.value) return []
+  const list: { id: string; icon: IconName; text: string; title: string; tone?: 'accent' | 'paused' }[] = []
+  if (newMail.value.length && !quickMailCode.value) {
+    list.push({ id: 'mail', icon: 'mail', text: String(newMail.value.length), title: mailSummary.value || '未读邮件', tone: 'accent' })
+  }
+  if (shelf.entries.length) {
+    list.push({ id: 'files', icon: 'folder', text: shelf.entries.length > 99 ? '99+' : String(shelf.entries.length), title: `暂存 ${shelf.entries.length} 个文件` })
+  }
+  if (state.ui.paused) {
+    list.push({ id: 'paused', icon: 'pause', text: '暂停', title: '剪贴板已暂停记录', tone: 'paused' })
+  }
+  return list
+})
+const showQuickCode = computed(() => !expanded.value && !tucked.value && !approval.value && !feedbackText.value && !showQuickOcr.value && !!quickMailCode.value)
 const isNoticeStatus = computed(() => capsuleStatus.value.kind !== 'idle' && capsuleStatus.value.kind !== 'telemetry')
 const taskSignal = computed(() => {
   if (capsuleStatus.value.kind === 'idle') return 'idle'
@@ -179,6 +255,8 @@ let stopShelf: (() => void) | undefined
 const content = ref<HTMLElement | null>(null)
 const chrome = ref<HTMLElement | null>(null)
 const modeNav = ref<HTMLElement | null>(null)
+const modeSelection = ref<HTMLElement | null>(null)
+const paneDir = ref<1 | -1>(1)
 const contentHeight = ref(330)
 const chromeHeight = ref(56)
 const availableWidth = ref(window.screen.availWidth)
@@ -192,8 +270,10 @@ function setReadingExplanation(active: boolean) {
   if (isDesktop) readingSync = readingSync.then(() => invokeHost<void>('set_island_reading_explanation', { active }))
     .catch(() => pushToast('无法同步灵动岛的展开状态', 'error'))
 }
-const keepTaskOpen = computed(() => !viewingMail.value &&
-  (page.value === 'translation' || (page.value === 'clipboard' && readingExplanation.value)))
+const ocrPanelOpen = computed(() => state.ocr.open)
+const keepTaskOpen = computed(() => ocrPanelOpen.value || (!viewingMail.value &&
+  ((page.value === 'translation' && shouldKeepTranslationOpen(state.translation)) ||
+   (page.value === 'clipboard' && readingExplanation.value))))
 const appearance = computed(() => state.ui.islandAppearance)
 const motionMode = computed<MotionMode>(() => {
   const raw = appearance.value.motion
@@ -212,10 +292,17 @@ const tuckedWidth = computed(() => variant.value !== 'standard' ? Math.min(134, 
 const visibleWidth = computed(() => {
   if (expanded.value) return expandedWidth.value - 24
   if (suppressed.value) return tuckedWidth.value
+  const badgeExtra = showQuickOcr.value
+    ? 116 * scale.value
+    : showQuickCode.value
+      ? 112 * scale.value
+      : capsuleBadges.value.reduce((acc, item) => acc + (item.text.length > 2 ? 48 : 34) * scale.value, 0)
+  const menuFloor = quickMenuOpen.value ? 412 * scale.value : 0
   if (capsuleStatus.value.kind === 'telemetry' && telemetryReadout.value) {
     const count = telemetryReadout.value.metricCount
     const table: Record<IslandVariant, [number, number][]> = {
       standard: [[140, 118], [188, 168], [240, 218]],
+      liquid: [[156, 134], [202, 182], [254, 232]],
       telemetry: [[158, 136], [204, 184], [256, 234]],
       scroll: [[178, 156], [226, 206], [278, 256]],
       mecha: [[190, 168], [240, 220], [292, 270]],
@@ -225,28 +312,41 @@ const visibleWidth = computed(() => {
       clay: [[176, 156], [226, 206], [278, 258]]
     }
     const [base, floor] = table[variant.value][Math.min(2, Math.max(0, count - 1))]
-    return Math.min(availableWidth.value - 24, Math.max(floor, Math.round(base * scale.value)))
+    return Math.min(availableWidth.value - 24, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra)))
   }
   const idle = capsuleStatus.value.kind === 'idle'
-  if (variant.value === 'telemetry') return (idle ? 148 : 186) * scale.value
-  if (variant.value === 'mecha' || variant.value === 'pixel') return (idle ? 176 : 208) * scale.value
-  if (variant.value === 'scroll') return (idle ? 164 : 196) * scale.value
-  if (variant.value === 'blueprint' || variant.value === 'neon') return (idle ? 184 : 216) * scale.value
-  if (variant.value === 'clay') return (idle ? 168 : 200) * scale.value
-  return (idle ? 128 : 168) * scale.value
+  let baseWidth = (idle ? 128 : 168) * scale.value
+  if (variant.value === 'liquid') baseWidth = (idle ? 142 : 178) * scale.value
+  else if (variant.value === 'telemetry') baseWidth = (idle ? 148 : 186) * scale.value
+  else if (variant.value === 'mecha' || variant.value === 'pixel') baseWidth = (idle ? 176 : 208) * scale.value
+  else if (variant.value === 'scroll') baseWidth = (idle ? 164 : 196) * scale.value
+  else if (variant.value === 'blueprint' || variant.value === 'neon') baseWidth = (idle ? 184 : 216) * scale.value
+  else if (variant.value === 'clay') baseWidth = (idle ? 168 : 200) * scale.value
+  return Math.min(availableWidth.value - 24, Math.max(menuFloor, Math.round(baseWidth + badgeExtra)))
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
-const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, scroll: 9, pixel: 9, blueprint: 8, neon: 6, clay: 8 }
-const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, scroll: 34, pixel: 36, blueprint: 34, neon: 34, clay: 36 }
-const visibleHeight = computed(() => expanded.value
-  ? Math.min(44 + (approval.value ? 0 : chromeHeight.value) + (!approval.value && !viewingMail.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value), window.screen.availHeight - 60)
-  : (suppressed.value ? lineHeights[variant.value] : compactHeights[variant.value]) * scale.value)
+const lineHeights: Record<IslandVariant, number> = { standard: 5, liquid: 6, telemetry: 7, mecha: 8, scroll: 9, pixel: 9, blueprint: 8, neon: 6, clay: 8 }
+const compactHeights: Record<IslandVariant, number> = { standard: 32, liquid: 34, telemetry: 32, mecha: 34, scroll: 34, pixel: 36, blueprint: 34, neon: 34, clay: 36 }
+const maxExpandedHeight = computed(() => Math.max(220, window.screen.availHeight - 60))
+const rawExpandedHeight = computed(() =>
+  48 + (approval.value ? 0 : chromeHeight.value) + (!approval.value && !viewingMail.value && !ocrPanelOpen.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value)
+)
+const needsOuterScroll = computed(() =>
+  expanded.value && !geometryMoving.value && !pageSwitching.value && rawExpandedHeight.value > maxExpandedHeight.value
+)
+const visibleHeight = computed(() => {
+  if (expanded.value) {
+    return Math.min(rawExpandedHeight.value, maxExpandedHeight.value)
+  }
+  if (suppressed.value) return lineHeights[variant.value] * scale.value
+  return compactHeights[variant.value] * scale.value + (quickMenuOpen.value ? 42 : 0)
+})
 const cornerRadius = computed(() => {
   if (variant.value === 'mecha' || variant.value === 'scroll' || variant.value === 'pixel') return 4
   if (variant.value === 'blueprint') return 2
   const base = expanded.value
-    ? (telemetry.value ? 12 : variant.value === 'clay' ? 28 : variant.value === 'neon' ? 20 : 18)
-    : tucked.value ? (telemetry.value ? 4 : 5) : (telemetry.value ? 10 : 24)
+    ? (telemetry.value ? 12 : variant.value === 'clay' ? 28 : variant.value === 'liquid' ? 22 : variant.value === 'neon' ? 20 : 18)
+    : tucked.value ? (telemetry.value ? 4 : 5) : quickMenuOpen.value ? 16 : (telemetry.value ? 10 : variant.value === 'liquid' ? 26 : 24)
   return Math.min(base, visibleHeight.value / 2, visibleWidth.value / 2)
 })
 const bounds = computed(() => ({
@@ -275,27 +375,59 @@ const sections = [
   { value: 'files', label: '文件中转', icon: 'folder' },
   { value: 'audio', label: '调音台', icon: 'volume' }
 ] as const
+let navMeasureTimer: ReturnType<typeof setTimeout> | undefined
+const pageSwitching = ref(false)
+let pageSwitchTimer: ReturnType<typeof setTimeout> | undefined
 function revealSelectedPage(): void {
   const nav = modeNav.value
   const selected = nav?.querySelector<HTMLElement>('button.selected')
   if (!nav || !selected) return
-  nav.style.setProperty('--sel-x', `${selected.offsetLeft}px`)
-  nav.style.setProperty('--sel-w', `${selected.offsetWidth}px`)
+  const indicator = modeSelection.value
+  if (indicator) {
+    indicator.style.transform = `translate3d(${selected.offsetLeft}px, 0, 0)`
+    indicator.style.width = `${selected.offsetWidth}px`
+  }
   if (selected.offsetLeft < nav.scrollLeft) nav.scrollLeft = selected.offsetLeft
   else if (selected.offsetLeft + selected.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = selected.offsetLeft + selected.offsetWidth - nav.clientWidth
 }
-watch([page, expanded, variant], revealSelectedPage, { flush: 'post' })
-watch(scale, revealSelectedPage, { flush: 'post' })
-onMounted(revealSelectedPage)
+function syncSelectedIndicator(): void {
+  revealSelectedPage()
+  clearTimeout(navMeasureTimer)
+  navMeasureTimer = setTimeout(revealSelectedPage, 60)
+}
+watch([page, expanded, variant, viewingMail], syncSelectedIndicator, { flush: 'post' })
+watch(scale, syncSelectedIndicator, { flush: 'post' })
+onMounted(syncSelectedIndicator)
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let leaveTimer: ReturnType<typeof setTimeout> | undefined
 let closeTimer: ReturnType<typeof setTimeout> | undefined
+let manualCollapseUntil = 0
 let closeCommitted = false
 let reenterAfterClose = false
 let clockTimer: ReturnType<typeof setTimeout> | undefined
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
+let quickOcrTimer: ReturnType<typeof setTimeout> | undefined
 let stopFeedback: (() => void) | undefined
 let stopTelemetry: (() => void) | undefined
+let stopWindowBlur: (() => void) | undefined
+let stopOcrResult: (() => void) | undefined
+let stopOcrError: (() => void) | undefined
+let stopQuickImageOcr: (() => void) | undefined
+const dismissHandle = ref<HTMLButtonElement | null>(null)
+let dismissSpring = { value: 0, velocity: 0, target: 0 }
+let dismissSpringFrame = 0
+let dismissSpringPrev = 0
+let suppressDismissClick = false
+let dismissSession: {
+  pointerId: number
+  handle: HTMLButtonElement
+  startX: number
+  startY: number
+  baseOffsetY: number
+  moved: boolean
+  samples: { y: number; ts: number }[]
+  lastOffsetY: number
+} | undefined
 let geometryTimer: ReturnType<typeof setTimeout> | undefined
 let observer: ResizeObserver | undefined
 let contentObserver: ResizeObserver | undefined
@@ -314,12 +446,122 @@ function updateClock(): void {
   clockText.value = formatTime()
   clockTimer = setTimeout(updateClock, 60000 - Date.now() % 60000 + 20)
 }
-function showFeedback(kind: string): void {
-  if (tucked.value || !['copied', 'translated', 'translation-error'].includes(kind)) return
+function showFeedback(kind: string, customLabel?: string): void {
+  if (tucked.value) return
+  if (!customLabel && !['copied', 'translated', 'translation-error'].includes(kind)) return
   clearTimeout(feedbackTimer)
-  feedbackText.value = kind === 'copied' ? '已复制' : kind === 'translated' ? '翻译完成' : '翻译失败'
+  feedbackText.value = customLabel ?? (kind === 'copied' ? '已复制' : kind === 'translated' ? '翻译完成' : '翻译失败')
   signal(kind === 'translation-error' ? 'notice' : 'complete')
-  feedbackTimer = setTimeout(() => { feedbackText.value = '' }, 2600)
+  feedbackTimer = setTimeout(() => { feedbackText.value = '' }, 2400)
+}
+
+/** 收起态一键直拷最新邮件验证码，不打断当前窗口工作流。 */
+async function copyQuickMailCode(): Promise<void> {
+  const item = quickMailCode.value
+  if (!item?.code || copyingQuickCode.value) return
+  copyingQuickCode.value = true
+  try {
+    if (isDesktop) {
+      await invokeHost('mail_action', { id: item.id, action: 'copy-code' })
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(item.code).catch(() => {})
+    }
+    if (!seenMail.value.includes(item.id)) seenMail.value = [...seenMail.value, item.id]
+    showFeedback('copied', `验证码 ${item.code} 已复制`)
+  } catch (error) {
+    pushToast(String(error), 'error')
+  } finally {
+    copyingQuickCode.value = false
+  }
+}
+
+function clearQuickOcr(): void {
+  clearTimeout(quickOcrTimer)
+  quickOcrTimer = undefined
+  quickOcrClip.value = null
+  hoveringQuickAction.value = false
+}
+
+function scheduleQuickOcrExpire(delayMs = 15000): void {
+  clearTimeout(quickOcrTimer)
+  quickOcrTimer = setTimeout(() => {
+    if (hoveringQuickAction.value || hovering.value) {
+      scheduleQuickOcrExpire(4000)
+      return
+    }
+    clearQuickOcr()
+  }, delayMs)
+}
+
+function showQuickImageOcr(payload: QuickImageOcrPayload): void {
+  if (!payload?.clipId || tucked.value || approval.value) return
+  clearTimeout(feedbackTimer)
+  feedbackText.value = ''
+  quickOcrClip.value = payload
+  signal('complete')
+  scheduleQuickOcrExpire(15000)
+}
+
+async function triggerQuickImageOcr(): Promise<void> {
+  const target = quickOcrClip.value
+  clearQuickOcr()
+  if (!target?.clipId) return
+  mailSelected.value = false
+  quickMenuOpen.value = false
+  manualCollapseUntil = 0
+  expand(true, true)
+  await runClipboardOcr(target.clipId)
+}
+
+function toggleQuickMenu(): void {
+  if (expanded.value || tucked.value || approval.value) return
+  cancelHover()
+  quickMenuOpen.value = !quickMenuOpen.value
+}
+
+async function runQuickAction(action: 'pause' | 'pin-open' | 'audio' | 'settings' | 'ocr'): Promise<void> {
+  quickMenuOpen.value = false
+  if (action === 'pause') {
+    await setPaused(!state.ui.paused)
+    showFeedback('copied', state.ui.paused ? '已暂停剪贴板' : '已恢复剪贴板')
+  } else if (action === 'pin-open') {
+    pinned.value = true
+    expand(true, true)
+  } else if (action === 'audio') {
+    await selectPage('audio')
+    expand(true, true)
+  } else if (action === 'ocr') {
+    await startScreenOcr()
+  } else {
+    openSettings()
+  }
+}
+
+/** 收起态胶囊滚轮快调音量（桌面版调用真实活动音频会话，浏览器态模拟演示）。 */
+async function adjustCapsuleVolume(deltaY: number): Promise<void> {
+  const step = deltaY < 0 ? 5 : -5
+  if (!isDesktop) {
+    previewVolume.value = Math.max(0, Math.min(100, previewVolume.value + step))
+    showFeedback('copied', `模拟音量 ${previewVolume.value}%`)
+    return
+  }
+  if (volumeBusy) return
+  volumeBusy = true
+  try {
+    const snapshot = await invokeHost<{ sessions: { id: string; name: string; volume: number; muted: boolean }[] }>('list_audio_sessions')
+    const target = snapshot.sessions[0]
+    if (!target) {
+      showFeedback('translation-error', '暂无活动音频')
+      return
+    }
+    const nextVol = Math.max(0, Math.min(100, Math.round(target.volume + step)))
+    const actual = await invokeHost<{ volume: number }>('update_audio_session', { id: target.id, volume: nextVol, muted: nextVol === 0 ? true : false })
+    showFeedback('copied', `${target.name} ${Math.round(actual.volume)}%`)
+  } catch {
+    showFeedback('translation-error', '音量读取失败')
+  } finally {
+    volumeBusy = false
+  }
 }
 watch(() => props.previewFeedback, value => {
   if (isDesktop || !value) return
@@ -361,14 +603,18 @@ function reserveGeometry(): void {
     width: Math.max(viewportSize.value.width, target.width),
     height: Math.max(viewportSize.value.height, target.height)
   }
+  const durationMs = Math.max(
+    expanded.value ? expandMs.value : collapseMs.value,
+    pageSwitching.value ? 230 : 0
+  )
   geometryTimer = setTimeout(() => {
     viewportSize.value = { ...bounds.value }
     geometryMoving.value = false
     queueGeometry()
-  }, (expanded.value ? expandMs.value : collapseMs.value) + 50)
+  }, durationMs + 60)
 }
 
-watch([bounds, () => state.ui.islandReducedMotion, reducedMotion], reserveGeometry)
+watch([bounds, expanded, () => state.ui.islandReducedMotion, reducedMotion], reserveGeometry, { flush: 'sync' })
 function updateMotion(): void { reducedMotion.value = systemMotion.matches }
 
 function cancelHover(): void { clearTimeout(hoverTimer) }
@@ -418,10 +664,205 @@ function expand(value: boolean, focus = false): void {
   })
 }
 
+function applyDismissVisual(offsetY: number, scaleY: number, dragging: boolean, ready: boolean): void {
+  const surface = panel.value
+  if (surface) {
+    if (offsetY === 0 && scaleY === 1) {
+      surface.style.translate = ''
+      surface.style.scale = ''
+    } else {
+      surface.style.translate = `0 ${offsetY.toFixed(2)}px`
+      surface.style.scale = `1 ${scaleY.toFixed(4)}`
+    }
+    surface.classList.toggle('dismiss-dragging', dragging)
+  }
+  const handle = dismissHandle.value
+  if (handle) {
+    handle.classList.toggle('dragging', dragging)
+    handle.classList.toggle('ready', ready)
+  }
+}
+
+function stopDismissSpring(): void {
+  if (dismissSpringFrame) {
+    cancelAnimationFrame(dismissSpringFrame)
+    dismissSpringFrame = 0
+  }
+  dismissSpringPrev = 0
+}
+
+function clearDismissVisual(): void {
+  stopDismissSpring()
+  dismissSpring = { value: 0, velocity: 0, target: 0 }
+  dismissSession = undefined
+  applyDismissVisual(0, 1, false, false)
+}
+
+function startDismissSnapBack(initialVelocityPxPerSec: number): void {
+  stopDismissSpring()
+  if (motionReduced.value || Math.abs(dismissSpring.value) < 0.05) {
+    clearDismissVisual()
+    return
+  }
+  dismissSpring.target = 0
+  dismissSpring.velocity = initialVelocityPxPerSec
+  dismissSpringPrev = performance.now()
+  const step = (now: number): void => {
+    dismissSpringFrame = 0
+    if (disposed || !expanded.value || dismissSession) return
+    const dt = Math.min(0.064, Math.max(0.001, (now - dismissSpringPrev) / 1000))
+    dismissSpringPrev = now
+    const moving = advanceSpring(dismissSpring, dt, 22, 16)
+    const offsetY = dismissSpring.value
+    const scaleY = offsetY < 0 ? Math.max(0.94, 1 + offsetY * 0.0011) : 1
+    applyDismissVisual(offsetY, scaleY, false, false)
+    if (moving) dismissSpringFrame = requestAnimationFrame(step)
+    else clearDismissVisual()
+  }
+  dismissSpringFrame = requestAnimationFrame(step)
+}
+
+function collapseNow(clearPin = true): void {
+  clearDismissVisual()
+  if (clearPin) pinned.value = false
+  const active = document.activeElement
+  if (active instanceof HTMLElement && element.value?.contains(active)) active.blur()
+  manualCollapseUntil = performance.now() + 420
+  expand(false)
+}
+
+function handleWindowBlur(): void {
+  if (quickMenuOpen.value) quickMenuOpen.value = false
+  const allowed = shouldAutoCollapseOnWindowBlur({
+    expanded: expanded.value,
+    pinned: pinned.value,
+    hasApproval: !!approval.value,
+    shelfBusy: shelf.busy,
+    receivingFiles: receivingFiles.value,
+    composing: composing.value,
+    translationLoading: state.translation.status === 'loading' || (ocrPanelOpen.value && state.ocr.status === 'loading'),
+    previewKeepOpen: !isDesktop && !!props.previewKeepOpen
+  })
+  if (!allowed) return
+  collapseNow(false)
+}
+
+function handlePreviewOutsidePointerDown(event: PointerEvent): void {
+  if (isDesktop || !expanded.value) return
+  const target = event.target instanceof Element ? event.target : null
+  if (!target) return
+  if (target.closest('.island-hit-area, .preview-tools, .preview-lab, dialog')) return
+  handleWindowBlur()
+}
+
+function computeDismissVelocity(samples: { y: number; ts: number }[], now: number): number {
+  const recent = samples.filter(item => now - item.ts <= 110)
+  const latest = recent.at(-1)
+  if (!latest || now - latest.ts > 80 || recent.length < 2) return 0
+  const first = recent[0]
+  const dt = Math.max(8, latest.ts - first.ts)
+  const velocity = ((latest.y - first.y) / dt) * 1000
+  return Math.max(-2000, Math.min(2000, velocity))
+}
+
+function beginDismissDrag(event: PointerEvent): void {
+  if (event.button !== 0 || !event.isPrimary || !expanded.value || approval.value) return
+  const handle = event.currentTarget as HTMLButtonElement | null
+  if (!handle) return
+  const liveOffset = dismissSpring.value
+  stopDismissSpring()
+  pressed.value = true
+  cancelHover()
+  clearTimeout(leaveTimer)
+  cancelHoverClose()
+  suppressDismissClick = false
+  const ts = event.timeStamp || performance.now()
+  dismissSession = {
+    pointerId: event.pointerId,
+    handle,
+    startX: event.clientX,
+    startY: event.clientY,
+    baseOffsetY: liveOffset,
+    moved: Math.abs(liveOffset) > 1,
+    samples: [{ y: event.clientY, ts }],
+    lastOffsetY: liveOffset
+  }
+  handle.setPointerCapture(event.pointerId)
+  handle.classList.add('dragging')
+}
+
+function moveDismissDrag(event: PointerEvent): void {
+  const session = dismissSession
+  if (!session || event.pointerId !== session.pointerId) return
+  if (!(event.buttons & 1)) {
+    endDismissDrag(event, false)
+    return
+  }
+  const dx = event.clientX - session.startX
+  const dy = event.clientY - session.startY
+  if (!session.moved) {
+    if (Math.abs(dy) < 6 && Math.hypot(dx, dy) < 6) return
+    if (Math.abs(dy) < 6 && Math.abs(dx) >= 6) return
+    session.moved = true
+  }
+  const ts = event.timeStamp || performance.now()
+  session.samples.push({ y: event.clientY, ts })
+  if (session.samples.length > 10) session.samples.shift()
+  const pull = computeDismissPull(session.baseOffsetY + dy)
+  dismissSpring.value = pull.offsetY
+  session.lastOffsetY = pull.offsetY
+  const visualY = motionReduced.value ? 0 : pull.offsetY
+  const visualScale = motionReduced.value ? 1 : pull.scaleY
+  applyDismissVisual(visualY, visualScale, true, pull.ready)
+}
+
+function endDismissDrag(event: PointerEvent, cancelled = false): void {
+  const session = dismissSession
+  if (!session || event.pointerId !== session.pointerId) return
+  dismissSession = undefined
+  if (session.handle.hasPointerCapture(session.pointerId)) {
+    session.handle.releasePointerCapture(session.pointerId)
+  }
+  pressed.value = false
+  const now = event.timeStamp || performance.now()
+  const velocityPxPerSec = cancelled ? 0 : computeDismissVelocity(session.samples, now)
+
+  if (!cancelled && !session.moved && Math.abs(session.baseOffsetY) < 2) {
+    suppressDismissClick = true
+    collapseNow(true)
+    return
+  }
+
+  if (!cancelled && shouldCommitDismiss(session.lastOffsetY, velocityPxPerSec, session.moved, motionReduced.value)) {
+    suppressDismissClick = true
+    collapseNow(true)
+    return
+  }
+
+  suppressDismissClick = session.moved
+  startDismissSnapBack(velocityPxPerSec)
+  if (!hovering.value) leave()
+}
+
+function onDismissClick(): void {
+  if (suppressDismissClick) {
+    suppressDismissClick = false
+    return
+  }
+  collapseNow(true)
+}
+
 function activateCapsule(event: MouseEvent): void {
   if (windowDrag.consumeClick(event)) return
   if (approval.value) return
-  expand(!expanded.value, true)
+  quickMenuOpen.value = false
+  if (expanded.value) {
+    collapseNow(true)
+  } else {
+    clearQuickOcr()
+    manualCollapseUntil = 0
+    expand(true, true)
+  }
 }
 
 function startHoverClose(): void {
@@ -440,11 +881,35 @@ function startHoverClose(): void {
   }, collapseMs.value + 34)
 }
 
+/** 聪明防误触（Hover Intent）：高速甩过顶边时重置计时，停住满延时后稳定展开。 */
+let lastPointerSample: { x: number; y: number; ts: number } | null = null
+function trackPointerSpeed(event: PointerEvent): void {
+  const now = performance.now()
+  if (lastPointerSample) {
+    const dt = Math.max(8, now - lastPointerSample.ts)
+    const dist = Math.hypot(event.clientX - lastPointerSample.x, event.clientY - lastPointerSample.y)
+    const velocity = dist / dt
+    const threshold = tucked.value ? 0.45 : 0.9
+    // 仅在移动期间顺延倒计时；细线模式下光标路过时不立即触发，停稳后必定按时展开
+    if (velocity > threshold && hovering.value && !hostExpanded.value && !quickMenuOpen.value && !hoveringQuickAction.value) {
+      cancelHover()
+      scheduleHoverOpen()
+    }
+  }
+  lastPointerSample = { x: event.clientX, y: event.clientY, ts: now }
+}
+
 function scheduleHoverOpen(): void {
-  if (tucked.value) { expand(true); return }
+  if (quickMenuOpen.value || hoveringQuickAction.value || performance.now() < manualCollapseUntil) return
+  const delayMs = tucked.value
+    ? Math.max(state.ui.islandHoverMs, 420)
+    : showQuickOcr.value
+      ? Math.max(state.ui.islandHoverMs, 900)
+      : state.ui.islandHoverMs
   hoverTimer = setTimeout(() => {
-    if (hovering.value && !pressed.value) expand(true)
-  }, state.ui.islandHoverMs)
+    hoverTimer = undefined
+    if (hovering.value && !pressed.value && !quickMenuOpen.value && !hoveringQuickAction.value && performance.now() >= manualCollapseUntil) expand(true)
+  }, delayMs)
 }
 
 function enter(): void {
@@ -459,15 +924,15 @@ function enter(): void {
     return
   }
   if (hoverClosing.value) cancelHoverClose()
-  if (!hostExpanded.value) scheduleHoverOpen()
+  if (!hostExpanded.value && !quickMenuOpen.value && !hoveringQuickAction.value) scheduleHoverOpen()
 }
 
 function editing(): boolean {
-  if (approval.value || keepTaskOpen.value) return true
+  if (approval.value || keepTaskOpen.value || pinned.value) return true
   if (!isDesktop && props.previewKeepOpen) return true
   const active = document.activeElement
   return composing.value || pressed.value || receivingFiles.value || shelf.busy || !!shelf.previewItem ||
-    (active instanceof HTMLElement && !!element.value?.contains(active) &&
+    (document.hasFocus() && active instanceof HTMLElement && !!element.value?.contains(active) &&
       (active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement ||
        active.isContentEditable ||
        (active instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'range', 'submit'].includes(active.type))))
@@ -475,10 +940,14 @@ function editing(): boolean {
 
 function leave(): void {
   hovering.value = false
+  hoveringQuickAction.value = false
   reenterAfterClose = false
+  manualCollapseUntil = 0
+  lastPointerSample = null
   cancelHover()
   clearTimeout(leaveTimer)
   leaveTimer = setTimeout(() => {
+    if (!hovering.value && quickMenuOpen.value) quickMenuOpen.value = false
     if (hovering.value || editing()) return
     startHoverClose()
   }, state.ui.islandLeaveMs)
@@ -502,6 +971,7 @@ watch(hostExpanded, value => {
   reenterAfterClose = false
   cancelHoverClose()
   if (!value) {
+    clearDismissVisual()
     mailSelected.value = false
     cancelHover()
     clearTimeout(leaveTimer)
@@ -511,10 +981,20 @@ watch(hostExpanded, value => {
   }
 })
 
-watch(page, () => {
+watch(page, (nextPage, prevPage) => {
   mailSelected.value = false
+  if (prevPage && nextPage !== prevPage) {
+    const prevIdx = sections.findIndex(item => item.value === prevPage)
+    const nextIdx = sections.findIndex(item => item.value === nextPage)
+    if (prevIdx >= 0 && nextIdx >= 0) paneDir.value = nextIdx >= prevIdx ? 1 : -1
+  }
   if (!closeCommitted) cancelHoverClose()
-})
+  if (expanded.value && prevPage && nextPage !== prevPage && !motionReduced.value) {
+    pageSwitching.value = true
+    clearTimeout(pageSwitchTimer)
+    pageSwitchTimer = setTimeout(() => { pageSwitching.value = false }, 220)
+  }
+}, { flush: 'sync' })
 watch(() => props.previewKeepOpen, value => { if (!value && !hovering.value) leave() })
 watch(() => state.ui.islandAnchor, () => { if (!isDesktop) windowDrag.reset() })
 watch(() => shelf.busy, busy => {
@@ -525,6 +1005,8 @@ watch(() => shelf.busy, busy => {
 })
 
 watch(suppressed, () => {
+  clearDismissVisual()
+  clearQuickOcr()
   cancelHover()
   clearTimeout(leaveTimer)
   clearTimeout(feedbackTimer)
@@ -539,13 +1021,18 @@ watch(suppressed, () => {
 
 async function selectPage(value: typeof page.value): Promise<void> {
   mailSelected.value = false
-  if (!isDesktop) {
-    state.ui.islandPage = value
-    state.ui.panel = value === 'applications' ? null : value
-    return
+  closeOcrPanel()
+  const previous = state.ui.islandPage
+  const previousPanel = state.ui.panel
+  state.ui.islandPage = value
+  state.ui.panel = value === 'applications' ? null : value
+  if (!isDesktop) return
+  try { await invokeHost('select_island_page', { page: value, focus: !document.hasFocus() }) }
+  catch (error) {
+    state.ui.islandPage = previous
+    state.ui.panel = previousPanel
+    pushToast(String(error), 'error')
   }
-  try { await invokeHost('select_island_page', { page: value, focus: true }) }
-  catch (error) { pushToast(String(error), 'error') }
 }
 
 async function openWechat(): Promise<void> {
@@ -570,12 +1057,65 @@ async function launch(id: string): Promise<void> {
 function keydown(event: KeyboardEvent): void {
   if (approval.value) return
   if (event.isComposing || event.keyCode === 229) return
-  if (event.key === 'Escape') { event.stopPropagation(); expand(false) }
+  if (event.key === 'Escape') {
+    event.stopPropagation()
+    if (quickMenuOpen.value) { quickMenuOpen.value = false; return }
+    if (page.value === 'applications' && appSearch.value) { appSearch.value = ''; return }
+    collapseNow(true)
+    return
+  }
+  if (!expanded.value) return
+  const target = event.target instanceof HTMLElement ? event.target : null
+  const inTextField = !!target?.closest('input, textarea, select, [contenteditable="true"]')
+
+  // Alt+1~5 或非输入态 1~5 快切功能页
+  if ((event.altKey || !inTextField) && !event.ctrlKey && !event.metaKey && event.key >= '1' && event.key <= '5') {
+    const idx = Number(event.key) - 1
+    const section = sections[idx]
+    if (section) {
+      event.preventDefault()
+      void selectPage(section.value)
+    }
+    return
+  }
+  // Alt+左右方向键循环切页
+  if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+    event.preventDefault()
+    const currentIdx = Math.max(0, sections.findIndex(item => item.value === page.value))
+    const delta = event.key === 'ArrowRight' ? 1 : -1
+    const next = sections[(currentIdx + delta + sections.length) % sections.length]
+    if (next) void selectPage(next.value)
+    return
+  }
+  // Alt+P 一键切换钉住展开
+  if (event.altKey && event.key.toLowerCase() === 'p') {
+    event.preventDefault()
+    pinned.value = !pinned.value
+    showFeedback('copied', pinned.value ? '已钉住展开' : '已取消钉住')
+    return
+  }
+  // 在应用页直接敲字母/数字自动聚焦搜索框筛选应用
+  if (page.value === 'applications' && !viewingMail.value && !inTextField && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1 && /\S/.test(event.key)) {
+    appSearchEl.value?.focus()
+  }
+}
+
+function launchFirstFilteredApp(): void {
+  const first = filteredApps.value[0]
+  if (first) void launch(first.id)
 }
 
 function scrollWheel(event: WheelEvent): void {
   const boundary = element.value
-  if (!expanded.value || !boundary || event.defaultPrevented || !event.cancelable || event.ctrlKey || event.metaKey) return
+  if (!boundary || event.defaultPrevented || !event.cancelable || event.ctrlKey || event.metaKey) return
+  // 收起态胶囊滚轮快速调音
+  if (!expanded.value) {
+    if (!tucked.value && !approval.value && Math.abs(event.deltaY) > 0) {
+      event.preventDefault()
+      void adjustCapsuleVolume(event.deltaY)
+    }
+    return
+  }
   // 嵌套面板里不可滚动的内层会截住 WebView 的默认滚动链。
   // 从命中元素向外找能沿当前方向滚动的容器；只处理岛内，不改变窗口焦点。
   let target = event.target instanceof Element ? event.target : null
@@ -654,6 +1194,14 @@ function measureContent(): void {
   if (header) chromeHeight.value = header
 }
 
+function onPaneBeforeLeave(el: Element): void {
+  if (el instanceof HTMLElement) el.inert = true
+}
+
+watch([ocrPanelOpen, () => state.ocr.status, () => state.ocr.text], () => {
+  void nextTick(measureContent)
+})
+
 onMounted(() => {
   void subscribeShelf().then(off => { if (disposed) off(); else stopShelf = off })
     .catch(() => { shelf.error = '暂时无法同步中转文件状态' })
@@ -687,6 +1235,32 @@ onMounted(() => {
     if (disposed) off()
     else stopTelemetry = off
   }).catch(() => {})
+  void listenHost<OcrResultEvent>('island-ocr-result', payload => {
+    mailSelected.value = false
+    applyOcrResult(payload)
+  }).then(off => {
+    if (disposed) off()
+    else stopOcrResult = off
+  }).catch(() => {})
+  void listenHost<string>('island-ocr-error', message => {
+    mailSelected.value = false
+    applyOcrError(message, 'screen')
+  }).then(off => {
+    if (disposed) off()
+    else stopOcrError = off
+  }).catch(() => {})
+  void listenHost<QuickImageOcrPayload>('island-quick-image-ocr', showQuickImageOcr).then(off => {
+    if (disposed) off()
+    else stopQuickImageOcr = off
+  }).catch(() => {})
+  if (isDesktop) {
+    void listenHost<void>('island-window-blur', handleWindowBlur).then(off => {
+      if (disposed) off()
+      else stopWindowBlur = off
+    }).catch(() => {})
+  } else {
+    document.addEventListener('pointerdown', handlePreviewOutsidePointerDown)
+  }
   observer = new ResizeObserver(queueGeometry)
   contentObserver = new ResizeObserver(measureContent)
   if (viewport.value) observer.observe(viewport.value)
@@ -709,13 +1283,22 @@ onBeforeUnmount(() => {
   clearTimeout(leaveTimer)
   clearTimeout(clockTimer)
   clearTimeout(feedbackTimer)
+  clearTimeout(quickOcrTimer)
   stopFeedback?.()
   stopTelemetry?.()
+  stopOcrResult?.()
+  stopOcrError?.()
+  stopQuickImageOcr?.()
+  stopWindowBlur?.()
   stopFileDrop?.()
   stopShelf?.()
+  clearDismissVisual()
+  if (!isDesktop) document.removeEventListener('pointerdown', handlePreviewOutsidePointerDown)
   document.removeEventListener('visibilitychange', updateClock)
   clearTimeout(closeTimer)
   clearTimeout(geometryTimer)
+  clearTimeout(navMeasureTimer)
+  clearTimeout(pageSwitchTimer)
   window.removeEventListener('pointerup', handlePointerUp)
   window.removeEventListener('pointercancel', handlePointerUp)
   systemDark.removeEventListener('change', updateTheme)
@@ -726,12 +1309,12 @@ onBeforeUnmount(() => {
 <template>
   <div ref="viewport" class="island-viewport" :class="`anchor-${state.ui.islandAnchor}`" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
-    :class="[{ expanded, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed }, `variant-${variant}`, `motion-${motionMode}`]"
+    :class="[{ expanded, 'page-switching': pageSwitching, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed, 'has-quick-menu': quickMenuOpen && !expanded }, `variant-${variant}`, `motion-${motionMode}`]"
     :style="rootStyle" aria-label="顶部灵动岛"
-    @mouseenter="enter" @mouseleave="leave" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
+    @mouseenter="enter" @mouseleave="leave" @pointermove="trackPointerSpeed" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
-    <div ref="panel" class="island solid-surface" :data-motion="motionMode" :class="[{ expanded, tucked: !revealed, telemetry }, `variant-${variant}`, `motion-${motionMode}`]"
+    <div ref="panel" class="island solid-surface" :data-motion="motionMode" :class="[{ expanded, 'page-switching': pageSwitching, tucked: !revealed, telemetry, 'has-quick-menu': quickMenuOpen && !expanded, 'no-physics': !(effectsActive && quality === 'full') && !motionReduced }, `variant-${variant}`, `motion-${motionMode}`]"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
       <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" />
       <GlassLight v-if="materialReady && glassAvailable"
@@ -739,56 +1322,116 @@ onBeforeUnmount(() => {
       <IslandParticles v-if="materialReady"
         :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" :motion="motionMode" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
-      <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
-        :title="!expanded && capsuleStatus.tooltip ? capsuleStatus.tooltip : undefined"
-        :aria-label="approval ? approval.title : `${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
-        :inert="!revealed" aria-description="按住拖动位置，单击展开或收起"
-        @pointerdown.stop="windowDrag.begin" @click="activateCapsule">
-        <span class="capsule-text" :class="{ feedback: isNoticeStatus }" aria-hidden="true">
-          <span v-if="telemetry && !expanded" class="telemetry-led" :class="capsuleStatus.kind" />
-          <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
-          <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : capsuleStatus.kind === 'telemetry' ? '巡' : '安' }}</span>
-          <span v-else-if="variant === 'pixel' && !expanded" class="pixel-hp">♥HP</span>
-          <span v-else-if="variant === 'blueprint' && !expanded" class="bp-tag">图 01</span>
-          <span v-else-if="variant === 'neon' && !expanded" class="neon-sign">{{ neonSign }}</span>
-          <span v-else-if="variant === 'clay' && !expanded" class="clay-face">{{ clayFace }}</span>
-          <span class="capsule-label" :class="{ 'is-telemetry': capsuleStatus.kind === 'telemetry' }">
-            <template v-if="capsuleStatus.kind === 'telemetry' && telemetryReadout">
-              <template v-for="(seg, idx) in telemetryReadout.segments" :key="idx">
-                <i v-if="idx > 0" class="tel-sep">·</i>
-                <span class="tel-seg"><em class="tel-pre" :class="{ accent: seg.accent }">{{ seg.prefix }}</em>{{ seg.value }}</span>
+      <div class="capsule-bar" :class="{ 'has-quick-code': showQuickOcr || showQuickCode }">
+        <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
+          :title="expanded ? '单击收起 · 按住拖动位置' : (capsuleStatus.tooltip || '单击展开 · 右键快操 · 滚轮调音')"
+          :aria-label="approval ? approval.title : `${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
+          :inert="!revealed" aria-description="按住拖动位置，单击展开或收起，右键打开快捷操作"
+          @pointerdown.stop="windowDrag.begin" @click="activateCapsule" @contextmenu.prevent="toggleQuickMenu">
+          <span class="capsule-text" :class="{ feedback: isNoticeStatus }" aria-hidden="true">
+            <span v-if="telemetry && !expanded" class="telemetry-led" :class="capsuleStatus.kind" />
+            <span v-else-if="variant === 'liquid' && !expanded" class="liquid-orb-dot" />
+            <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
+            <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : capsuleStatus.kind === 'telemetry' ? '巡' : '安' }}</span>
+            <span v-else-if="variant === 'pixel' && !expanded" class="pixel-hp">♥HP</span>
+            <span v-else-if="variant === 'blueprint' && !expanded" class="bp-tag">图 01</span>
+            <span v-else-if="variant === 'neon' && !expanded" class="neon-sign">{{ neonSign }}</span>
+            <span v-else-if="variant === 'clay' && !expanded" class="clay-face">{{ clayFace }}</span>
+            <span class="capsule-label" :class="{ 'is-telemetry': capsuleStatus.kind === 'telemetry' }">
+              <template v-if="capsuleStatus.kind === 'telemetry' && telemetryReadout">
+                <template v-for="(seg, idx) in telemetryReadout.segments" :key="idx">
+                  <i v-if="idx > 0" class="tel-sep">·</i>
+                  <span class="tel-seg"><em class="tel-pre" :class="{ accent: seg.accent }">{{ seg.prefix }}</em>{{ seg.value }}</span>
+                </template>
               </template>
-            </template>
-            <template v-else>
-              <Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}
-            </template>
+              <template v-else>
+                <Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}
+              </template>
+            </span>
+            <!-- 右侧副舱微徽标：与时钟/微读数和平并存 -->
+            <span v-if="capsuleBadges.length && !expanded" class="capsule-badges">
+              <span v-for="badge in capsuleBadges" :key="badge.id" class="capsule-badge" :class="badge.tone ? `tone-${badge.tone}` : ''" :title="badge.title">
+                <Icon :name="badge.icon" :size="11" />{{ badge.text }}
+              </span>
+            </span>
+            <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
+            <span v-else-if="variant === 'scroll' && !expanded" class="scroll-knot" />
+            <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
+            <span v-else-if="variant === 'blueprint' && !expanded" class="bp-scale">1:1</span>
+            <span v-else-if="variant === 'neon' && !expanded" class="neon-hours">24H</span>
+            <span v-else-if="variant === 'clay' && !expanded" class="clay-dots"><i /><i /><i /></span>
           </span>
-          <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
-          <span v-else-if="variant === 'scroll' && !expanded" class="scroll-knot" />
-          <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
-          <span v-else-if="variant === 'blueprint' && !expanded" class="bp-scale">1:1</span>
-          <span v-else-if="variant === 'neon' && !expanded" class="neon-hours">24H</span>
-          <span v-else-if="variant === 'clay' && !expanded" class="clay-dots"><i /><i /><i /></span>
-        </span>
-        <span class="grip" aria-hidden="true" />
-      </button>
+          <span class="grip" aria-hidden="true" />
+        </button>
+        <!-- 检测到 Win+Shift+S 等新截图进入剪贴板时：收起态浮现一键识字按钮 -->
+        <div
+          v-if="showQuickOcr && quickOcrClip"
+          class="capsule-ocr-actions"
+          @pointerenter="hoveringQuickAction = true; cancelHover(); scheduleQuickOcrExpire(15000)"
+          @pointerleave="hoveringQuickAction = false"
+        >
+          <button
+            class="capsule-code-btn capsule-ocr-btn"
+            type="button"
+            title="识别刚刚截取的图片中的文字"
+            @click.stop="triggerQuickImageOcr"
+          >
+            <Icon name="scan-text" :size="11" />
+            <span>识字</span>
+          </button>
+          <button
+            class="capsule-ocr-dismiss"
+            type="button"
+            title="关闭提示"
+            aria-label="关闭截图识字提示"
+            @click.stop="clearQuickOcr"
+          >
+            <Icon name="close" :size="10" />
+          </button>
+        </div>
+        <!-- 检测到新邮件验证码时：收起态直接露出一键直拷按钮 -->
+        <button
+          v-if="showQuickCode && quickMailCode"
+          class="capsule-code-btn"
+          type="button"
+          :disabled="copyingQuickCode"
+          :title="`一键复制来自 ${quickMailCode.sender || '邮件'} 的验证码`"
+          @click.stop="copyQuickMailCode"
+        >
+          <Icon name="copy" :size="11" />
+          <span>{{ quickMailCode.code }}</span>
+        </button>
+      </div>
+      <!-- 右键胶囊免展开快捷操作条 -->
+      <div v-if="quickMenuOpen && !expanded && !tucked" class="capsule-quick-menu" role="toolbar" aria-label="胶囊快捷操作">
+        <button type="button" @click="runQuickAction('pause')">
+          <Icon :name="state.ui.paused ? 'play' : 'pause'" :size="12" />{{ state.ui.paused ? '恢复剪贴板' : '暂停剪贴板' }}
+        </button>
+        <button type="button" @click="runQuickAction('ocr')"><Icon name="scan-text" :size="12" />截图识字</button>
+        <button type="button" @click="runQuickAction('pin-open')"><Icon name="pin" :size="12" />钉住展开</button>
+        <button type="button" @click="runQuickAction('audio')"><Icon name="volume" :size="12" />调音台</button>
+        <button type="button" @click="runQuickAction('settings')"><Icon name="settings" :size="12" />设置</button>
+      </div>
       <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && isNoticeStatus ? capsuleStatus.text : '' }}</span>
-      <div class="expanded-content" :class="{ 'fixed-search': !approval && !viewingMail && page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
+      <div class="expanded-content" :class="{ 'can-scroll': needsOuterScroll, 'fixed-search': !approval && !ocrPanelOpen && !viewingMail && page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
         <div ref="chrome" v-show="!approval" class="island-chrome">
           <header class="toolbar">
             <nav ref="modeNav" class="mode-nav" aria-label="灵动岛功能">
-              <span v-show="!viewingMail" class="mode-selection" aria-hidden="true" />
-              <button v-for="section in sections" :key="section.value" type="button"
-                :title="section.label" :aria-label="section.label" :aria-pressed="!viewingMail && page === section.value"
-                :class="{ selected: !viewingMail && page === section.value }" @click="selectPage(section.value)">
-                <Icon :name="section.icon" :size="22" :stroke="1.65" />
+              <span v-show="!viewingMail && !ocrPanelOpen" ref="modeSelection" class="mode-selection" aria-hidden="true" />
+              <button v-for="(section, idx) in sections" :key="section.value" type="button"
+                :title="`${section.label}（按 ${idx + 1} 或 Alt+${idx + 1}）`" :aria-label="section.label" :aria-pressed="!viewingMail && !ocrPanelOpen && page === section.value"
+                :class="{ selected: !viewingMail && !ocrPanelOpen && page === section.value }" @click="selectPage(section.value)">
+                <Icon :name="section.icon" :size="19" :stroke="1.7" />
+                <span class="mode-label">{{ section.label }}</span>
               </button>
             </nav>
             <div class="tools">
-              <button v-if="mailNotices.length" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="mailSelected = !viewingMail"><Icon name="mail" :size="19" /></button>
-              <button v-if="!viewingMail && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="19" /></button>
-              <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="21" /></button>
-              <button class="round-action collapse-action" type="button" title="收起" aria-label="收起灵动岛" @click="expand(false)"><Icon name="chevron-down" :size="20" /></button>
+              <button v-if="mailNotices.length" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="closeOcrPanel(); mailSelected = !viewingMail"><Icon name="mail" :size="18" /></button>
+              <button class="round-action" type="button" :title="`截图识字（${state.shortcuts.ocr || 'Ctrl+Shift+O'}）`" aria-label="截图识字" :aria-pressed="ocrPanelOpen" @click="startScreenOcr"><Icon name="scan-text" :size="18" /></button>
+              <button v-if="!viewingMail && !ocrPanelOpen && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="18" /></button>
+              <button class="round-action pin-action" type="button" :title="pinned ? '已钉住展开（点击或按 Esc 取消）' : '钉住展开，移开鼠标不自动收起（Alt+P）'" aria-label="钉住灵动岛" :aria-pressed="pinned" @click="pinned = !pinned"><Icon name="pin" :size="17" /></button>
+              <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="19" /></button>
+              <button class="round-action collapse-action" type="button" title="收起（Esc）" aria-label="收起灵动岛" @click="collapseNow(true)"><Icon name="chevron-down" :size="19" /></button>
             </div>
           </header>
           <div v-if="state.ui.wechatAttention" class="attention-strip" role="status">
@@ -799,20 +1442,40 @@ onBeforeUnmount(() => {
         </div>
         <div ref="content" class="island-content">
           <ApprovalPrompt v-if="approval" :key="approval.id" :card="approval" :count="approvalCount" :busy="answering" @answer="answerApproval" />
-          <MailNotices v-if="!approval && viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
-          <div v-show="!approval && !viewingMail" class="ordinary-pane">
-          <Transition name="island-pane" mode="out-in" @enter="measureContent" @after-enter="measureContent">
+          <OcrResultPanel v-else-if="ocrPanelOpen && expanded" />
+          <MailNotices v-else-if="viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
+          <div v-show="!approval && !ocrPanelOpen && !viewingMail" class="ordinary-pane" :style="{ '--pane-dir': paneDir }">
+          <Transition name="island-pane" @before-leave="onPaneBeforeLeave" @enter="measureContent" @after-enter="measureContent" @after-leave="measureContent">
             <div v-if="page === 'applications'" :key="'applications'" class="applications">
+              <div class="app-toolbar">
+                <div class="app-search-box">
+                  <Icon name="search" :size="13" />
+                  <input
+                    ref="appSearchEl"
+                    v-model="appSearch"
+                    type="text"
+                    spellcheck="false"
+                    autocomplete="off"
+                    placeholder="打字筛选应用，回车启动首项…"
+                    aria-label="筛选应用"
+                    @keydown.enter.prevent="launchFirstFilteredApp"
+                  />
+                  <button v-if="appSearch" class="app-search-clear" type="button" aria-label="清空应用搜索" @click="appSearch = ''">
+                    <Icon name="close" :size="12" />
+                  </button>
+                </div>
+              </div>
               <nav class="categories" aria-label="应用分类">
                 <button v-for="category in state.categories" :key="category.id" type="button"
                   :class="{ selected: state.ui.activeCategoryId === category.id }" :aria-pressed="state.ui.activeCategoryId === category.id"
                   @click="setCategory(category.id)">{{ category.name }}</button>
               </nav>
-              <p v-if="!visibleApps.length" class="empty">这个分类还没有应用</p>
-              <div v-else class="app-grid scroll-y">
-                <button v-for="app in visibleApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
+              <p v-if="!filteredApps.length" class="empty">{{ appSearch ? '没有匹配的应用' : '这个分类还没有应用' }}</p>
+              <div v-else class="app-grid scroll-y" :class="{ 'with-names': showAppNames }">
+                <button v-for="app in filteredApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
                   <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
                   <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
+                  <span v-if="showAppNames" class="app-name">{{ app.name }}</span>
                 </button>
               </div>
             </div>
@@ -826,6 +1489,22 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      <button
+        v-if="expanded && !approval"
+        ref="dismissHandle"
+        class="dismiss-handle"
+        type="button"
+        title="单击或向上轻推收起"
+        aria-label="收起灵动岛（底部拉条）"
+        @pointerdown.stop="beginDismissDrag"
+        @pointermove.stop="moveDismissDrag"
+        @pointerup.stop="endDismissDrag($event, false)"
+        @pointercancel.stop="endDismissDrag($event, true)"
+        @lostpointercapture.stop="endDismissDrag($event, true)"
+        @click.stop="onDismissClick"
+      >
+        <span class="dismiss-pill" aria-hidden="true" />
+      </button>
     </div>
   </section>
   </div>
@@ -842,19 +1521,19 @@ onBeforeUnmount(() => {
 }
 .island-hit-area {
   --geometry-time: var(--expand-time);
-  --geometry-ease: cubic-bezier(.2, .9, .25, 1);
+  --geometry-ease: var(--ease-out);
   --island-shadow: rgb(0 0 0 / .2);
   --island-outline: rgb(0 0 0 / .16);
   --surface-inset: 2px;
   position: relative;
   flex: none;
-  transition: var(--size-transition), opacity 110ms;
+  transition: opacity 110ms ease;
 }
 .island-hit-area.dark { --island-shadow: rgb(0 0 0 / .5); --island-outline: rgb(255 255 255 / .14); }
 .island-hit-area.expanded { --surface-inset: 12px; }
 /* 从细线展开时顶边不下移，避免窗口裁切热区后把原位置的鼠标判为移出。 */
 .island-hit-area.desktop.avoiding { --surface-inset: 0px; }
-.island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: cubic-bezier(.32, .72, .28, 1); }
+.island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: var(--ease-drawer); }
 .island-hit-area.reduced { --geometry-time: 0ms; transition: none; }
 .island-hit-area.suppressed { --surface-inset: 0px; }
 .island-hit-area.desktop.suppressed { --geometry-time: 0ms; }
@@ -868,24 +1547,94 @@ onBeforeUnmount(() => {
   isolation: isolate;
 }
 .island {
-  position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%);
+  position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%); transform-origin: 50% 0;
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   box-shadow: inset 0 1px 0 var(--island-top-sheen);
   transition: var(--size-transition), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
+.island.dismiss-dragging { transition: none !important; }
 .island.expanded { border-radius: 18px; }
 .island.tucked { border-radius: 5px; box-shadow: none; }
+.island.tucked .capsule-bar,
 .island.tucked .capsule { visibility: hidden; }
 .island.tucked :deep(.glass-light) { visibility: hidden; }
+.capsule-bar {
+  position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; width: 100%;
+}
+.capsule-bar.has-quick-code { justify-content: space-between; padding: 0 5px 0 8px; gap: 6px; }
 .capsule {
   position: relative; z-index: 3; display: flex; align-items: center; justify-content: center;
-  height: 24px; width: 156px; margin: 0 auto; white-space: nowrap; font-size: 12px;
+  height: 24px; width: min(260px, calc(100% - 32px)); margin: 0 auto; white-space: nowrap; font-size: 12px;
   cursor: grab; touch-action: none; user-select: none;
   transition: height var(--geometry-time) var(--height-ease, var(--geometry-ease)), opacity 110ms ease-out 40ms;
 }
+.capsule-bar.has-quick-code .capsule { flex: 1; width: auto; margin: 0; justify-content: flex-start; min-width: 0; }
 .capsule:active { transform: none; }
 .window-dragging .capsule { cursor: grabbing; }
 .island:not(.expanded) .capsule { height: var(--capsule-height); width: 100%; }
+.island:not(.expanded) .capsule-bar.has-quick-code .capsule { width: auto; }
+.liquid-orb-dot {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffffff, #7dd3fc 58%, #c084fc);
+  box-shadow: 0 0 10px rgba(125, 211, 252, .65);
+}
+.capsule-badges {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 4px;
+}
+.capsule-badge {
+  display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px;
+  border-radius: 999px; font-size: 10.5px; font-weight: 650; line-height: 1;
+  background: var(--surface-3); color: var(--text-2); border: 1px solid var(--line);
+}
+.capsule-badge.tone-accent { background: var(--accent-weak); color: var(--accent); border-color: var(--accent); }
+.capsule-badge.tone-paused { color: var(--danger); border-color: var(--danger-weak); background: var(--danger-weak); }
+.capsule-code-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+  border-radius: 999px; border: 1px solid var(--accent); background: var(--accent-weak); color: var(--text);
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: .04em; cursor: pointer;
+  transform-origin: right center;
+  touch-action: manipulation;
+  transition: transform 170ms var(--ease-out), opacity 170ms var(--ease-out), filter 170ms var(--ease-out), background-color 140ms ease, color 140ms ease;
+}
+.capsule-code-btn:hover { background: var(--accent); color: var(--accent-text); }
+.capsule-ocr-actions {
+  position: relative; z-index: 3; flex: none; display: inline-flex; align-items: center; gap: 4px;
+  transform-origin: right center;
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out), filter 180ms var(--ease-out);
+}
+@starting-style {
+  .capsule-ocr-actions,
+  .capsule-code-btn {
+    opacity: 0;
+    transform: translate3d(-4px, 0, 0) scale(.92);
+    filter: blur(1.5px);
+  }
+}
+.capsule-ocr-btn { font-family: var(--font-sans); letter-spacing: 0; }
+.capsule-ocr-dismiss {
+  flex: none; display: grid; place-items: center; width: 20px; height: 20px; padding: 0;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text-2);
+  cursor: pointer;
+}
+.capsule-ocr-dismiss:hover { background: var(--hover); border-color: var(--line-strong); color: var(--text); }
+.capsule-quick-menu {
+  position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 4px 8px 7px; border-top: 1px solid var(--line);
+  transform-origin: top center;
+  transition: opacity 170ms var(--ease-out), transform 170ms var(--ease-out);
+}
+@starting-style {
+  .capsule-quick-menu {
+    opacity: 0;
+    transform: translate3d(0, -4px, 0) scale(.96);
+  }
+}
+.capsule-quick-menu button {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px;
+  border-radius: 8px; border: 1px solid transparent; background: var(--surface-2); color: var(--text-2);
+  font-size: 11px; font-weight: 550; white-space: nowrap; cursor: pointer;
+}
+.capsule-quick-menu button:hover { background: var(--hover); color: var(--text); border-color: var(--line); }
 .island-hit-area:not(.desktop) .island.tucked .capsule {
   visibility: visible;
   opacity: 0;
@@ -894,9 +1643,9 @@ onBeforeUnmount(() => {
 .capsule-text {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px;
   font-weight: 600; letter-spacing: .22px; font-variant-numeric: tabular-nums; color: var(--text);
-  transition: opacity calc(var(--geometry-time) * .46) ease-out calc(var(--geometry-time) * .42), transform calc(var(--geometry-time) * .78) var(--geometry-ease);
+  transition: opacity calc(var(--geometry-time) * .36) var(--ease-out) calc(var(--geometry-time) * .28), transform calc(var(--geometry-time) * .68) var(--geometry-ease);
 }
-.expanded .capsule-text:not(.feedback) { opacity: 0; transform: translateY(-3px) scale(.96); transition: opacity calc(var(--geometry-time) * .22) ease-out, transform calc(var(--geometry-time) * .32) ease-out; }
+.expanded .capsule-text:not(.feedback) { opacity: 0; transform: translateY(-3px) scale(.96); transition: opacity calc(var(--geometry-time) * .2) var(--ease-out), transform calc(var(--geometry-time) * .28) var(--ease-out); }
 .capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }
 .capsule-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .grip {
@@ -910,21 +1659,36 @@ onBeforeUnmount(() => {
 .expanded-content {
   --content-gutter: 18px;
   position: relative; z-index: 3; width: 100%; max-height: calc(100% - 24px);
-  overflow: hidden; padding: 0 var(--content-gutter) 18px;
+  overflow: clip; padding: 0 var(--content-gutter) 18px;
 }
-.expanded .expanded-content { overflow-y: auto; }
-.moving .expanded-content { overflow-y: hidden; }
+.expanded .expanded-content.can-scroll { overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+.expanded .expanded-content.can-scroll .island-content { max-width: 100%; }
+.moving :deep(::-webkit-scrollbar-thumb),
+.page-switching :deep(::-webkit-scrollbar-thumb) { background: transparent !important; }
+.moving .feature-pane,
+.moving .app-grid,
+.page-switching .feature-pane { scrollbar-color: transparent transparent; }
+.moving .island-chrome,
+.moving .island-content { will-change: transform, opacity; }
 .island-chrome { display: flow-root; }
 /* 工具栏随外壳分配可用宽度，正文维持最终列宽，开合途中不会反复换行。 */
 .island-content {
   position: relative; left: 50%; translate: -50% 0;
   width: calc(var(--content-width) - 2 * var(--content-gutter));
 }
-.ordinary-pane { display: contents; }
-.island-pane-enter-active { transition: opacity 150ms cubic-bezier(.2, .9, .25, 1), transform 160ms cubic-bezier(.2, .9, .25, 1); }
-.island-pane-leave-active { transition: opacity 85ms ease-out, transform 85ms ease-out; }
-.island-pane-enter-from { opacity: 0; transform: translateY(5px); }
-.island-pane-leave-to { opacity: 0; transform: translateY(-3px); }
+.ordinary-pane { position: relative; display: block; overflow: clip; }
+.island-pane-enter-active {
+  will-change: transform, opacity;
+  transition: opacity 155ms var(--ease-out), transform 175ms var(--ease-out), filter 155ms var(--ease-out);
+}
+.island-pane-leave-active {
+  position: absolute; top: 0; left: 0; right: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: opacity 95ms var(--ease-out), transform 105ms var(--ease-out), filter 95ms var(--ease-out);
+}
+.island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 12px), 0, 0) scale(.992); filter: blur(1.5px); }
+.island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -8px), 0, 0) scale(.992); filter: blur(1.5px); }
 .toolbar {
   display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
   gap: 8px; margin-bottom: 10px; padding: 0 0 8px; border-bottom: 1px solid var(--line);
@@ -937,50 +1701,105 @@ onBeforeUnmount(() => {
 .collapse-action svg { transform: rotate(180deg); }
 .round-action:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
 .tools .round-action[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
-.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 80px; overflow-y: auto; margin: 0 0 10px; padding: 2px; }
+.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 80px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin: 0 0 10px; padding: 2px; }
 .categories button { flex: none; padding: 5px 12px; border-radius: 20px; border: 1px solid transparent; min-height: 32px; font-size: 13px; color: var(--text-2); }
 .categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line-strong); }
 .categories button:hover:not(.selected) { color: var(--text); background: var(--hover); border-color: var(--line); }
+.app-toolbar {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+}
+.app-search-box {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 10px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.app-search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); color: var(--text); }
+.app-search-box input {
+  flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; outline: none;
+}
+.app-search-box input::placeholder { color: var(--text-3); }
+.app-search-clear {
+  display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--text-2);
+}
+.app-search-clear:hover { background: var(--hover); color: var(--text); }
 .app-grid {
   --app-icon-size: 28px; --app-cell-size: 46px; --app-gap: 8px;
   display: grid; grid-template-columns: repeat(auto-fill, var(--app-cell-size));
   grid-auto-rows: var(--app-cell-size); justify-content: start; align-content: start;
-  max-height: calc(var(--app-cell-size) * 2 + var(--app-gap)); overflow-y: auto; gap: var(--app-gap); padding: 2px;
+  max-height: calc(var(--app-cell-size) * 3 + var(--app-gap) * 2); overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; gap: var(--app-gap); padding: 2px;
   scrollbar-width: thin; scrollbar-color: transparent transparent;
 }
-.app-tile {
-  display: flex; align-items: center; justify-content: center;
-  width: var(--app-cell-size); height: var(--app-cell-size); padding: 8px;
-  border-radius: 12px; border: 1px solid transparent;
+.app-grid.with-names {
+  --app-cell-size: 68px;
+  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+  grid-auto-rows: 66px;
+  max-height: 220px;
 }
+.app-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  width: 100%; height: 100%; padding: 6px;
+  border-radius: 12px; border: 1px solid transparent; min-width: 0;
+}
+.app-name {
+  width: 100%; font-size: 11px; line-height: 1.25; color: var(--text-2); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.app-tile:hover .app-name { color: var(--text); }
 .app-tile:hover { background: var(--hover); border-color: var(--line); }
 .app-grid:hover, .app-grid:focus-within { scrollbar-color: var(--line-strong) transparent; }
 .app-tile img, .fallback { flex: none; width: var(--app-icon-size); height: var(--app-icon-size); object-fit: contain; }
 .app-tile img { filter: drop-shadow(0 3px 2px rgba(0,0,0,.08)); }
 .fallback { display: grid; place-items: center; border-radius: 8px; color: #fff; font-size: 12px; font-weight: 600; box-shadow: inset 0 1px 1px rgba(255,255,255,.4), 0 3px 5px -3px var(--island-shadow); }
+.no-physics .app-tile img, .no-physics .app-tile .fallback {
+  transition: transform 160ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .no-physics .app-tile:hover img, .no-physics .app-tile:hover .fallback {
+    transform: scale(1.03);
+  }
+}
 .empty { display: flex; align-items: center; min-height: 64px; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.8; padding: 16px 4px; }
 .mode-nav {
   position: relative; display: flex; flex: 1; align-items: center; gap: 4px;
   min-width: 0; width: auto; height: 42px; padding: 2px;
-  overflow-x: auto; scrollbar-width: thin; color: var(--text);
+  overflow-x: auto; scrollbar-width: none; color: var(--text);
 }
 .mode-selection {
   position: absolute; top: 3px; bottom: 3px; left: 0;
-  width: var(--sel-w, 40px); border-radius: 11px;
+  width: 40px; border-radius: 11px;
   background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--line-strong);
-  transform: translateX(var(--sel-x, 2px));
-  transition: transform 200ms cubic-bezier(.2, .9, .25, 1), width 200ms cubic-bezier(.2, .9, .25, 1);
+  transform: translate3d(2px, 0, 0);
+  transition: transform 185ms var(--ease-out), width 175ms var(--ease-out);
   pointer-events: none;
 }
 .mode-nav button {
-  position: relative; z-index: 1; display: flex; flex: 0 0 40px; align-items: center; justify-content: center;
-  height: 36px; min-width: 0; border-radius: 11px; color: var(--text-2); font-size: 14px;
+  position: relative; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 0;
+  height: 36px; min-width: 38px; padding: 0 9px; border-radius: 11px; color: var(--text-2); font-size: 12.5px;
+  transition: transform 150ms var(--ease-out), color 130ms ease;
 }
-.mode-nav .selected { color: var(--text); font-weight: 600; }
+.mode-nav .mode-label {
+  max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 650;
+  transition: opacity 140ms ease;
+}
+.mode-nav button.selected { gap: 6px; padding: 0 12px; color: var(--text); font-weight: 600; }
+.mode-nav button.selected .mode-label { max-width: 64px; opacity: 1; }
+.narrow .mode-nav button.selected { gap: 0; padding: 0 9px; }
+.narrow .mode-nav button.selected .mode-label { max-width: 0; opacity: 0; }
 .mode-nav .selected svg { color: var(--accent); }
 .mode-nav button:hover { color: var(--text); }
-button { transition: background 130ms ease, color 130ms ease, border-color 130ms ease; }
-:is(.categories button, .attention-strip button, .feature-pane button):active { transform: scale(.97); }
+button {
+  touch-action: manipulation;
+  transition: transform 150ms var(--ease-out), background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+:where(.round-action, .mode-nav button, .categories button, .attention-strip button, .feature-pane button, .app-tile, .capsule-code-btn, .capsule-ocr-dismiss, .capsule-quick-menu button):active:not(:disabled) {
+  transform: scale(.965);
+  transition-duration: 70ms;
+}
+/* 启用 physics.ts 时由内层图标弹簧承担主按压微缩，外框仅轻微沉降避免双重过度缩水。 */
+.island:not(.no-physics) :where(.app-tile, .mode-nav button, .round-action):active:not(:disabled) {
+  transform: scale(.985);
+}
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 2; background: var(--success); border-radius: 50%; }
 .island:not(.tucked) > .attention-dot { right: 16px; top: 50%; transform: translateY(-50%); background: #42d580; }
@@ -988,7 +1807,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 12px; border-radius: 12px; background: var(--surface-2); font-size: 12px; }
 .attention-strip > span { flex: 1; }
 .attention-strip button { padding: 5px 8px; border-radius: 8px; background: var(--hover); }
-.feature-pane { max-height: 420px; overflow: auto; }
+.feature-pane { max-height: 420px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 .feature-pane :deep(.panel > .head) { display: none; }
 .feature-pane :deep(button:disabled) { opacity: 1; color: var(--text-3); background: var(--surface-2); cursor: not-allowed; }
@@ -1302,8 +2121,34 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 }
 .variant-pixel .feature-pane :deep(.row.is-active *) { color: #0f0d1a; }
 
-.reduced :deep(*), .reduced :deep(*::before), .reduced :deep(*::after) { transition: none !important; animation: none !important; }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation:none !important; } }
+.dismiss-handle {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;
+  display: flex; align-items: center; justify-content: center;
+  height: 18px; width: 100%; padding: 0; border: 0; background: transparent;
+  color: var(--text); cursor: grab; touch-action: none; user-select: none;
+}
+.dismiss-handle::before {
+  content: ''; position: absolute; left: 0; right: 0; top: -4px; bottom: 0;
+}
+.dismiss-handle:active, .dismiss-handle.dragging { cursor: grabbing; }
+.dismiss-pill {
+  position: relative; z-index: 1;
+  width: 40px; height: 3.5px; border-radius: 999px;
+  background: currentColor; opacity: .22;
+  transition: width 150ms cubic-bezier(.22, 1, .36, 1), opacity 140ms ease, background-color 140ms ease, transform 150ms cubic-bezier(.22, 1, .36, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .dismiss-handle:hover .dismiss-pill { width: 52px; opacity: .52; }
+}
+.dismiss-handle.dragging .dismiss-pill { width: 56px; opacity: .68; transform: translateY(-1px); }
+.dismiss-handle.ready .dismiss-pill { background: var(--accent); opacity: .92; width: 62px; }
+.variant-mecha .dismiss-pill,
+.variant-pixel .dismiss-pill,
+.variant-scroll .dismiss-pill,
+.variant-blueprint .dismiss-pill { border-radius: 0; }
+
+.reduced :deep(*), .reduced :deep(*::before), .reduced :deep(*::after) { transition: none !important; animation: none !important; filter: none !important; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation:none !important; filter: none !important; } }
 @media (prefers-contrast: more) {
   .mode-selection, .categories .selected { box-shadow: inset 0 0 0 2px var(--accent); }
 }
@@ -1313,7 +2158,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .expanded-content.fixed-search { display: flex; flex-direction: column; overflow: hidden; }
 .fixed-search .island-chrome { flex: none; }
 .fixed-search .island-content { min-height: 0; display: flex; flex-direction: column; }
-.fixed-search .feature-pane { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.fixed-search .feature-pane { min-height: 0; overflow: hidden; scrollbar-gutter: auto; display: flex; flex-direction: column; }
 .fixed-search .feature-pane :deep(.pop) { height: 420px; min-height: 0; max-height: 420px; }
 </style>
 

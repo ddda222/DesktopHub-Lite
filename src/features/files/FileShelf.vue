@@ -162,7 +162,7 @@ onBeforeUnmount(() => {
 .undo-button { flex: none; font-weight: 600; color: var(--accent); min-height: 30px; padding: 5px 10px; border-radius: 8px; }
 .shelf-empty { min-height: 120px; display: flex; flex-direction: column; gap: 9px; align-items: center; justify-content: center; padding: 16px 8px; color: var(--text-2); font-size: 13px; text-align: center; }
 .shelf-empty small { font-size: 12px; color: var(--text-3); }
-.shelf-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; max-height: 250px; overflow-y: auto; }
+.shelf-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; max-height: 250px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .shelf-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; min-width: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); transition: background 120ms ease, border-color 120ms ease; }
 .shelf-list li:hover { background: var(--surface-3); border-color: var(--line-strong); }
 .shelf-list input { accent-color: var(--accent); flex: none; }

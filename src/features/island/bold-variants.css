@@ -475,3 +475,77 @@
     inset 0 2px 2px rgba(255, 255, 255, .85),
     inset 3px 0 0 #ef476f;
 }
+
+/* ==================== 液态琉璃（variant-liquid：菲涅尔折射棱边 + 弹性高光滑块） ==================== */
+.island.variant-liquid {
+  border-radius: 26px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .42),
+    0 18px 46px rgba(3, 8, 22, .62);
+}
+.island.variant-liquid.expanded {
+  border-radius: 22px;
+}
+.variant-liquid .grip {
+  width: 36px;
+  height: 3px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, rgba(125, 211, 252, .45), rgba(216, 180, 254, .85), rgba(125, 211, 252, .45));
+}
+.variant-liquid .mode-selection {
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(125, 211, 252, .26), rgba(192, 132, 252, .24));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .46),
+    inset 0 0 0 1px rgba(186, 230, 253, .38),
+    0 4px 14px rgba(125, 211, 252, .18);
+  transition:
+    transform 260ms cubic-bezier(.34, 1.48, .54, 1),
+    width 240ms cubic-bezier(.34, 1.38, .54, 1);
+}
+.variant-liquid .mode-nav button {
+  border-radius: 999px;
+}
+.variant-liquid .round-action {
+  border-radius: 999px;
+  border: 1px solid rgba(186, 230, 253, .14);
+  background: rgba(255, 255, 255, .04);
+}
+.variant-liquid .round-action:hover {
+  background: rgba(125, 211, 252, .16);
+  border-color: rgba(186, 230, 253, .42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .36);
+}
+.variant-liquid .categories button {
+  border-radius: 999px;
+  border-color: rgba(186, 230, 253, .14);
+}
+.variant-liquid .categories .selected {
+  background: linear-gradient(135deg, rgba(125, 211, 252, .24), rgba(192, 132, 252, .2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .4), inset 0 0 0 1px rgba(186, 230, 253, .42);
+}
+.variant-liquid .app-tile {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .04);
+  border-color: rgba(186, 230, 253, .14);
+}
+.variant-liquid .app-tile:hover {
+  background: linear-gradient(145deg, rgba(125, 211, 252, .16), rgba(192, 132, 252, .12));
+  border-color: rgba(186, 230, 253, .45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 6px 16px rgba(4, 10, 26, .28);
+}
+.variant-liquid .feature-pane :deep(.search),
+.variant-liquid .feature-pane :deep(.pause),
+.variant-liquid .feature-pane :deep(.textarea) {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .05);
+  border-color: rgba(186, 230, 253, .2);
+}
+.variant-liquid .feature-pane :deep(.row) {
+  border-radius: 12px;
+  border-bottom-color: rgba(186, 230, 253, .1);
+}
+.variant-liquid .feature-pane :deep(.row.is-active) {
+  background: linear-gradient(90deg, rgba(125, 211, 252, .18), rgba(192, 132, 252, .1));
+  box-shadow: inset 2px 0 0 #7dd3fc, inset 0 1px 0 rgba(255, 255, 255, .22);
+}

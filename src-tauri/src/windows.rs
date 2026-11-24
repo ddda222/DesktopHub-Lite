@@ -64,6 +64,8 @@ pub struct WindowsHandle {
     /// 弹层窗口显示的时刻。刚显示时系统会给它一次焦点，
     /// 之后紧接着的失焦并不代表用户点了别处，需要忽略这一小段。
     pop_shown_at: Mutex<Option<Instant>>,
+    /// 灵动岛最近一次展开的时刻，用于忽略展开瞬间系统偶发的焦点抖动。
+    bar_expanded_at: Mutex<Option<Instant>>,
     /// 最近一次「因失焦自动收起」的时刻与弹层名。
     /// 点图标条上同一个按钮想收起时，焦点先离开弹层触发自动收起，
     /// 紧接着这次点击又会被当成「打开」，需要用这个记录消掉重复打开。
@@ -82,6 +84,7 @@ impl WindowsHandle {
             pop_align: Mutex::new("center".to_string()),
             toast_size: Mutex::new((360.0, 40.0)),
             pop_shown_at: Mutex::new(None),
+            bar_expanded_at: Mutex::new(None),
             last_auto_close: Mutex::new(None),
         }
     }
@@ -122,6 +125,25 @@ impl WindowsHandle {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .map(|at| at.elapsed() < Duration::from_millis(800))
+            .unwrap_or(false)
+    }
+
+    /// 记录灵动岛主窗刚展开的时刻。
+    pub fn mark_bar_expanded(&self) {
+        *self.bar_expanded_at.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    }
+
+    /// 清除灵动岛主窗展开时刻记录。
+    pub fn clear_bar_expanded(&self) {
+        *self.bar_expanded_at.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// 灵动岛是否刚展开不久（用于忽略展开瞬间系统焦点切换抖动）。
+    pub fn bar_recently_expanded(&self) -> bool {
+        self.bar_expanded_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|at| at.elapsed() < Duration::from_millis(320))
             .unwrap_or(false)
     }
 

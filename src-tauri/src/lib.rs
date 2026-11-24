@@ -20,9 +20,11 @@ mod image_preview;
 mod audio;
 mod config_format;
 mod config_transfer;
+mod data_location;
 mod launcher;
 mod logging;
 mod mail;
+mod ocr;
 mod snippets;
 mod state;
 mod storage;
@@ -58,6 +60,8 @@ pub const UI_STATE_EVENT: &str = "ui-state";
 pub const APPLICATIONS_EVENT: &str = "applications-changed";
 /// 轻提示事件：toast 窗口收到后渲染并回报尺寸。
 pub const TOAST_EVENT: &str = "toast";
+/// 灵动岛主窗失焦通知：由前端结合交互保护态决定是否自动收起。
+pub const ISLAND_WINDOW_BLUR_EVENT: &str = "island-window-blur";
 /// 需要跨重启保留的界面偏好。
 pub const UI_PREFS_FILE: &str = "ui-preferences.json";
 
@@ -103,7 +107,7 @@ fn broadcast_apps(app: &AppHandle, config: &AppConfig) {
     let _ = app.emit(APPLICATIONS_EVENT, config);
 }
 
-fn hide_window(app: &AppHandle, label: &str) {
+pub(crate) fn hide_window(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
         if window.hide().is_ok() && label == windows::BAR {
             approvals::visibility(app, false);
@@ -135,7 +139,7 @@ fn display_window(window: &WebviewWindow) -> tauri::Result<()> {
     Ok(())
 }
 
-fn reveal_bar(app: &AppHandle) {
+pub(crate) fn reveal_bar(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(windows::BAR) {
         if let Err(error) = display_window(&window) {
             log_warn!("显示灵动岛失败：{error}");
@@ -143,7 +147,7 @@ fn reveal_bar(app: &AppHandle) {
     }
 }
 
-fn show_window(app: &AppHandle, label: &str) {
+pub(crate) fn show_window(app: &AppHandle, label: &str) {
     if label == windows::BAR && !capture_privacy::prepare_to_show(app) {
         let _ = open_settings(app.clone(), None);
         return;
@@ -203,9 +207,12 @@ fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> U
             Some(ui.island_page.clone())
         } else { None };
     });
-    if expanded { state.windows.mark_pop_shown(); }
-    else {
+    if expanded {
+        state.windows.mark_pop_shown();
+        state.windows.mark_bar_expanded();
+    } else {
         state.windows.clear_pop_shown();
+        state.windows.clear_bar_expanded();
         translation::cancel_for_window(&app, windows::BAR);
     }
     if focus.unwrap_or(false) { show_window(&app, windows::BAR); }
@@ -237,6 +244,7 @@ fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Resu
     if previous.island_page == PANEL_TRANSLATION && page != PANEL_TRANSLATION {
         translation::cancel_for_window(&app, windows::BAR);
     }
+    state.windows.mark_bar_expanded();
     if focus.unwrap_or(true) { show_window(&app, windows::BAR); }
     hide_window(&app, windows::POP);
     broadcast_ui(&app);
@@ -1037,19 +1045,59 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // 隔离数据目录：开发验证一律落在 DesktopHub-work 下，不碰真实用户数据。
-            let root = std::env::var("DESKTOPHUB_LITE_DATA")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| {
-                    if let Some(directory) = std::env::current_exe().ok().and_then(|path| path.parent().map(|parent| parent.to_path_buf())) {
-                        if directory.join("portable.flag").exists() { return directory.join("data"); }
+            // 解析数据目录：环境变量 > 便携隔离标记 > 跨版本共享目录 > 已有数据的旧便携目录。
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(|parent| parent.to_path_buf()));
+            let app_local_dir = handle
+                .path()
+                .app_local_data_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let env_override = std::env::var("DESKTOPHUB_LITE_DATA")
+                .ok()
+                .map(std::path::PathBuf::from);
+            let resolved_root = data_location::resolve_data_root(
+                env_override,
+                exe_dir.as_deref(),
+                &app_local_dir,
+            );
+            let startup_dir = desktop_features::startup_exe_dir();
+            let extra_hint_dirs = data_location::collect_extra_hint_dirs(startup_dir.as_deref());
+            let mut auto_migrated_from: Option<String> = None;
+            let mut auto_migrated_files: usize = 0;
+            let mut auto_migrate_error: Option<String> = None;
+            if resolved_root.mode == "shared"
+                && !data_location::has_meaningful_data(&resolved_root.path)
+            {
+                let current_ptr = data_location::load_pointer(&resolved_root.pointer_file);
+                match data_location::auto_migrate_empty_shared_dir(
+                    &resolved_root.path,
+                    exe_dir.as_deref(),
+                    &app_local_dir,
+                    &resolved_root.default_shared_dir,
+                    &current_ptr,
+                    &extra_hint_dirs,
+                ) {
+                    Ok(Some(outcome)) => {
+                        data_location::record_recent_dir(
+                            &resolved_root.pointer_file,
+                            &outcome.source_dir,
+                        );
+                        auto_migrated_from = Some(outcome.source_dir.to_string_lossy().into_owned());
+                        auto_migrated_files = outcome.copied_files;
                     }
-                    handle
-                        .path()
-                        .app_local_data_dir()
-                        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-                });
-            let store = match Store::new(root) {
+                    Ok(None) => {}
+                    Err(error) => {
+                        auto_migrate_error = Some(error);
+                    }
+                }
+            }
+            if resolved_root.should_persist_pointer {
+                let mut ptr = data_location::load_pointer(&resolved_root.pointer_file);
+                ptr.shared_data_dir = Some(resolved_root.path.to_string_lossy().into_owned());
+                let _ = data_location::save_pointer(&resolved_root.pointer_file, &ptr);
+            }
+            let store = match Store::new(resolved_root.path.clone()) {
                 Ok(store) => store,
                 Err(error) => {
                     // 数据目录都建不起来时直接失败，而不是退化成内存态假装成功。
@@ -1058,7 +1106,20 @@ pub fn run() {
             };
             // 桌面程序没有控制台，诊断信息只能写文件。
             logging::init(store.root().join("desktophub-lite.log"));
-            log_info!("启动，数据目录 {}", store.root().display());
+            log_info!("启动，数据目录（{}）{}", resolved_root.mode, store.root().display());
+            if let Some(ref src_dir) = auto_migrated_from {
+                log_info!(
+                    "首次启用共享目录，已自动从旧版目录迁移 {} 个文件：{} -> {}",
+                    auto_migrated_files,
+                    src_dir,
+                    store.root().display()
+                );
+            } else if let Some(ref error) = auto_migrate_error {
+                log_warn!("首次启用共享目录尝试自动迁移旧版数据时跳过：{error}");
+            }
+            if resolved_root.mode != "env" {
+                data_location::record_recent_dir(&resolved_root.pointer_file, store.root());
+            }
             let window_state: WindowState = store.read(windows::WINDOW_STATE_FILE).unwrap_or_default();
             let config: AppConfig = match store.read(applications::CONFIG_FILE) {
                 Some(existing) => existing,
@@ -1097,7 +1158,16 @@ pub fn run() {
             app.manage(approvals::Approvals::default());
             app.manage(mail::Mail::load(&store));
             app.manage(audio::AudioState::default());
+            app.manage(ocr::OcrState::default());
             app.manage(config_transfer::ConfigurationTransfers::default());
+            app.manage(data_location::DataLocationState::new(
+                resolved_root,
+                exe_dir,
+                app_local_dir,
+                extra_hint_dirs,
+                auto_migrated_from,
+                auto_migrated_files,
+            ));
             app.manage(file_shelf::ShelfHistory::default());
             app.manage(AppState {
                 island_reading_explanation: AtomicBool::new(false),
@@ -1192,13 +1262,22 @@ pub fn run() {
             match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     if window.label().starts_with("image-preview-") { return; }
+                    if window.label() == ocr::CAPTURE_WINDOW {
+                        ocr::cleanup_capture_on_destroy(app);
+                        return;
+                    }
                     // 关闭只隐藏，退出走托盘菜单。
                     api.prevent_close();
                     if window.label() == windows::TRANSLATION { close_translation_window(app.clone()); }
                     else if window.label() == windows::BAR { hide_window(app, windows::BAR); }
                     else { let _ = window.hide(); }
                 }
-                WindowEvent::Destroyed => { image_preview::forget(app, window.label()); }
+                WindowEvent::Destroyed => {
+                    image_preview::forget(app, window.label());
+                    if window.label() == ocr::CAPTURE_WINDOW {
+                        ocr::cleanup_capture_on_destroy(app);
+                    }
+                }
                 WindowEvent::Moved(position) => {
                     if window.label() == windows::BAR {
                         // 程序布局也会发 Moved；动画过程中不能把每帧写入数据文件。
@@ -1216,6 +1295,15 @@ pub fn run() {
                     #[cfg(windows)]
                     if window.label() == windows::BAR {
                         windows::enforce_bar_frameless(app);
+                    }
+                    if !*focused && window.label() == windows::BAR {
+                        if let Some(state) = app.try_state::<AppState>() {
+                            let is_expanded = state.ui.snapshot().island_expanded;
+                            let in_selftest = std::env::var("DESKTOPHUB_LITE_SELFTEST").is_ok();
+                            if is_expanded && !in_selftest && !state.windows.bar_recently_expanded() {
+                                let _ = window.emit(ISLAND_WINDOW_BLUR_EVENT, ());
+                            }
+                        }
                     }
                     // 岛内交互由 WebView 管理，系统短暂失焦不关闭输入中的界面。
                     // 「点击弹层外面收起弹层」必须由系统焦点事件判断：
@@ -1258,6 +1346,15 @@ pub fn run() {
             config_transfer::preview_configuration_import,
             config_transfer::cancel_configuration_import,
             config_transfer::apply_configuration_import,
+            data_location::get_data_storage_status,
+            data_location::open_current_data_dir,
+            data_location::pick_data_dir_for_switch,
+            data_location::preview_switch_data_dir,
+            data_location::apply_switch_data_dir,
+            data_location::pick_old_data_dir_for_import,
+            data_location::preview_old_data_import,
+            data_location::apply_old_data_import,
+            data_location::restart_for_data_change,
             audio::list_audio_sessions,
             audio::set_mixer_item_visible,
             audio::update_audio_session,
@@ -1354,6 +1451,7 @@ pub fn run() {
             snippets::remove_snippet_group,
             snippets::save_clip_as_snippet,
             snippets::copy_snippet,
+            snippets::reveal_snippet_password,
             get_translation_settings,
             save_translation_settings,
             translation::translate_text,
@@ -1363,6 +1461,12 @@ pub fn run() {
             translation::cancel_translation,
             desktop_support::get_shortcuts,
             desktop_support::save_shortcuts,
+            ocr::start_screen_ocr,
+            ocr::get_capture_session,
+            ocr::cancel_screen_ocr,
+            ocr::run_screen_ocr,
+            ocr::ocr_clipboard_image,
+            ocr::copy_ocr_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running DesktopHub Lite");

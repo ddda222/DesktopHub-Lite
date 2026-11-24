@@ -117,11 +117,17 @@ export interface TranslationSettingsRecord {
   hasSecret: boolean
 }
 
-/** Rust 侧 snippets.json 的单条常用短语结构。 */
+/** Rust 侧 snippets.json 的单条常用短语结构（列表视图不含密码明文/密文）。 */
+export type SnippetKind = 'text' | 'credential'
+export type SnippetCopyField = 'account' | 'password'
+
 export interface SnippetItem {
   id: string
+  kind?: SnippetKind
   title: string
   content: string
+  account?: string
+  hasPassword?: boolean
   group: string
   pinned: boolean
   updatedAt: number
@@ -134,8 +140,11 @@ export interface SnippetPayload {
 
 export interface SnippetDraft {
   id?: string
+  kind?: SnippetKind
   title: string
   content: string
+  account?: string
+  password?: string
   group: string
   pinned: boolean
 }

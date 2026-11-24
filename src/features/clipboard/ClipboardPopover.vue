@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
-import type { ClipItem, SnippetDraft, SnippetItem } from '@/lib/desktop/types'
+import type { ClipItem, SnippetCopyField, SnippetDraft, SnippetItem, SnippetKind } from '@/lib/desktop/types'
 import { formatJson } from './format-json'
 import { useErrorExplanation } from './error-explanation'
 import {
@@ -29,6 +29,8 @@ import {
   pushToast,
   renderSnippetPreview,
   reorderVisibleSnippets,
+  revealSnippetPassword,
+  runClipboardOcr,
   saveClipAsSnippet,
   saveSnippet,
   setClipboardView,
@@ -45,6 +47,7 @@ const searchEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 const snippetListEl = ref<HTMLElement | null>(null)
 const snippetTitleEl = ref<HTMLInputElement | null>(null)
+const snippetAccountEl = ref<HTMLInputElement | null>(null)
 const snippetBodyEl = ref<HTMLTextAreaElement | null>(null)
 
 const isHistoryView = computed(() => state.ui.clipboardView === 'history')
@@ -276,11 +279,43 @@ const variablePresets = [
 const editingSnippet = ref<SnippetDraft | null>(null)
 const customGroupMode = ref(false)
 const customGroupName = ref('')
+const lastTextGroup = ref('未分组')
+const showDraftPassword = ref(false)
+const loadingDraftPassword = ref(false)
+const draftPasswordDirty = ref(false)
+const draftPasswordError = ref('')
+const copiedBadgeKey = ref<string | null>(null)
+let copiedBadgeTimer: number | null = null
+let revealPasswordSeq = 0
 const savingSnippet = ref(false)
 const snippetDeletePrompt = ref<SnippetItem | null>(null)
 const deletingSnippet = ref(false)
 const previewNow = ref(new Date())
 let previewTickTimer: number | null = null
+
+function clearCredentialEditorSecrets(): void {
+  revealPasswordSeq++
+  showDraftPassword.value = false
+  loadingDraftPassword.value = false
+  draftPasswordDirty.value = false
+  draftPasswordError.value = ''
+}
+
+function clearCopiedBadgeTimer(): void {
+  if (copiedBadgeTimer !== null) {
+    window.clearTimeout(copiedBadgeTimer)
+    copiedBadgeTimer = null
+  }
+}
+
+function markCopiedBadge(snippetId: string, field: SnippetCopyField): void {
+  clearCopiedBadgeTimer()
+  copiedBadgeKey.value = `${snippetId}:${field}`
+  copiedBadgeTimer = window.setTimeout(() => {
+    copiedBadgeKey.value = null
+    copiedBadgeTimer = null
+  }, 1400)
+}
 
 function startPreviewClock(): void {
   stopPreviewClock()
@@ -297,7 +332,11 @@ function stopPreviewClock(): void {
   }
 }
 
-onBeforeUnmount(stopPreviewClock)
+onBeforeUnmount(() => {
+  stopPreviewClock()
+  clearCopiedBadgeTimer()
+  clearCredentialEditorSecrets()
+})
 
 const editingOriginal = computed(() =>
   editingSnippet.value?.id
@@ -305,8 +344,17 @@ const editingOriginal = computed(() =>
     : null
 )
 
+const isEditingCredential = computed(() => {
+  const draft = editingSnippet.value
+  if (!draft) return false
+  const effectiveGroup = customGroupMode.value ? customGroupName.value.trim() : draft.group
+  return draft.kind === 'credential' || effectiveGroup === '账密'
+})
+
 const draftHasVariables = computed(() =>
-  editingSnippet.value ? hasSnippetVariables(editingSnippet.value.content) : false
+  editingSnippet.value && !isEditingCredential.value
+    ? hasSnippetVariables(editingSnippet.value.content)
+    : false
 )
 
 const draftPreviewText = computed(() => {
@@ -318,6 +366,18 @@ const draftPreviewText = computed(() => {
   )
   const chars = [...rendered]
   return chars.length > 180 ? `${chars.slice(0, 180).join('')}…` : rendered
+})
+
+const canSubmitSnippet = computed(() => {
+  const draft = editingSnippet.value
+  if (!draft || savingSnippet.value || !draft.title.trim()) return false
+  if (isEditingCredential.value) {
+    const accountOk = Boolean((draft.account ?? '').trim())
+    const needPassword = !editingOriginal.value?.hasPassword || draftPasswordDirty.value
+    const passwordOk = !needPassword || Boolean(draft.password)
+    return accountOk && passwordOk
+  }
+  return Boolean(draft.content.trim())
 })
 
 function snippetSummary(content: string): string {
@@ -332,22 +392,64 @@ function switchView(view: 'history' | 'snippets'): void {
   stopSelecting()
   snippetDeletePrompt.value = null
   editingSnippet.value = null
+  clearCredentialEditorSecrets()
   stopPreviewClock()
   setClipboardView(view)
   void nextTick(() => searchEl.value?.focus())
 }
 
+function switchDraftKind(nextKind: SnippetKind): void {
+  const draft = editingSnippet.value
+  if (!draft) return
+  if (nextKind === 'credential') {
+    if (draft.group && draft.group !== '账密') {
+      lastTextGroup.value = draft.group
+    }
+    customGroupMode.value = false
+    customGroupName.value = ''
+    draft.kind = 'credential'
+    draft.group = '账密'
+    if (draft.account === undefined) draft.account = ''
+    if (draft.password === undefined) draft.password = ''
+  } else {
+    draft.kind = 'text'
+    if (draft.group === '账密') {
+      const fallback = state.snippetGroups.find((g) => g !== '账密') ?? '未分组'
+      draft.group =
+        lastTextGroup.value && lastTextGroup.value !== '账密' ? lastTextGroup.value : fallback
+    }
+    showDraftPassword.value = false
+  }
+}
+
+watch(
+  () => editingSnippet.value?.group,
+  (group) => {
+    if (editingSnippet.value && group === '账密' && editingSnippet.value.kind !== 'credential') {
+      switchDraftKind('credential')
+    }
+  }
+)
+
 function openCreateSnippet(): void {
   snippetDeletePrompt.value = null
   customGroupMode.value = false
   customGroupName.value = ''
+  clearCredentialEditorSecrets()
+  const activeGroup = state.ui.snippetGroup
+  const startCredential = activeGroup === '账密'
+  const fallbackTextGroup = state.snippetGroups.find((g) => g !== '账密') ?? '未分组'
   const defaultGroup =
-    state.ui.snippetGroup !== '全部' && state.snippetGroups.includes(state.ui.snippetGroup)
-      ? state.ui.snippetGroup
-      : state.snippetGroups[0] ?? '未分组'
+    activeGroup !== '全部' && state.snippetGroups.includes(activeGroup)
+      ? activeGroup
+      : fallbackTextGroup
+  lastTextGroup.value = defaultGroup !== '账密' ? defaultGroup : fallbackTextGroup
   editingSnippet.value = {
+    kind: startCredential ? 'credential' : 'text',
     title: '',
     content: '',
+    account: '',
+    password: '',
     group: defaultGroup,
     pinned: false
   }
@@ -359,12 +461,37 @@ function openEditSnippet(snippet: SnippetItem): void {
   snippetDeletePrompt.value = null
   customGroupMode.value = false
   customGroupName.value = ''
+  clearCredentialEditorSecrets()
+  const isCred = snippet.kind === 'credential'
+  lastTextGroup.value = snippet.group !== '账密' ? snippet.group : '未分组'
   editingSnippet.value = {
     id: snippet.id,
+    kind: isCred ? 'credential' : 'text',
     title: snippet.title,
     content: snippet.content,
-    group: snippet.group,
+    account: snippet.account ?? '',
+    password: '',
+    group: isCred ? '账密' : snippet.group,
     pinned: snippet.pinned
+  }
+  if (isCred && snippet.hasPassword) {
+    const ticket = ++revealPasswordSeq
+    loadingDraftPassword.value = true
+    void revealSnippetPassword(snippet.id)
+      .then((secret) => {
+        if (ticket !== revealPasswordSeq || !editingSnippet.value) return
+        if (!draftPasswordDirty.value) {
+          editingSnippet.value.password = secret
+        }
+      })
+      .catch((error) => {
+        if (ticket !== revealPasswordSeq) return
+        draftPasswordError.value =
+          error instanceof Error ? error.message : '读取已保存密码失败，留空将保留原密码'
+      })
+      .finally(() => {
+        if (ticket === revealPasswordSeq) loadingDraftPassword.value = false
+      })
   }
   startPreviewClock()
   void nextTick(() => snippetTitleEl.value?.focus())
@@ -374,6 +501,7 @@ function cancelEditSnippet(): void {
   editingSnippet.value = null
   customGroupMode.value = false
   customGroupName.value = ''
+  clearCredentialEditorSecrets()
   stopPreviewClock()
   void nextTick(() => searchEl.value?.focus())
 }
@@ -399,14 +527,36 @@ function insertVariable(token: string): void {
 async function submitSnippet(): Promise<void> {
   const draft = editingSnippet.value
   if (!draft || savingSnippet.value) return
-  const targetGroup = customGroupMode.value ? customGroupName.value.trim() : draft.group
-  if (customGroupMode.value && !targetGroup) {
+  const rawGroup = customGroupMode.value ? customGroupName.value.trim() : draft.group
+  if (customGroupMode.value && !rawGroup) {
     pushToast('请填写新分组名称，或切回已有分组', 'error')
     return
   }
+  const credentialMode = draft.kind === 'credential' || rawGroup === '账密'
+  const shouldKeepExistingPassword =
+    credentialMode && Boolean(editingOriginal.value?.hasPassword) && !draftPasswordDirty.value
+  const payload: SnippetDraft = credentialMode
+    ? {
+        id: draft.id,
+        kind: 'credential',
+        title: draft.title,
+        content: draft.content,
+        account: draft.account ?? '',
+        password: shouldKeepExistingPassword ? undefined : (draft.password ?? ''),
+        group: '账密',
+        pinned: draft.pinned
+      }
+    : {
+        id: draft.id,
+        kind: 'text',
+        title: draft.title,
+        content: draft.content,
+        group: rawGroup || '未分组',
+        pinned: draft.pinned
+      }
   savingSnippet.value = true
   try {
-    if (await saveSnippet({ ...draft, group: targetGroup || '未分组' })) {
+    if (await saveSnippet(payload)) {
       cancelEditSnippet()
       clampSnippetActive()
     }
@@ -422,17 +572,29 @@ function clampSnippetActive(): void {
   }
 }
 
-function onCopySnippet(snippet: SnippetItem | null, raw = false): void {
+async function onCopySnippet(
+  snippet: SnippetItem | null,
+  raw = false,
+  field?: SnippetCopyField
+): Promise<void> {
   if (!snippet) return
-  void copySnippet(snippet, raw)
+  const targetField: SnippetCopyField | undefined =
+    snippet.kind === 'credential' ? (field ?? 'account') : undefined
+  const ok = await copySnippet(snippet, raw, targetField)
+  if (ok && targetField) {
+    markCopiedBadge(snippet.id, targetField)
+  }
   if (!editingSnippet.value) searchEl.value?.focus()
 }
 
 async function onTogglePin(snippet: SnippetItem): Promise<void> {
   await saveSnippet({
     id: snippet.id,
+    kind: snippet.kind ?? 'text',
     title: snippet.title,
     content: snippet.content,
+    account: snippet.account,
+    password: undefined,
     group: snippet.group,
     pinned: !snippet.pinned
   })
@@ -557,6 +719,25 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  // Alt+1~9 序号快拷（历史记录与常用短语双视图均支持）
+  if (event.altKey && !event.ctrlKey && !event.metaKey && event.key >= '1' && event.key <= '9') {
+    const idx = Number(event.key) - 1
+    if (isHistoryView.value) {
+      const clip = filteredClips.value[idx]
+      if (clip) {
+        event.preventDefault()
+        onCopy(clip)
+      }
+    } else {
+      const snippet = filteredSnippets.value[idx]
+      if (snippet) {
+        event.preventDefault()
+        void onCopySnippet(snippet)
+      }
+    }
+    return
+  }
+
   if (event.key === 'Enter') {
     const target = event.target as HTMLElement | null
     if (target?.closest('button')) return
@@ -569,13 +750,19 @@ function onKeydown(event: KeyboardEvent): void {
       const snippet = filteredSnippets.value[state.ui.snippetActiveIndex]
       if (!snippet) return
       event.preventDefault()
-      onCopySnippet(snippet)
+      if (snippet.kind === 'credential' && event.shiftKey) {
+        void onCopySnippet(snippet, false, 'password')
+      } else {
+        void onCopySnippet(snippet)
+      }
     }
   }
 }
 
 onMounted(() => {
-  searchEl.value?.focus()
+  requestAnimationFrame(() => {
+    searchEl.value?.focus({ preventScroll: true })
+  })
 })
 
 // 从详情返回列表后焦点回到搜索框
@@ -589,20 +776,77 @@ watch(
   }
 )
 
-const emptySnippetHint = computed(() =>
-  state.snippets.length
-    ? '换个关键词，或切到「全部」分组再试。'
-    : '把常用回复、命令或带 {{date}} / {{clipboard}} 的模板钉在这里，单击即可复制。'
+const activeSnippet = computed(() =>
+  !isHistoryView.value ? filteredSnippets.value[state.ui.snippetActiveIndex] ?? null : null
 )
+
+const emptySnippetHint = computed(() => {
+  if (state.snippets.length) {
+    return state.ui.snippetGroup === '账密'
+      ? '还没有账密记录，点击右上角「新建」即可分别保存账号和密码。'
+      : '换个关键词，或切到「全部」分组再试。'
+  }
+  return '把常用回复、命令、账密或带 {{date}} / {{clipboard}} 的模板钉在这里，单击即可复制。'
+})
 
 const footerHint = computed(() => {
   if (explanation.value) return 'Esc 返回原文'
   if (detailClip.value?.kind === 'text') return '格式化仅改变预览，原文始终保留'
   if (detailClip.value) return 'Esc 返回列表'
-  if (editingSnippet.value) return '支持 {{date}} / {{time}} / {{clipboard}} · Esc 取消编辑'
-  if (!isHistoryView.value) return '方向键选择 · Enter 复制 · Alt+↑↓ 排序 · Esc 关闭'
-  return '方向键选择 · Enter 复制 · Esc 关闭'
+  if (editingSnippet.value) {
+    return isEditingCredential.value
+      ? '密码在本机加密保存，复制不会写入剪贴板历史 · Esc 取消编辑'
+      : '支持 {{date}} / {{time}} / {{clipboard}} · Esc 取消编辑'
+  }
+  if (!isHistoryView.value) {
+    return activeSnippet.value?.kind === 'credential'
+      ? 'Enter 复制账号 · Shift+Enter 复制密码 · Alt+↑↓ 排序 · Esc 关闭'
+      : '方向键选择 · Enter/Alt+1~9 复制 · Alt+↑↓ 排序 · Esc 关闭'
+  }
+  return '方向键选择 · Enter/Alt+1~9 复制 · Esc 关闭'
 })
+
+/** 智能识别剪贴板内容类型：颜色值、网址、JSON 或代码片段，提供直觉微标签与快捷动作。 */
+interface ClipBadgeInfo {
+  type: 'color' | 'url' | 'json' | 'code'
+  label: string
+  color?: string
+  url?: string
+}
+
+const COLOR_HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/
+const COLOR_RGB_RE = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/i
+const URL_RE = /^https?:\/\/[^\s<>"{}|\\^`[\]]+$/i
+const clipKindCache = new WeakMap<ClipItem, { text: string | undefined; info: ClipBadgeInfo | null }>()
+
+function inspectClipKind(clip: ClipItem): ClipBadgeInfo | null {
+  if (clip.kind !== 'text' || !clip.text) return null
+  const cached = clipKindCache.get(clip)
+  if (cached && cached.text === clip.text) return cached.info
+  const trimmed = clip.text.trim()
+  let info: ClipBadgeInfo | null = null
+  if (trimmed) {
+    if (COLOR_HEX_RE.test(trimmed) || COLOR_RGB_RE.test(trimmed)) {
+      info = { type: 'color', label: '色值', color: trimmed }
+    } else if (!trimmed.includes('\n') && URL_RE.test(trimmed)) {
+      info = { type: 'url', label: '链接', url: trimmed }
+    } else if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      try {
+        JSON.parse(trimmed)
+        info = { type: 'json', label: 'JSON' }
+      } catch { /* 非完整 JSON */ }
+    } else if (/^(?:SELECT|INSERT|UPDATE|DELETE|export\s+|import\s+|function\s+|const\s+|class\s+)/i.test(trimmed)) {
+      info = { type: 'code', label: '代码' }
+    }
+  }
+  clipKindCache.set(clip, { text: clip.text, info })
+  return info
+}
+
+function openDetectedUrl(url: string): void {
+  if (!URL_RE.test(url)) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
 </script>
 
 <template>
@@ -649,7 +893,7 @@ const footerHint = computed(() => {
           type="text"
           spellcheck="false"
           autocomplete="off"
-          :placeholder="isHistoryView ? '搜索正文、备注、图片…' : '搜索短语标题、正文、分组…'"
+          :placeholder="isHistoryView ? '搜索正文、备注、图片…' : '搜索短语标题、账号、正文、分组…'"
           :aria-label="isHistoryView ? '搜索剪贴板历史' : '搜索常用短语'"
           :value="isHistoryView ? state.ui.query : state.ui.snippetQuery"
           @input="onInput"
@@ -903,6 +1147,15 @@ const footerHint = computed(() => {
             class="btn btn-ghost"
             type="button"
             :disabled="isImageBroken(detailClip)"
+            @click="runClipboardOcr(detailClip.id)"
+          >
+            识别文字
+          </button>
+          <button
+            v-if="detailClip.kind === 'image'"
+            class="btn btn-ghost"
+            type="button"
+            :disabled="isImageBroken(detailClip)"
             @click="previewImage(detailClip.id)"
           >
             预览 / 钉图
@@ -978,13 +1231,21 @@ const footerHint = computed(() => {
             />
             <div class="thumb" :class="{ 'is-broken': isImageBroken(clip) }">
               <img v-if="clip.kind === 'image' && !isImageBroken(clip)" :src="clip.imageUrl" alt="" />
+              <span
+                v-else-if="inspectClipKind(clip)?.type === 'color'"
+                class="color-swatch"
+                :style="{ background: inspectClipKind(clip)?.color }"
+                :title="`颜色预览：${inspectClipKind(clip)?.color}`"
+              />
               <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
               <Icon v-else name="text" :size="16" />
+              <span v-if="!selecting && index < 9" class="index-kbd" :title="`按 Alt+${index + 1} 快捷复制`">{{ index + 1 }}</span>
             </div>
 
             <div class="row-main">
               <div class="row-title">{{ clip.favorite ? '★ ' : '' }}{{ clipSummary(clip) }}</div>
               <div class="row-meta">
+                <span v-if="inspectClipKind(clip)" class="smart-tag" :class="`is-${inspectClipKind(clip)?.type}`">{{ inspectClipKind(clip)?.label }}</span>
                 <span class="row-meta-text">
                   {{ clip.group }} · {{ relativeTime(clip.copiedAt) }}
                 </span>
@@ -996,6 +1257,16 @@ const footerHint = computed(() => {
             </div>
 
             <div v-if="!selecting" class="row-actions">
+              <button
+                v-if="inspectClipKind(clip)?.type === 'url'"
+                class="icon-btn"
+                type="button"
+                title="在新窗口打开链接"
+                :aria-label="`打开链接：${clipSummary(clip)}`"
+                @click.stop="openDetectedUrl(inspectClipKind(clip)!.url!)"
+              >
+                <Icon name="external" :size="14" />
+              </button>
               <button v-if="clip.kind === 'text'" class="chip" type="button" :disabled="!isDesktop || !clip.text?.trim()"
                 title="用已配置的模型解读这段文字" @click.stop="explainClip(clip)">AI 解读</button>
               <button
@@ -1071,12 +1342,49 @@ const footerHint = computed(() => {
             <Icon name="back" :size="14" />
             <span>返回常用短语</span>
           </button>
-          <span class="detail-meta">{{ editingSnippet.id ? '编辑模板' : '新建模板' }}</span>
+          <span class="detail-meta">
+            {{
+              editingSnippet.id
+                ? isEditingCredential
+                  ? '编辑账密'
+                  : '编辑模板'
+                : isEditingCredential
+                  ? '新建账密'
+                  : '新建模板'
+            }}
+          </span>
         </div>
 
         <div class="snippet-editor scroll-y">
+          <div class="snippet-kind-row">
+            <span class="snippet-label">类型</span>
+            <div class="kind-switch" role="radiogroup" aria-label="短语类型">
+              <button
+                class="kind-switch-btn"
+                type="button"
+                role="radio"
+                :aria-checked="!isEditingCredential"
+                :class="{ 'is-active': !isEditingCredential }"
+                @click="switchDraftKind('text')"
+              >
+                普通短语
+              </button>
+              <button
+                class="kind-switch-btn"
+                type="button"
+                role="radio"
+                :aria-checked="isEditingCredential"
+                :class="{ 'is-active': isEditingCredential }"
+                @click="switchDraftKind('credential')"
+              >
+                <Icon name="key" :size="12" />
+                <span>账密</span>
+              </button>
+            </div>
+          </div>
+
           <label class="snippet-field">
-            <span class="snippet-label">短语标题</span>
+            <span class="snippet-label">{{ isEditingCredential ? '账密名称' : '短语标题' }}</span>
             <input
               ref="snippetTitleEl"
               v-model="editingSnippet.title"
@@ -1084,14 +1392,21 @@ const footerHint = computed(() => {
               type="text"
               maxlength="80"
               spellcheck="false"
-              placeholder="例如：研发日报抬头、收件地址、常用命令"
+              :placeholder="
+                isEditingCredential
+                  ? '例如：公司邮箱、测试服务器、GitHub 账号'
+                  : '例如：研发日报抬头、收件地址、常用命令'
+              "
             />
           </label>
 
           <div class="snippet-meta-row">
             <div class="snippet-group-picker">
-              <span class="snippet-label">分组</span>
-              <template v-if="!customGroupMode">
+              <span class="snippet-label">{{ isEditingCredential ? '类别' : '分组' }}</span>
+              <template v-if="isEditingCredential">
+                <span class="tag-credential">账密（内置）</span>
+              </template>
+              <template v-else-if="!customGroupMode">
                 <select
                   v-model="editingSnippet.group"
                   class="snippet-select"
@@ -1126,41 +1441,111 @@ const footerHint = computed(() => {
 
             <label class="pin-toggle">
               <input v-model="editingSnippet.pinned" type="checkbox" />
-              <span>置顶此短语</span>
+              <span>{{ isEditingCredential ? '置顶此账密' : '置顶此短语' }}</span>
             </label>
           </div>
 
-          <div class="var-bar" role="group" aria-label="插入动态占位符">
-            <span class="var-hint">插入变量：</span>
-            <button
-              v-for="preset in variablePresets"
-              :key="preset.token"
-              class="chip var-chip"
-              type="button"
-              :title="preset.title"
-              @click="insertVariable(preset.token)"
-            >
-              + {{ preset.label }}
-            </button>
-          </div>
+          <template v-if="isEditingCredential">
+            <label class="snippet-field">
+              <span class="snippet-label">账号</span>
+              <input
+                ref="snippetAccountEl"
+                v-model="editingSnippet.account"
+                class="snippet-input"
+                type="text"
+                maxlength="300"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="输入登录账号、用户名或邮箱"
+                @keydown.enter.prevent
+              />
+            </label>
 
-          <label class="snippet-field snippet-body-field">
-            <span class="snippet-label">短语内容</span>
-            <textarea
-              ref="snippetBodyEl"
-              v-model="editingSnippet.content"
-              class="textarea snippet-textarea"
-              rows="4"
-              maxlength="20000"
-              spellcheck="false"
-              placeholder="输入短语正文，支持点击上方按钮插入 {{date}}、{{time}}、{{clipboard}} 等变量；复制时仅写入剪贴板，不会自动发送。"
-            />
-          </label>
+            <label class="snippet-field">
+              <span class="snippet-label">
+                密码
+                <span v-if="loadingDraftPassword" class="snippet-inline-note">正在读取已保存密码…</span>
+              </span>
+              <div class="password-input-wrap">
+                <input
+                  v-model="editingSnippet.password"
+                  class="snippet-input password-input"
+                  :type="showDraftPassword ? 'text' : 'password'"
+                  maxlength="1000"
+                  autocomplete="new-password"
+                  spellcheck="false"
+                  :placeholder="
+                    editingOriginal?.hasPassword
+                      ? '输入新密码（留空或保持现状将保留原密码）'
+                      : '输入登录密码'
+                  "
+                  @input="draftPasswordDirty = true; draftPasswordError = ''"
+                  @keydown.enter.prevent="submitSnippet"
+                />
+                <button
+                  class="pw-toggle"
+                  type="button"
+                  :aria-pressed="showDraftPassword"
+                  :aria-label="showDraftPassword ? '隐藏密码' : '显示密码'"
+                  :title="showDraftPassword ? '隐藏密码' : '显示密码'"
+                  @click="showDraftPassword = !showDraftPassword"
+                >
+                  <Icon :name="showDraftPassword ? 'eye-off' : 'eye'" :size="14" />
+                </button>
+              </div>
+              <p v-if="draftPasswordError" class="field-warn" role="status">{{ draftPasswordError }}</p>
+            </label>
 
-          <div v-if="draftHasVariables" class="var-preview" role="status">
-            <div class="var-preview-head">动态拼装实时预览</div>
-            <div class="var-preview-body">{{ draftPreviewText }}</div>
-          </div>
+            <label class="snippet-field">
+              <span class="snippet-label">备注（可选）</span>
+              <input
+                v-model="editingSnippet.content"
+                class="snippet-input"
+                type="text"
+                maxlength="500"
+                spellcheck="false"
+                placeholder="例如：系统地址、环境说明（不建议写明文口令）"
+              />
+            </label>
+
+            <p class="cred-security-hint">
+              密码仅在本机加密保存，列表隐藏明文且复制自动跳过剪贴板历史，不会自动粘贴。
+            </p>
+          </template>
+
+          <template v-else>
+            <div class="var-bar" role="group" aria-label="插入动态占位符">
+              <span class="var-hint">插入变量：</span>
+              <button
+                v-for="preset in variablePresets"
+                :key="preset.token"
+                class="chip var-chip"
+                type="button"
+                :title="preset.title"
+                @click="insertVariable(preset.token)"
+              >
+                + {{ preset.label }}
+              </button>
+            </div>
+
+            <label class="snippet-field snippet-body-field">
+              <span class="snippet-label">短语内容</span>
+              <textarea
+                ref="snippetBodyEl"
+                v-model="editingSnippet.content"
+                class="textarea snippet-textarea"
+                rows="4"
+                maxlength="20000"
+                spellcheck="false"
+                placeholder="输入短语正文，支持点击上方按钮插入 {{date}}、{{time}}、{{clipboard}} 等变量；复制时仅写入剪贴板，不会自动发送。"
+              />
+            </label>
+
+            <div v-if="draftHasVariables" class="var-preview" role="status">
+              <div class="var-preview-head">动态拼装实时预览</div>
+              <div class="var-preview-body">{{ draftPreviewText }}</div>
+            </div>
+          </template>
         </div>
 
         <div class="detail-actions snippet-actions">
@@ -1190,7 +1575,7 @@ const footerHint = computed(() => {
               下移
             </button>
             <button
-              v-if="hasSnippetVariables(editingOriginal.content)"
+              v-if="!isEditingCredential && hasSnippetVariables(editingOriginal.content)"
               class="btn btn-ghost"
               type="button"
               title="不展开变量，复制原始模板花括号"
@@ -1204,10 +1589,10 @@ const footerHint = computed(() => {
           <button
             class="btn btn-primary"
             type="button"
-            :disabled="savingSnippet || !editingSnippet.title.trim() || !editingSnippet.content.trim()"
+            :disabled="!canSubmitSnippet"
             @click="submitSnippet"
           >
-            {{ savingSnippet ? '保存中…' : '保存短语' }}
+            {{ savingSnippet ? '保存中…' : isEditingCredential ? '保存账密' : '保存短语' }}
           </button>
         </div>
       </section>
@@ -1275,21 +1660,79 @@ const footerHint = computed(() => {
             role="button"
             tabindex="-1"
             :data-index="index"
-            :class="{ 'is-active': index === state.ui.snippetActiveIndex }"
-            :aria-label="`${snippet.title}，${snippet.group}`"
+            :class="{
+              'is-active': index === state.ui.snippetActiveIndex,
+              'is-credential': snippet.kind === 'credential'
+            }"
+            :aria-label="
+              snippet.kind === 'credential'
+                ? `${snippet.title}，账密，账号 ${snippet.account ?? ''}`
+                : `${snippet.title}，${snippet.group}`
+            "
             @click="onCopySnippet(snippet)"
             @mouseenter="state.ui.snippetActiveIndex = index"
           >
-            <div class="thumb snippet-thumb" :class="{ 'is-pinned': snippet.pinned }">
-              <Icon :name="snippet.pinned ? 'pin' : 'bookmark'" :size="15" />
+            <div
+              class="thumb snippet-thumb"
+              :class="{
+                'is-pinned': snippet.pinned,
+                'is-credential': snippet.kind === 'credential'
+              }"
+            >
+              <Icon
+                :name="snippet.kind === 'credential' ? 'key' : snippet.pinned ? 'pin' : 'bookmark'"
+                :size="15"
+              />
             </div>
 
             <div class="row-main">
               <div class="row-title snippet-title-line">
                 <span class="snippet-title-text">{{ snippet.title }}</span>
-                <span v-if="hasSnippetVariables(snippet.content)" class="tag-dynamic">动态</span>
+                <span v-if="snippet.kind === 'credential'" class="tag-credential">账密</span>
+                <span v-else-if="hasSnippetVariables(snippet.content)" class="tag-dynamic">动态</span>
               </div>
-              <div class="row-meta">
+              <template v-if="snippet.kind === 'credential'">
+                <div class="row-meta cred-row-meta">
+                  <span class="row-meta-text" :title="`账号：${snippet.account || ''}`">
+                    账号：{{ snippet.account || '未填写'
+                    }}<template v-if="snippet.content"> · {{ snippetSummary(snippet.content) }}</template>
+                  </span>
+                </div>
+                <div class="cred-quick-bar">
+                  <button
+                    class="cred-copy-btn"
+                    :class="{ 'is-copied': copiedBadgeKey === `${snippet.id}:account` }"
+                    type="button"
+                    :aria-label="`复制账号：${snippet.title}`"
+                    @click.stop="onCopySnippet(snippet, false, 'account')"
+                  >
+                    <Icon
+                      :name="copiedBadgeKey === `${snippet.id}:account` ? 'check' : 'copy'"
+                      :size="11"
+                    />
+                    <span>{{
+                      copiedBadgeKey === `${snippet.id}:account` ? '已复制账号' : '复制账号'
+                    }}</span>
+                  </button>
+                  <button
+                    class="cred-copy-btn is-secret"
+                    :class="{ 'is-copied': copiedBadgeKey === `${snippet.id}:password` }"
+                    type="button"
+                    title="复制密码（不记入剪贴板历史）"
+                    :aria-label="`复制密码：${snippet.title}`"
+                    @click.stop="onCopySnippet(snippet, false, 'password')"
+                  >
+                    <Icon
+                      :name="copiedBadgeKey === `${snippet.id}:password` ? 'check' : 'key'"
+                      :size="11"
+                    />
+                    <span>{{
+                      copiedBadgeKey === `${snippet.id}:password` ? '已复制密码' : '复制密码'
+                    }}</span>
+                  </button>
+                </div>
+              </template>
+              <div v-else class="row-meta">
                 <span class="row-meta-text">
                   {{ snippet.group }} · {{ snippetSummary(snippet.content) }}
                 </span>
@@ -1330,18 +1773,33 @@ const footerHint = computed(() => {
         </div>
 
         <div v-else class="empty">
-          <Icon :name="state.snippets.length ? 'search' : 'bookmark'" :size="26" />
+          <Icon
+            :name="
+              state.snippets.length
+                ? state.ui.snippetGroup === '账密'
+                  ? 'key'
+                  : 'search'
+                : 'bookmark'
+            "
+            :size="26"
+          />
           <p class="empty-title">
-            {{ state.snippets.length ? '没有匹配的常用短语' : '还没有常用短语' }}
+            {{
+              state.snippets.length
+                ? state.ui.snippetGroup === '账密'
+                  ? '暂无账密记录'
+                  : '没有匹配的常用短语'
+                : '还没有常用短语'
+            }}
           </p>
           <p class="empty-sub">{{ emptySnippetHint }}</p>
           <button
-            v-if="!state.snippets.length"
+            v-if="!state.snippets.length || state.ui.snippetGroup === '账密'"
             class="btn btn-primary empty-cta"
             type="button"
             @click="openCreateSnippet"
           >
-            新建第一条短语
+            {{ state.ui.snippetGroup === '账密' ? '新建第一条账密' : '新建第一条短语' }}
           </button>
         </div>
       </template>
@@ -1687,6 +2145,8 @@ const footerHint = computed(() => {
   flex: 1 1 auto;
   min-height: 0;
   padding: 0 8px 8px;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 .row {
@@ -1721,6 +2181,7 @@ const footerHint = computed(() => {
 }
 
 .thumb {
+  position: relative;
   flex: none;
   width: 36px;
   height: 36px;
@@ -1731,6 +2192,50 @@ const footerHint = computed(() => {
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--text-2);
+}
+
+.color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.index-kbd {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+  opacity: 0.78;
+}
+
+.smart-tag {
+  flex: none;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 16px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.smart-tag.is-color {
+  border: 1px solid var(--line-strong);
 }
 
 .thumb img {
@@ -1906,7 +2411,7 @@ const footerHint = computed(() => {
 
 .explanation .detail-head { justify-content: space-between; }
 .explanation h3 { margin: 0; font-size: var(--text-md); font-weight: 600; }
-.explanation-body { max-height: 260px; overflow-wrap: anywhere; line-height: 1.65; user-select: text; }
+.explanation-body { max-height: 260px; overflow-x: hidden; scrollbar-gutter: stable; overflow-wrap: anywhere; line-height: 1.65; user-select: text; }
 .explanation-body :is(p, h4) { white-space: pre-wrap; }
 .explanation-body p { margin: 0; }
 .follow-up { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--line-strong); }
@@ -1950,6 +2455,8 @@ const footerHint = computed(() => {
   flex: 1 1 auto;
   min-height: 0;
   padding: 10px;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--r-card);
@@ -2143,8 +2650,14 @@ const footerHint = computed(() => {
   flex: 0 1 auto;
   min-height: 90px;
   max-height: 224px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 10px 8px;
+}
+.detail-body.code-body.no-wrap {
+  overflow: auto;
+  scrollbar-gutter: auto;
 }
 
 .code-body:focus-visible {
@@ -2305,6 +2818,203 @@ const footerHint = computed(() => {
   border-color: var(--line);
   color: var(--text-3);
   cursor: not-allowed;
+}
+
+/* 账密列表与编辑器样式 */
+.snippet-row.is-credential {
+  align-items: flex-start;
+}
+
+.snippet-row.is-credential .row-actions {
+  margin-top: 4px;
+}
+
+.snippet-thumb.is-credential {
+  background: var(--surface-3);
+  border-color: var(--line-strong);
+  color: var(--accent);
+}
+
+.tag-credential {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--accent-weak);
+  border: 1px solid var(--accent-weak);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.cred-quick-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.cred-copy-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease), transform 140ms var(--ease-out);
+}
+
+.cred-copy-btn:hover {
+  background: var(--hover);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.cred-copy-btn.is-secret {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.cred-copy-btn.is-copied {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cred-copy-btn:active:not(:disabled) {
+  transform: scale(0.965);
+}
+
+.snippet-kind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kind-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+}
+
+.kind-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: calc(var(--r-chip) - 2px);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  touch-action: manipulation;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform 140ms var(--ease-out);
+}
+
+.kind-switch-btn:hover {
+  color: var(--text);
+}
+
+.kind-switch-btn.is-active {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.kind-switch-btn:active:not(:disabled) {
+  transform: scale(0.965);
+}
+
+.snippet-inline-note {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input {
+  width: 100%;
+  padding-right: 34px;
+}
+
+.pw-toggle {
+  position: absolute;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-2);
+  touch-action: manipulation;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease),
+    transform 140ms var(--ease-out);
+}
+
+.pw-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.pw-toggle:active {
+  transform: scale(0.95);
+}
+
+.field-warn {
+  margin: 0;
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.cred-security-hint {
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-chip);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cred-copy-btn,
+  .kind-switch-btn,
+  .pw-toggle {
+    transition-duration: 0.001ms;
+  }
+
+  .cred-copy-btn:active:not(:disabled),
+  .kind-switch-btn:active:not(:disabled),
+  .pw-toggle:active {
+    transform: none;
+  }
 }
 
 /* 底部提示 */

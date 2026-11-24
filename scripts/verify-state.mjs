@@ -248,4 +248,89 @@ await test('首次解释失败可重试，网页预览不会调用模型', async
   await ui.submit()
   assert.equal(ui.explanation.value.result, '解释成功')
 })
+const dismissSource = fs.readFileSync(new URL('../src/features/island/dismissGesture.ts', import.meta.url), 'utf8')
+const dismissMod = ts.transpileModule(dismissSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+const dismissCtx = { exports: {} }
+vm.runInNewContext(dismissMod, dismissCtx)
+const dismissApi = dismissCtx.exports
+await test('空白翻译页不锁死自动收缩，加载中、有输入、有译文或报错时保持展开', () => {
+  assert.equal(dismissApi.shouldKeepTranslationOpen({ status: 'idle', source: '   ', result: null, error: '' }), false)
+  assert.equal(dismissApi.shouldKeepTranslationOpen({ status: 'loading', source: '', result: null, error: '' }), true)
+  assert.equal(dismissApi.shouldKeepTranslationOpen({ status: 'idle', source: '你好', result: null, error: '' }), true)
+  assert.equal(dismissApi.shouldKeepTranslationOpen({ status: 'done', source: '', result: { text: 'Hello' }, error: '' }), true)
+  assert.equal(dismissApi.shouldKeepTranslationOpen({ status: 'error', source: '', result: null, error: '请求超时' }), true)
+})
+await test('窗口失焦保护矩阵：仅保护钉住、审批、文件忙碌、拖入、组字、翻译中与预览保活', () => {
+  const base = {
+    expanded: true, pinned: false, hasApproval: false, shelfBusy: false,
+    receivingFiles: false, composing: false, translationLoading: false, previewKeepOpen: false
+  }
+  assert.equal(dismissApi.shouldAutoCollapseOnWindowBlur(base), true)
+  assert.equal(dismissApi.shouldAutoCollapseOnWindowBlur({ ...base, expanded: false }), false)
+  for (const flag of ['pinned', 'hasApproval', 'shelfBusy', 'receivingFiles', 'composing', 'translationLoading', 'previewKeepOpen']) {
+    assert.equal(dismissApi.shouldAutoCollapseOnWindowBlur({ ...base, [flag]: true }), false)
+  }
+})
+await test('底部拉条满足 1:1 跟手、边界橡皮筋阻尼、动量投影轻甩与减弱动态降级', () => {
+  const linearPull = dismissApi.computeDismissPull(-20)
+  assert.equal(linearPull.offsetY, -20)
+  assert.equal(linearPull.ready, false)
+  assert.ok(linearPull.scaleY < 1 && linearPull.scaleY >= 0.94)
+  const overPull = dismissApi.computeDismissPull(-60)
+  assert.ok(overPull.offsetY < -36 && overPull.offsetY > -60)
+  assert.equal(overPull.ready, true)
+  const downRubber = dismissApi.computeDismissPull(20)
+  assert.ok(downRubber.offsetY > 0 && downRubber.offsetY < 20)
+  assert.equal(downRubber.scaleY, 1)
+  assert.equal(downRubber.ready, false)
+  assert.equal(dismissApi.shouldCommitDismiss(-28, 0, true), true)
+  assert.equal(dismissApi.shouldCommitDismiss(-12, -450, true), true)
+  assert.equal(dismissApi.shouldCommitDismiss(-12, -50, true), false)
+  assert.equal(dismissApi.shouldCommitDismiss(-12, -450, true, true), false)
+  assert.equal(dismissApi.shouldCommitDismiss(-30, 0, true, true), true)
+  assert.equal(dismissApi.shouldCommitDismiss(-40, -800, false), false)
+})
+await test('常用短语账密类别校验、密码保留与禁止删除内置类别', async () => {
+  const calls = []
+  const toasts = []
+  const state = {
+    snippets: [{ id: 'c1', kind: 'credential', title: '邮箱', content: '', account: 'u@example.com', hasPassword: true, group: '账密', pinned: false, updatedAt: 1 }],
+    snippetGroups: ['未分组', '账密'],
+    ui: { snippetGroup: '全部' }
+  }
+  const api = subject(
+    ['applySnippets', 'saveSnippet', 'removeSnippetGroup', 'copySnippet'],
+    {
+      state,
+      pushToast: (msg, kind) => toasts.push({ msg, kind }),
+      invokeHost: async (command, args) => {
+        calls.push({ command, args })
+        if (command === 'save_snippet') {
+          return {
+            groups: ['未分组', '账密'],
+            entries: [{ id: args.snippet.id || 'c-new', kind: args.snippet.kind, title: args.snippet.title, content: args.snippet.content, account: args.snippet.account, hasPassword: true, group: '账密', pinned: args.snippet.pinned, updatedAt: 2 }]
+          }
+        }
+      }
+    }
+  )
+  // 不可删除内置类别“账密”与“未分组”
+  assert.equal(await api.removeSnippetGroup('未分组'), false)
+  assert.equal(await api.removeSnippetGroup('账密'), false)
+  // 新建账密缺少账号或密码均校验拦截，不发 IPC
+  assert.equal(await api.saveSnippet({ kind: 'credential', title: '新账密', account: '  ', password: 'abc', content: '', group: '账密', pinned: false }), false)
+  assert.equal(await api.saveSnippet({ kind: 'credential', title: '新账密', account: 'alice', password: '', content: '', group: '账密', pinned: false }), false)
+  assert.equal(calls.length, 0)
+  // 编辑已有账密不传 password（如置顶操作）允许保留原密码，并携带 kind 与 account
+  assert.equal(await api.saveSnippet({ id: 'c1', kind: 'credential', title: '邮箱', account: 'u@example.com', content: '', group: '账密', pinned: true }), true)
+  assert.equal(calls[0].command, 'save_snippet')
+  assert.equal(calls[0].args.snippet.kind, 'credential')
+  assert.equal(calls[0].args.snippet.password, undefined)
+  // 账密分别复制账号与密码
+  assert.equal(await api.copySnippet(state.snippets[0], false, 'account'), true)
+  assert.equal(await api.copySnippet(state.snippets[0], false, 'password'), true)
+  assert.equal(calls[1].args.field, 'account')
+  assert.equal(calls[2].args.field, 'password')
+  assert.match(toasts.at(-1).msg, /不记入剪贴板历史/)
+})
 if(failed)process.exitCode=1

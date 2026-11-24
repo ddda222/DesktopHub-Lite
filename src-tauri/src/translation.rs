@@ -93,9 +93,9 @@ pub fn cancel_translation(app: AppHandle, window: tauri::WebviewWindow) {
 
 fn completion_request(settings: &TranslationSettings, messages: Vec<Value>) -> Result<reqwest::RequestBuilder, String> {
     let url = validate(settings)?;
-    if settings.model.trim().is_empty() { return Err("请先在翻译设置中填写模型名称".into()); }
+    if settings.model.trim().is_empty() { return Err("请先在模型与翻译设置中填写模型名称".into()); }
     let secret = credential(settings)?.get_password().unwrap_or_default();
-    if secret.is_empty() && !matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")) { return Err("请先在翻译设置中保存 API 密钥".into()); }
+    if secret.is_empty() && !matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]")) { return Err("请先在模型与翻译设置中保存 API 密钥".into()); }
     let base = settings.base_url.trim_end_matches('/');
     let endpoint = if base.ends_with("/chat/completions") { base.to_owned() } else { format!("{base}/chat/completions") };
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(45))

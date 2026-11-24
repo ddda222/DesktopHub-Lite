@@ -24,12 +24,12 @@ export const MOTION_DESCRIPTIONS: Record<MotionMode, string> = {
 }
 
 export const MOTION_TIMINGS: Record<MotionMode, { expandMs: number; collapseMs: number }> = {
-  glide: { expandMs: 310, collapseMs: 205 },
-  sweep: { expandMs: 370, collapseMs: 245 },
-  bounce: { expandMs: 430, collapseMs: 225 },
-  step: { expandMs: 300, collapseMs: 200 },
-  flicker: { expandMs: 155, collapseMs: 120 },
-  unroll: { expandMs: 380, collapseMs: 250 }
+  glide: { expandMs: 270, collapseMs: 180 },
+  sweep: { expandMs: 310, collapseMs: 200 },
+  bounce: { expandMs: 360, collapseMs: 195 },
+  step: { expandMs: 260, collapseMs: 175 },
+  flicker: { expandMs: 145, collapseMs: 110 },
+  unroll: { expandMs: 300, collapseMs: 195 }
 }
 
 export function isMotionMode(value: string): value is MotionMode {

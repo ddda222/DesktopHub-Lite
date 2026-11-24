@@ -7,6 +7,7 @@ import AppManagement from './AppManagement.vue'
 import MixerSettings from './MixerSettings.vue'
 import MailSettings from './MailSettings.vue'
 import ApprovalSettings from './ApprovalSettings.vue'
+import DataStorageSettings, { type QuickDataPrompt } from './DataStorageSettings.vue'
 import ConfigBackup from './ConfigBackup.vue'
 import './settings.css'
 import {
@@ -43,6 +44,11 @@ const props = withDefaults(defineProps<{ standalone?: boolean }>(), { standalone
 const windowEl = ref<HTMLElement | null>(null)
 const islandDraftPending = ref(false)
 const appsDraftPending = ref(false)
+const dataStorageRef = ref<InstanceType<typeof DataStorageSettings> | null>(null)
+const dataStoragePrompt = ref<QuickDataPrompt | null>(null)
+function jumpToDataMigration(): void {
+  void dataStorageRef.value?.triggerQuickMigration()
+}
 const windowDrag = useWindowDrag(windowEl, {
   native: () => props.standalone && isDesktop,
   onError: error => pushToast(`无法拖动设置：${String(error)}`, 'error')
@@ -55,7 +61,7 @@ const sections: { id: SettingsSection; label: string }[] = [
   { id: 'general', label: '通用' },
   { id: 'apps', label: '应用管理' },
   { id: 'clipboard', label: '剪贴板' },
-  { id: 'translation', label: '翻译' },
+  { id: 'translation', label: '模型与翻译' },
   { id: 'audio', label: '调音台' },
   { id: 'mail', label: '邮箱通知' },
   { id: 'approvals', label: '智能体连接' }
@@ -200,7 +206,7 @@ async function saveTranslation(): Promise<void> {
   try {
     const ok = await saveTranslationSettings(translationDraft.value)
     translationError.value = !ok
-    translationFeedback.value = ok ? '翻译设置已保存' : '保存失败，请检查接口地址和模型后重试。'
+    translationFeedback.value = ok ? '模型设置已保存' : '保存失败，请检查接口地址和模型后重试。'
     if (ok) savedTranslation.value = submitted
   } finally { translationBusy.value = false }
 }
@@ -257,7 +263,7 @@ function removeSecret(): void {
 /* ---------- 通用 ---------- */
 
 const shortcutDraft = ref({ ...state.shortcuts })
-const shortcutSignature = () => JSON.stringify([shortcutDraft.value.bar, shortcutDraft.value.clipboard, shortcutDraft.value.translation])
+const shortcutSignature = () => JSON.stringify([shortcutDraft.value.bar, shortcutDraft.value.clipboard, shortcutDraft.value.translation, shortcutDraft.value.ocr])
 const savedShortcuts = ref(shortcutSignature())
 const shortcutsDirty = computed(() => shortcutSignature() !== savedShortcuts.value)
 const shortcutsBusy = ref(false)
@@ -429,18 +435,19 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               <input id="new-snippet-group" v-model="newSnippetGroup" class="control" maxlength="40" placeholder="例如：快捷回复、常用脚本" @keydown.enter.prevent="addSnippetGroup" />
               <button class="btn" type="button" :disabled="!newSnippetGroup.trim()" @click="addSnippetGroup">添加分组</button>
             </div>
-            <p class="hint">删除短语分组后，该组短语会自动归入“未分组”，正文不会丢失。</p>
+            <p class="hint">删除短语分组后，该组短语会自动归入“未分组”，正文不会丢失；“未分组”与“账密”为内置类别，不可删除。</p>
             <div class="card">
               <div v-for="group in state.snippetGroups" :key="group" class="group-row">
                 <span class="group-name">{{ group }}</span>
                 <span v-if="group === '未分组'" class="tag tag-muted">默认组</span>
+                <span v-else-if="group === '账密'" class="tag tag-muted">内置类别</span>
                 <span class="count">{{ snippetGroupCount(group) }}</span>
                 <button
                   class="icon-btn sm"
                   type="button"
-                  :disabled="group === '未分组'"
+                  :disabled="group === '未分组' || group === '账密'"
                   :aria-label="`删除短语分组 ${group}`"
-                  :title="group === '未分组' ? '默认组不可删除' : '删除短语分组'"
+                  :title="group === '未分组' ? '默认组不可删除' : group === '账密' ? '内置类别不可删除' : '删除短语分组'"
                   @click="onRemoveSnippetGroup(group)"
                 >
                   <Icon name="trash" :size="13" />
@@ -464,10 +471,10 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
             </div>
           </div>
 
-          <!-- 翻译 -->
+          <!-- 模型与翻译 -->
           <div v-show="state.ui.settingsSection === 'translation'" class="panel">
-            <h3 class="panel-title">翻译</h3>
-            <p class="hint">翻译默认手动提交，不会自动读取或上传剪贴板内容。</p>
+            <h3 class="panel-title">模型与翻译</h3>
+            <p class="hint">配置模型服务商、接口与密钥，供文本翻译与剪贴板 AI 解读共用。所有请求均需手动触发，不会自动读取或上传剪贴板内容。</p>
 
             <div class="field-grid">
               <label class="field">
@@ -491,7 +498,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               </label>
 
               <label class="field">
-                <span class="field-label">默认方向</span>
+                <span class="field-label">默认翻译方向</span>
                 <span class="select-wrap">
                   <select
                     class="control select"
@@ -529,7 +536,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               </label>
             </div>
 
-            <div class="save-row"><p role="status" :class="{ error: translationError }">{{ translationDirty ? '有未保存的修改' : translationFeedback || '更改后点击保存' }}<span v-if="translationDirty && translationError"> · {{ translationFeedback }}</span></p><button class="btn btn-primary" type="button" :disabled="translationBusy || !isDesktop || !translationDraft.baseUrl.trim() || !translationDraft.model.trim()" @click="saveTranslation">{{ translationBusy ? '保存中…' : '保存翻译设置' }}</button></div>
+            <div class="save-row"><p role="status" :class="{ error: translationError }">{{ translationDirty ? '有未保存的修改' : translationFeedback || '更改后点击保存' }}<span v-if="translationDirty && translationError"> · {{ translationFeedback }}</span></p><button class="btn btn-primary" type="button" :disabled="translationBusy || !isDesktop || !translationDraft.baseUrl.trim() || !translationDraft.model.trim()" @click="saveTranslation">{{ translationBusy ? '保存中…' : '保存模型设置' }}</button></div>
             <div class="card">
               <div class="set-row">
                 <span class="set-text">
@@ -586,6 +593,15 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
           <!-- 通用 -->
           <div v-show="state.ui.settingsSection === 'general'" class="panel">
             <h3 class="panel-title">通用</h3>
+            <div v-if="dataStoragePrompt" class="general-quick-banner" role="region" aria-label="数据迁移快捷引导">
+              <div class="general-quick-copy">
+                <strong>{{ dataStoragePrompt.title }}</strong>
+                <span class="hint">{{ dataStoragePrompt.detail }}</span>
+              </div>
+              <button class="btn btn-primary" type="button" @click="jumpToDataMigration">
+                {{ dataStoragePrompt.buttonLabel }}
+              </button>
+            </div>
             <DesktopFeatures @dirty-change="islandDraftPending = $event">
               <h4 class="sub-title">显示主题 <span class="save-mode">即时生效</span></h4>
               <div class="card">
@@ -639,18 +655,49 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
                 </div>
               </div>
             </DesktopFeatures>
+            <DataStorageSettings
+              ref="dataStorageRef"
+              :blocked="islandDraftPending || appsDraftPending"
+              @quick-prompt="dataStoragePrompt = $event"
+            />
             <ConfigBackup :blocked="islandDraftPending || appsDraftPending" />
             <h4 class="sub-title">全局快捷键</h4><div class="shortcut-fields">
               <label class="field"><span class="field-label">唤出图标条</span><input v-model="shortcutDraft.bar" class="control" /></label>
               <label class="field"><span class="field-label">剪贴板</span><input v-model="shortcutDraft.clipboard" class="control" /></label>
               <label class="field"><span class="field-label">翻译</span><input v-model="shortcutDraft.translation" class="control" /></label>
+              <label class="field"><span class="field-label">截图识字</span><input v-model="shortcutDraft.ocr" class="control" /></label>
               <div class="save-row"><p role="status" :class="{ error: shortcutsError }">{{ shortcutsDirty ? '有未保存的修改' : shortcutsFeedback || '更改后点击保存' }}<span v-if="shortcutsDirty && shortcutsError"> · {{ shortcutsFeedback }}</span></p><button class="btn btn-primary" :disabled="shortcutsBusy || !isDesktop" @click="applyShortcuts">{{ shortcutsBusy ? '保存中…' : '保存快捷键' }}</button></div>
+              <p class="hint">联动提示：除全局快捷键外，使用系统 Win+Shift+S 截完图后，灵动岛胶囊也会自动浮现「识字」一键按钮。</p>
               <p v-for="error in state.shortcuts.errors" :key="error" class="hint">{{ error }}</p>
             </div>
-            <p class="about">版本 {{ appVersion }} · DesktopHub Lite · 数据保存在本机独立目录</p>
+            <p class="about">版本 {{ appVersion }} · DesktopHub Lite · 默认跨版本共享独立数据目录</p>
           </div>
         </section>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.general-quick-banner {
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.general-quick-copy {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.general-quick-copy strong { font-size: 13px; }
+.general-quick-copy .hint { margin: 0; }
+</style>

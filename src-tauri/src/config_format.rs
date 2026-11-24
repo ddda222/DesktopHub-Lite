@@ -49,6 +49,8 @@ pub struct PortablePreferences {
     pub telemetry_cpu: bool,
     #[serde(default = "default_true")]
     pub telemetry_memory: bool,
+    #[serde(default = "default_true")]
+    pub show_app_names: bool,
 }
 impl PortablePreferences {
     pub fn capture(ui: &UiState) -> Self {
@@ -67,6 +69,7 @@ impl PortablePreferences {
             telemetry_net: ui.island_appearance.telemetry_net,
             telemetry_cpu: ui.island_appearance.telemetry_cpu,
             telemetry_memory: ui.island_appearance.telemetry_memory,
+            show_app_names: ui.island_appearance.show_app_names,
         }
     }
     pub fn apply(&self, ui: &mut UiState) {
@@ -80,6 +83,7 @@ impl PortablePreferences {
         ui.island_appearance.telemetry_net = self.telemetry_net;
         ui.island_appearance.telemetry_cpu = self.telemetry_cpu;
         ui.island_appearance.telemetry_memory = self.telemetry_memory;
+        ui.island_appearance.show_app_names = self.show_app_names;
         if ui.island_expanded { ui.panel = if self.island_page == "applications" { None } else { Some(self.island_page.clone()) }; }
     }
 }

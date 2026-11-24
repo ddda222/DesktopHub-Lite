@@ -92,7 +92,7 @@ onBeforeUnmount(() => { ++sequence; if (preview.value && busy.value !== 'apply')
 <template>
   <section class="configuration-backup" aria-labelledby="configuration-title" :aria-busy="Boolean(busy)">
     <h4 id="configuration-title" class="sub-title">配置备份 <span class="save-mode">预览后确认恢复</span></h4>
-    <p class="hint">保存应用清单、分类和显示偏好。路径与网址只保留引用，换电脑后可能需要重新选择；请勿在应用目标中保存凭据。API 密钥、翻译设置、剪贴板、文件内容、声音配置和系统联动开关均不包含在内。</p>
+    <p class="hint">保存应用清单、分类和显示偏好。路径与网址只保留引用，换电脑后可能需要重新选择；请勿在应用目标中保存凭据。API 密钥、模型设置、剪贴板、文件内容、声音配置和系统联动开关均不包含在内。</p>
     <p v-if="!isDesktop" class="hint">网页演示仅使用合成预览，不读取或备份本机配置。</p>
     <div class="actions">
       <button class="btn" :disabled="Boolean(busy) || !isDesktop" @click="exportConfig">{{ busy === 'export' ? '正在导出…' : '导出配置' }}</button>

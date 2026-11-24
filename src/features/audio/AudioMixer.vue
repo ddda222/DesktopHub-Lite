@@ -15,7 +15,7 @@ const visibleSessions = computed(() => {
 })
 const profiles = ref<Profile[]>(isDesktop ? [] : mockProfiles)
 const profileName = ref('')
-const notice = ref(isDesktop ? '应用播放声音后会出现在这里。配置只在点击时应用。' : '合成会话，可体验独立音量与静音。')
+const notice = ref('')
 const error = ref('')
 const readError = ref('')
 const warnings = ref<string[]>([])
@@ -141,8 +141,6 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
     </div>
     <form class="save-profile" @submit.prevent="save"><input v-model="profileName" maxlength="20" placeholder="如：开会、游戏（同名覆盖）" aria-label="声音配置名称" /><button type="submit" :disabled="busy || !sessions.length">保存配置</button></form>
     <p v-if="error" class="mixer-error" role="alert">{{ error }}</p><p v-if="readError" class="mixer-error" role="alert">{{ readError }}</p><p v-for="warning in warnings" :key="warning" class="mixer-notice">{{ warning }}</p>
-    <p class="mixer-notice" role="status">{{ notice }}</p>
-    <p class="mixer-boundary">{{ isDesktop ? '声音配置按应用和输出设备匹配，包含隐藏条目，跳过未运行的应用。不会调整系统总音量。' : '合成会话 · 配置仅保留在当前页面 · 不控制 Windows 音量' }}</p>
   </section>
 </template>
 

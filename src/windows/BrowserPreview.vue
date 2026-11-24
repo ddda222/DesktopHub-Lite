@@ -4,6 +4,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
+import type { MailNotice } from '@/features/mail/mail'
 import SettingsWindow from '@/features/settings/SettingsWindow.vue'
 import ImagePreviewWindow from './ImagePreviewWindow.vue'
 import { browserImagePreview } from '@/mock/image-preview'
@@ -26,7 +27,8 @@ function selectPreviewMotion(mode: MotionMode): void {
 }
 const feedback = ref({ kind: '', sequence: 0 })
 const telemetryDemoSample = ref<TelemetrySnapshot | null>(null)
-const demoNote = ref('先试任务胶囊，再载入文件体验预览与撤销。')
+const demoMailNotices = ref<MailNotice[]>([])
+const demoNote = ref('先试任务胶囊、模拟验证码邮件或右键胶囊，再展开体验新交互。')
 const imageDialog = ref<HTMLDialogElement | null>(null)
 const imageDemoHeader = ref<HTMLElement | null>(null)
 const imageDemoSize = ref({ width: 720, height: 540 })
@@ -63,7 +65,23 @@ function clearTask(): void {
   state.settings.recordClipboard = true
   shelf.busy = false; shelf.activity = ''
   telemetryDemoSample.value = null
+  demoMailNotices.value = []
   feedback.value = { kind: '', sequence: feedback.value.sequence + 1 }
+}
+function mailCodeDemo(): void {
+  clearTask(); closeShelfPreview(); closeSettings()
+  keepOpen.value = false; scene.value = 'normal'
+  state.ui.islandExpanded = false
+  demoMailNotices.value = [{
+    id: `demo-mail-${Date.now()}`,
+    provider: 'qq',
+    address: 'demo@qq.com',
+    subject: '登录安全验证码',
+    sender: '安全中心',
+    code: '482916',
+    links: [{ label: '查看详情', domain: 'mail.qq.com' }]
+  }]
+  demoNote.value = '已注入模拟验证码邮件：无需展开面板，直接点胶囊右侧「482916」即可一键复制。'
 }
 async function capsuleDemo(kind: string): Promise<void> {
   const wasPaused = state.ui.paused
@@ -136,6 +154,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
     <header class="preview-tools">
       <span>DesktopHub <small>实底高对比预览</small></span>
       <div class="preview-options">
+        <a href="?preview=settings-lab" style="color: #fff; background: linear-gradient(135deg, #2563eb, #06b6d4); padding: 5px 13px; border-radius: 99px; font-weight: 700; text-decoration: none">✨ 液态玻璃设置空间 ↗</a>
         <a href="?preview=styles" style="color: inherit; font-weight: 600">十款样式实验室 ↗</a>
         <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button v-for="mode in previewThemes" :key="mode" type="button" :aria-pressed="state.settings.theme === mode" @click="setTheme(mode)">{{ THEME_LABELS[mode] }}</button>
@@ -149,11 +168,12 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
     </header>
     <div class="preview-workbench">
     <main class="preview-stage">
-      <IslandEntry :preview-feedback="feedback" :preview-keep-open="keepOpen" :preview-telemetry="telemetryDemoSample" />
+      <IslandEntry :preview-feedback="feedback" :preview-keep-open="keepOpen" :preview-telemetry="telemetryDemoSample" :preview-mail="demoMailNotices" />
     </main>
     <aside class="preview-lab" aria-label="效果测试">
       <header><div><span class="lab-eyebrow">交互演示</span><h1>点一下，看效果</h1></div><button type="button" class="reset-demo" @click="resetDemo">重置演示</button></header>
       <fieldset><legend>任务胶囊</legend><div class="demo-buttons">
+        <button type="button" :aria-pressed="demoMailNotices.length > 0" @click="mailCodeDemo">验证码直拷</button>
         <button type="button" :aria-pressed="telemetryDemoSample !== null" @click="capsuleDemo('telemetry')">模拟微读数</button>
         <button type="button" :aria-pressed="state.ui.translationPending > 0" @click="capsuleDemo('working')">翻译中</button>
         <button type="button" @click="capsuleDemo('translated')">翻译完成</button>
@@ -172,7 +192,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
       </div></fieldset>
       <label class="keep-open"><input v-model="keepOpen" type="checkbox" />保持面板展开</label>
       <p class="lab-note" role="status">{{ demoNote }}</p>
-      <p class="lab-help">试细线：顶部「场景」选最大化或全屏，鼠标移入立即展开，移开后收回。</p>
+      <p class="lab-help">试细线：顶部「场景」选最大化或全屏，鼠标悬停驻留或点击展开，移开后收回。</p>
       <small class="lab-scope">光轨舱门 · 中转文件与声音为模拟，不改变系统音量。</small>
     </aside>
     </div>

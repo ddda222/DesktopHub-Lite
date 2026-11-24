@@ -8,7 +8,7 @@ const props = withDefaults(defineProps<{
   active?: boolean
   quality?: 'full' | 'low'
   cornerRadius?: number
-  palette?: 'cool' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'
+  palette?: 'cool' | 'liquid' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'
 }>(), { active: true, quality: 'full', palette: 'cool' })
 const emit = defineEmits<{ unavailable: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -92,6 +92,7 @@ onMounted(() => {
     const rippleAge = Math.min((now - rippleStart) / 680, 1)
     const cornerNow = props.cornerRadius ?? (parseFloat(getComputedStyle(surface!).borderTopLeftRadius) || corner)
     const paletteMap: Record<string, { base: [number, number, number]; rim: [number, number, number] } | undefined> = {
+      liquid: { base: [.48, .82, 1], rim: [.92, .78, 1] },
       amber: { base: [.96, .62, .08], rim: [1, .92, .56] },
       vermilion: { base: [.72, .24, .16], rim: [.92, .48, .36] },
       lime: { base: [.64, .9, .21], rim: [.98, .92, .25] },
@@ -134,7 +135,7 @@ onMounted(() => {
     if (!entry) return
     width = entry.contentRect.width; height = entry.contentRect.height
     if (!enabled()) return
-    corner = parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0
+    if (props.cornerRadius === undefined) corner = parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0
     clearTimeout(resizeTimer)
     resizeTimer = setTimeout(() => { trim = true; schedule() }, 200)
     schedule()

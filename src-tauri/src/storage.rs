@@ -63,13 +63,28 @@ pub struct Store {
     root: PathBuf,
     gate: std::sync::Mutex<()>,
     blocked: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// 迁移或切换数据目录后冻结写入，避免旧内存状态在重启前覆写新数据。
+    frozen: std::sync::atomic::AtomicBool,
 }
 
 impl Store {
     pub fn new(root: PathBuf) -> std::io::Result<Self> {
         std::fs::create_dir_all(&root)?;
         recover_configuration(&root)?;
-        Ok(Self { root, gate: std::sync::Mutex::new(()), blocked: std::sync::Mutex::new(std::collections::HashSet::new()) })
+        Ok(Self {
+            root,
+            gate: std::sync::Mutex::new(()),
+            blocked: std::sync::Mutex::new(std::collections::HashSet::new()),
+            frozen: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    pub fn freeze_until_restart(&self) {
+        self.frozen.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.frozen.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn root(&self) -> &Path {
@@ -82,6 +97,9 @@ impl Store {
 
     fn write_configuration_inner<A: Serialize, P: Serialize, B: Serialize>(&self, apps: &A, prefs: &P, backup: &B, after_first: impl FnOnce() -> Result<(), String>) -> Result<PathBuf, String> {
         let _guard = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+        if self.is_frozen() {
+            return Err("已完成数据迁移或切换，请重启程序后再保存修改".into());
+        }
         if CONFIG_FILES.iter().any(|name| self.blocked.lock().unwrap_or_else(|e| e.into_inner()).contains(*name)) || self.path(JOURNAL).exists() {
             return Err("现有配置或恢复记录无法读取，已禁止覆盖".into());
         }
@@ -154,6 +172,9 @@ impl Store {
 
     pub fn write<T: Serialize>(&self, name: &str, value: &T) -> Result<(), String> {
         let _guard = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+        if self.is_frozen() {
+            return Err("已完成数据迁移或切换，请重启程序后再保存修改".into());
+        }
         if self.blocked.lock().unwrap_or_else(|e| e.into_inner()).contains(name) { return Err(format!("{name} 无法读取，已保留原文件并禁止覆盖")); }
         let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
         let tmp = self.path(&format!("{name}.tmp"));
@@ -237,5 +258,17 @@ mod tests {
         let store=Store::new(root()).unwrap();std::fs::write(store.path(JOURNAL),b"{broken").unwrap();
         std::fs::write(store.path("applications.json"),b"[1]").unwrap();
         assert!(Store::new(store.root.clone()).is_err());assert_eq!(std::fs::read(store.path("applications.json")).unwrap(),b"[1]");
+    }
+    #[test]
+    fn frozen_store_rejects_writes_and_keeps_migrated_bytes() {
+        let store = Store::new(root()).unwrap();
+        store.write("applications.json", &vec![1]).unwrap();
+        store.write("ui-preferences.json", &vec![2]).unwrap();
+        std::fs::write(store.path("applications.json"), b"[99]").unwrap();
+        store.freeze_until_restart();
+        assert!(store.is_frozen());
+        assert!(store.write("applications.json", &vec![1]).is_err());
+        assert!(store.write_configuration(&vec![3], &vec![4], &vec![1, 2]).is_err());
+        assert_eq!(std::fs::read(store.path("applications.json")).unwrap(), b"[99]");
     }
 }

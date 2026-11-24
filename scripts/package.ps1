@@ -1,5 +1,9 @@
-#requires -Version 7.0
-param([string]$OutputRoot = 'D:\codex\DesktopHub-work\packages', [string]$ReleaseNotesFile = '')
+﻿#requires -Version 7.0
+param(
+    [string]$OutputRoot = 'D:\codex\DesktopHub-work\packages',
+    [string]$ReleaseNotesFile = '',
+    [switch]$IsolatedPortable
+)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if ($ReleaseNotesFile) { $ReleaseNotesFile = (Resolve-Path -LiteralPath $ReleaseNotesFile).Path }
@@ -12,14 +16,22 @@ $env:CARGO_HOME = 'D:\codex\DesktopHub-work\rust\cargo'
 $env:RUSTUP_HOME = 'D:\codex\DesktopHub-work\rust\rustup'
 $env:CARGO_TARGET_DIR = 'D:\codex\DesktopHub-work\rust\target'
 $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
-# 复用本机已有的 GNU / LLVM-MinGW；运行库必须与 Rust 的启动对象配套。
+# 优先复用完整的本地工具链，避免 rustup 代理意外触发联网同步。
 $llvmBin = 'D:\codex\DesktopHub-work\build-tools\llvm-mingw-20261104-msvcrt-x86_64\bin'
 $gnuToolchain = Join-Path $env:RUSTUP_HOME 'toolchains\stable-x86_64-pc-windows-gnu'
-if ((Test-Path -LiteralPath $gnuToolchain) -and (Test-Path -LiteralPath "$llvmBin\x86_64-w64-mingw32-gcc.exe")) {
+$cargoExe = Join-Path $env:CARGO_HOME 'bin\cargo.exe'
+if ((Test-Path -LiteralPath (Join-Path $gnuToolchain 'bin\rustc.exe')) -and (Test-Path -LiteralPath "$llvmBin\x86_64-w64-mingw32-gcc.exe")) {
     $env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-gnu'
     $env:CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "$llvmBin\x86_64-w64-mingw32-gcc.exe"
     $env:RUSTFLAGS = '-C link-self-contained=yes'
     $env:PATH = "$llvmBin;$env:PATH"
+} else {
+    # GNU 工具链不完整时直连本地 MSVC 工具链，显式固定 RUSTC 与 cargo.exe
+    $msvcBin = Join-Path $env:RUSTUP_HOME 'toolchains\stable-x86_64-pc-windows-msvc\bin'
+    if ((Test-Path -LiteralPath (Join-Path $msvcBin 'cargo.exe')) -and (Test-Path -LiteralPath (Join-Path $msvcBin 'rustc.exe'))) {
+        $env:RUSTC = Join-Path $msvcBin 'rustc.exe'
+        $cargoExe = Join-Path $msvcBin 'cargo.exe'
+    }
 }
 Push-Location $projectRoot
 try {
@@ -32,14 +44,16 @@ try {
     $relativeDist = [System.IO.Path]::GetRelativePath($nativeDirectory, $distDirectory).Replace('\', '/')
     if ([System.IO.Path]::IsPathRooted($relativeDist)) { throw '前端产物和项目必须位于同一磁盘' }
     $env:TAURI_CONFIG = @{ build = @{ frontendDist = $relativeDist } } | ConvertTo-Json -Compress
-    & "$env:CARGO_HOME\bin\cargo.exe" build --release --locked --manifest-path (Join-Path $nativeDirectory 'Cargo.toml')
+    & $cargoExe build --release --offline --locked --manifest-path (Join-Path $nativeDirectory 'Cargo.toml')
     if ($LASTEXITCODE -ne 0) { throw '桌面程序编译失败' }
     $packageName = "DesktopHub-Lite-$version-win-x64-" + (Get-Date -Format 'yyyyMMdd-HHmmss')
     $packageDirectory = Join-Path $OutputRoot $packageName
     New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\desktophub-lite.exe" -Destination (Join-Path $packageDirectory 'DesktopHub-Lite.exe')
     Copy-Item -LiteralPath "$env:CARGO_TARGET_DIR\release\WebView2Loader.dll" -Destination $packageDirectory
-    New-Item -ItemType File -Path (Join-Path $packageDirectory 'portable.flag') | Out-Null
+    if ($IsolatedPortable) {
+        New-Item -ItemType File -Path (Join-Path $packageDirectory 'portable-isolated.flag') | Out-Null
+    }
     Copy-Item -LiteralPath (Join-Path $projectRoot 'PORTABLE.md') -Destination (Join-Path $packageDirectory '使用说明.md')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'integrations') -Destination $packageDirectory -Recurse
     $releaseNotes = if ($ReleaseNotesFile) { $ReleaseNotesFile } else { Join-Path (Split-Path -Parent $projectRoot) "docs\releases\lite-v$version.md" }

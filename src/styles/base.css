@@ -60,6 +60,17 @@ body {
   height: 100%;
 }
 
+:root[data-shell='capture'],
+:root[data-shell='capture'] body,
+:root[data-shell='capture'] #app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+
 button {
   font: inherit;
   color: inherit;

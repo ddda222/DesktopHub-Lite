@@ -17,6 +17,7 @@ pub const PANEL_OVERFLOW: &str = "overflow";
 
 pub const THEME_DARK: &str = "dark";
 pub const THEME_LIGHT: &str = "light";
+pub const THEME_LIQUID: &str = "liquid";
 pub const THEME_MIDNIGHT: &str = "midnight";
 pub const THEME_MECHA: &str = "mecha";
 pub const THEME_SCROLL: &str = "scroll";
@@ -31,6 +32,7 @@ pub fn valid_theme(theme: &str) -> bool {
         theme,
         THEME_DARK
             | THEME_LIGHT
+            | THEME_LIQUID
             | THEME_MIDNIGHT
             | THEME_MECHA
             | THEME_SCROLL

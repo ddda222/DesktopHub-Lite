@@ -40,6 +40,7 @@ import {
   clips as mockClips,
   defaultTranslationSettings as mockTranslationSettings,
   groups as mockGroups,
+  mockSnippetPasswords,
   snippetGroups as mockSnippetGroups,
   snippets as mockSnippets
 } from '@/mock/data'
@@ -50,8 +51,10 @@ import type {
   ClipboardRecord,
   HubApp,
   HubSettings,
+  SnippetCopyField,
   SnippetDraft,
   SnippetItem,
+  SnippetKind,
   SnippetPayload,
   Toast,
   ToastKind,
@@ -66,14 +69,25 @@ export type { SettingsSection } from '@/lib/desktop/desktop'
 export const state = reactive({
   /** 数据是否已经从宿主加载过；false 时界面显示占位而不是假装有数据 */
   ready: false,
-  shortcuts: { bar: 'Ctrl+Alt+Space', clipboard: 'Ctrl+Shift+V', translation: 'Ctrl+Shift+F', errors: [] as string[] },
+  shortcuts: { bar: 'Ctrl+Alt+Space', clipboard: 'Ctrl+Shift+V', translation: 'Ctrl+Shift+F', ocr: 'Ctrl+Shift+O', errors: [] as string[] },
+  ocr: {
+    open: false,
+    status: 'idle' as 'idle' | 'loading' | 'done' | 'error',
+    text: '',
+    lineCount: 0,
+    charCount: 0,
+    language: '',
+    elapsedMs: 0,
+    source: 'screen' as 'screen' | 'clipboard',
+    error: ''
+  },
   loadError: '',
   apps: [] as HubApp[],
   categories: [] as Category[],
   clips: [] as ClipItem[],
   groups: [] as string[],
   snippets: [] as SnippetItem[],
-  snippetGroups: ['未分组'] as string[],
+  snippetGroups: ['未分组', '账密'] as string[],
   clipboardPreferences: { captureImages: true, historyLimit: null as number | null, defaultHistoryLimit: 500 },
   settings: {
     theme: 'dark',
@@ -193,7 +207,7 @@ async function refreshTranslationSettings(): Promise<void> {
 }
 
 function applySnippets(payload: SnippetPayload): void {
-  state.snippetGroups = payload.groups.length ? [...payload.groups] : ['未分组']
+  state.snippetGroups = payload.groups.length ? [...payload.groups] : ['未分组', '账密']
   state.snippets = payload.entries.map((entry) => ({ ...entry }))
   if (state.ui.snippetGroup !== '全部' && !state.snippetGroups.includes(state.ui.snippetGroup)) {
     state.ui.snippetGroup = '全部'
@@ -251,6 +265,8 @@ function dropIcon(target: string): void {
  * 从宿主加载真实数据。失败时保留 loadError，界面必须显示失败原因，
  * 不能悄悄退回合成数据让用户以为一切正常。
  */
+const mockPasswordVault = new Map<string, string>()
+
 export async function bootstrap(): Promise<void> {
   if (!isDesktop) {
     // 浏览器样稿：用合成数据，并明确标注不是真实数据。
@@ -260,6 +276,10 @@ export async function bootstrap(): Promise<void> {
     state.groups = [...mockGroups]
     state.snippets = mockSnippets.map((item) => ({ ...item }))
     state.snippetGroups = [...mockSnippetGroups]
+    mockPasswordVault.clear()
+    for (const [id, pw] of Object.entries(mockSnippetPasswords)) {
+      mockPasswordVault.set(id, pw)
+    }
     state.translationSettings = { ...mockTranslationSettings }
     state.ready = true
     return
@@ -270,7 +290,8 @@ export async function bootstrap(): Promise<void> {
     applyApps(config)
     await refreshClipboard()
     await refreshSnippets()
-    state.shortcuts = await invokeHost<typeof state.shortcuts>('get_shortcuts')
+    const loadedShortcuts = await invokeHost<typeof state.shortcuts>('get_shortcuts')
+    state.shortcuts = { ...loadedShortcuts, ocr: loadedShortcuts.ocr ?? 'Ctrl+Shift+O' }
     state.settings.clipboardHotkey = state.shortcuts.clipboard
     await refreshTranslationSettings()
     const ui = await invokeHost<UiState>('ui_state')
@@ -338,7 +359,7 @@ export async function subscribeHostEvents(): Promise<() => void> {
     listenHost('clipboard-changed', () => { void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error')) }),
     listenHost<SnippetPayload>('snippets-changed', (payload) => applySnippets(payload)),
     listenHost<string>('clipboard-notice', (message) => pushToast(message, 'error')),
-    listenHost('translation-settings-changed', () => { void refreshTranslationSettings().catch(() => pushToast('读取翻译设置失败', 'error')) })
+    listenHost('translation-settings-changed', () => { void refreshTranslationSettings().catch(() => pushToast('读取模型设置失败', 'error')) })
   ])
   return () => offs.forEach((off) => off())
 }
@@ -403,6 +424,7 @@ export const filteredSnippets = computed(() => {
     return (
       item.title.toLowerCase().includes(query) ||
       item.content.toLowerCase().includes(query) ||
+      (item.account ?? '').toLowerCase().includes(query) ||
       item.group.toLowerCase().includes(query)
     )
   })
@@ -993,7 +1015,7 @@ export async function saveTranslationSettings(settings: TranslationSettings = st
   try {
     state.translationSettings = await invokeHost<TranslationSettings>('save_translation_settings', { settings: { ...settings } })
     setTranslationDirection(state.translationSettings.direction)
-    pushToast('翻译设置已保存', 'success')
+    pushToast('模型设置已保存', 'success')
     return true
   } catch (error) { pushToast(String(error), 'error'); return false }
 }
@@ -1124,26 +1146,67 @@ export function moveSnippetActive(delta: number): void {
   state.ui.snippetActiveIndex = (state.ui.snippetActiveIndex + delta + total) % total
 }
 
-export async function copySnippet(snippet: SnippetItem, raw = false): Promise<void> {
+export function isCredentialSnippet(item: Pick<SnippetItem, 'kind' | 'group'> | null | undefined): boolean {
+  if (!item) return false
+  return item.kind === 'credential'
+}
+
+export async function revealSnippetPassword(id: string): Promise<string> {
   if (!isDesktop) {
+    return mockPasswordVault.get(id) ?? ''
+  }
+  return invokeHost<string>('reveal_snippet_password', { id })
+}
+
+export async function copySnippet(
+  snippet: SnippetItem,
+  raw = false,
+  field?: SnippetCopyField
+): Promise<boolean> {
+  const credential = snippet.kind === 'credential'
+  const targetField: SnippetCopyField | undefined = credential ? (field ?? 'account') : undefined
+  if (!isDesktop) {
+    if (credential) {
+      const value =
+        targetField === 'password'
+          ? (mockPasswordVault.get(snippet.id) ?? '')
+          : (snippet.account ?? '')
+      if (!value) {
+        pushToast(targetField === 'password' ? '这条账密尚未设置密码' : '这条账密尚未填写账号', 'error')
+        return false
+      }
+      pushToast(
+        `样稿：已模拟复制${targetField === 'password' ? '密码（不入历史）' : '账号'}「${snippet.title}」，未写入系统剪贴板`,
+        'success'
+      )
+      return true
+    }
     const dynamic = !raw && hasSnippetVariables(snippet.content)
     pushToast(
       `样稿：已模拟复制短语「${snippet.title}」${dynamic ? '（已展开动态变量）' : ''}，未写入系统剪贴板`,
       'info'
     )
-    return
+    return true
   }
   try {
-    await invokeHost('copy_snippet', { id: snippet.id, raw })
+    await invokeHost('copy_snippet', { id: snippet.id, raw, field: targetField })
+    if (credential) {
+      pushToast(targetField === 'password' ? '已复制密码（不记入剪贴板历史）' : '已复制账号', 'success')
+    }
+    return true
   } catch (error) {
     pushToast(error instanceof Error ? error.message : String(error), 'error')
+    return false
   }
 }
 
 export async function saveSnippet(draft: SnippetDraft): Promise<boolean> {
   const title = draft.title.trim()
-  const content = draft.content
-  const group = draft.group.trim() || '未分组'
+  const rawGroup = draft.group.trim() || '未分组'
+  const isCredential = draft.kind === 'credential' || rawGroup === '账密'
+  const kind: SnippetKind = isCredential ? 'credential' : 'text'
+  const group = isCredential ? '账密' : rawGroup
+
   if (!title) {
     pushToast('请填写短语标题', 'error')
     return false
@@ -1152,42 +1215,107 @@ export async function saveSnippet(draft: SnippetDraft): Promise<boolean> {
     pushToast('短语标题不能超过 80 个字符', 'error')
     return false
   }
-  if (!content.trim()) {
-    pushToast('短语内容不能为空', 'error')
-    return false
-  }
-  if (group === '全部' || [...group].length > 40) {
-    pushToast('分组名需为 1–40 个字符，且不能为“全部”', 'error')
-    return false
+
+  let content = draft.content
+  let account: string | undefined
+  let password: string | undefined
+
+  if (isCredential) {
+    const trimmedAccount = (draft.account ?? '').trim()
+    if (!trimmedAccount) {
+      pushToast('请填写账号', 'error')
+      return false
+    }
+    if ([...trimmedAccount].length > 300) {
+      pushToast('账号不能超过 300 个字符', 'error')
+      return false
+    }
+    const trimmedNote = draft.content.trim()
+    if ([...trimmedNote].length > 500) {
+      pushToast('备注不能超过 500 个字符', 'error')
+      return false
+    }
+    const existingItem = draft.id ? state.snippets.find((item) => item.id === draft.id) : undefined
+    if (draft.password !== undefined) {
+      if (!draft.password) {
+        pushToast('请填写密码', 'error')
+        return false
+      }
+      if ([...draft.password].length > 1000) {
+        pushToast('密码不能超过 1000 个字符', 'error')
+        return false
+      }
+      password = draft.password
+    } else if (!existingItem?.hasPassword) {
+      pushToast('请填写密码', 'error')
+      return false
+    }
+    account = trimmedAccount
+    content = trimmedNote
+  } else {
+    if (!content.trim()) {
+      pushToast('短语内容不能为空', 'error')
+      return false
+    }
+    if (group === '全部' || [...group].length > 40) {
+      pushToast('分组名需为 1–40 个字符，且不能为“全部”', 'error')
+      return false
+    }
   }
 
   if (!isDesktop) {
     if (!state.snippetGroups.includes(group)) state.snippetGroups.push(group)
     const now = Date.now()
+    const targetId =
+      draft.id || `snip-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    if (isCredential) {
+      if (password !== undefined) mockPasswordVault.set(targetId, password)
+    } else {
+      mockPasswordVault.delete(targetId)
+    }
+    const nextItem: SnippetItem = {
+      id: targetId,
+      kind,
+      title,
+      content,
+      account,
+      hasPassword: isCredential ? Boolean(password ?? mockPasswordVault.has(targetId)) : undefined,
+      group,
+      pinned: draft.pinned,
+      updatedAt: now
+    }
     if (draft.id) {
       const target = state.snippets.find((item) => item.id === draft.id)
-      if (target) Object.assign(target, { title, content, group, pinned: draft.pinned, updatedAt: now })
+      if (target) {
+        Object.assign(target, nextItem)
+        if (!isCredential) {
+          delete target.account
+          delete target.hasPassword
+        }
+      }
     } else {
-      state.snippets.unshift({
-        id: `snip-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        title,
-        content,
-        group,
-        pinned: draft.pinned,
-        updatedAt: now
-      })
+      state.snippets.unshift(nextItem)
     }
     state.snippets = normalizeMockSnippetOrder(state.snippets)
-    pushToast('常用短语已保存（浏览器样稿，未落盘）', 'success')
+    pushToast(`${isCredential ? '账密' : '常用短语'}已保存（浏览器样稿，未落盘）`, 'success')
     return true
   }
 
   try {
     const payload = await invokeHost<SnippetPayload>('save_snippet', {
-      snippet: { id: draft.id, title, content, group, pinned: draft.pinned }
+      snippet: {
+        id: draft.id,
+        kind,
+        title,
+        content,
+        account,
+        password,
+        group,
+        pinned: draft.pinned
+      }
     })
     applySnippets(payload)
-    pushToast('常用短语已保存', 'success')
+    pushToast(isCredential ? '账密已保存' : '常用短语已保存', 'success')
     return true
   } catch (error) {
     pushToast(error instanceof Error ? error.message : String(error), 'error')
@@ -1199,6 +1327,7 @@ export async function deleteSnippet(id: string): Promise<boolean> {
   if (!isDesktop) {
     const before = state.snippets.length
     state.snippets = state.snippets.filter((item) => item.id !== id)
+    mockPasswordVault.delete(id)
     if (state.snippets.length < before) pushToast('已删除常用短语', 'success')
     return state.snippets.length < before
   }
@@ -1222,11 +1351,13 @@ export async function saveClipAsSnippet(clip: ClipItem): Promise<boolean> {
     const rawLine = (clip.note?.trim() || clip.text.split(/\r?\n/).find((line) => line.trim()) || '常用短语').trim()
     const chars = [...rawLine]
     const title = chars.length > 28 ? `${chars.slice(0, 28).join('')}…` : rawLine
-    const group = clip.group && clip.group !== '全部' ? clip.group : '未分组'
+    const group =
+      clip.group && clip.group !== '全部' && clip.group !== '账密' ? clip.group : '未分组'
     if (!state.snippetGroups.includes(group)) state.snippetGroups.push(group)
     state.snippets = normalizeMockSnippetOrder([
       {
         id: `snip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        kind: 'text',
         title,
         content: clip.text,
         group,
@@ -1305,7 +1436,7 @@ export async function createSnippetGroup(group: string): Promise<boolean> {
 }
 
 export async function removeSnippetGroup(group: string): Promise<boolean> {
-  if (group === '未分组') return false
+  if (group === '未分组' || group === '账密') return false
   if (!isDesktop) {
     state.snippetGroups = state.snippetGroups.filter((name) => name !== group)
     state.snippets.forEach((item) => {
@@ -1361,3 +1492,111 @@ watch(() => state.ui.panel, (panel, previous) => {
   }
   if (windowLabel !== 'translation' && previous === 'translation' && panel !== 'translation') cancelTranslation()
 })
+
+export interface OcrResultEvent {
+  text: string
+  lineCount: number
+  charCount: number
+  language: string
+  elapsedMs: number
+  source: 'screen' | 'clipboard'
+}
+
+export function applyOcrResult(payload: OcrResultEvent): void {
+  state.ocr.open = true
+  state.ocr.status = 'done'
+  state.ocr.text = payload.text
+  state.ocr.lineCount = payload.lineCount
+  state.ocr.charCount = payload.charCount
+  state.ocr.language = payload.language
+  state.ocr.elapsedMs = payload.elapsedMs
+  state.ocr.source = payload.source
+  state.ocr.error = ''
+  state.ui.islandExpanded = true
+}
+
+export function applyOcrError(message: string, source: 'screen' | 'clipboard' = 'screen'): void {
+  state.ocr.open = true
+  state.ocr.status = 'error'
+  state.ocr.text = ''
+  state.ocr.lineCount = 0
+  state.ocr.charCount = 0
+  state.ocr.language = ''
+  state.ocr.elapsedMs = 0
+  state.ocr.source = source
+  state.ocr.error = message
+  state.ui.islandExpanded = true
+}
+
+export async function startScreenOcr(): Promise<void> {
+  if (!isDesktop) {
+    applyOcrResult({
+      text: '截图识字预览示例 DesktopHub Lite 0.1.3\n支持直接复制全文或选段修改',
+      lineCount: 2,
+      charCount: 38,
+      language: 'zh-Hans-CN',
+      elapsedMs: 42,
+      source: 'screen'
+    })
+    return
+  }
+  try {
+    await invokeHost('start_screen_ocr')
+  } catch (error) {
+    pushToast(String(error), 'error')
+  }
+}
+
+export async function runClipboardOcr(id: string): Promise<void> {
+  state.ocr.open = true
+  state.ocr.status = 'loading'
+  state.ocr.source = 'clipboard'
+  state.ocr.error = ''
+  state.ui.islandExpanded = true
+  if (!isDesktop) {
+    applyOcrResult({
+      text: '剪贴板图片示例文字 DesktopHub Lite 2026',
+      lineCount: 1,
+      charCount: 27,
+      language: 'zh-Hans-CN',
+      elapsedMs: 36,
+      source: 'clipboard'
+    })
+    return
+  }
+  try {
+    const payload = await invokeHost<OcrResultEvent>('ocr_clipboard_image', { id })
+    applyOcrResult(payload)
+  } catch (error) {
+    applyOcrError(String(error), 'clipboard')
+  }
+}
+
+export async function copyOcrText(text: string): Promise<boolean> {
+  if (!text) return false
+  if (!isDesktop) {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text).catch(() => {})
+    pushToast('已复制识别文字（浏览器预览）', 'success')
+    return true
+  }
+  try {
+    await invokeHost('copy_ocr_text', { text })
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
+export function closeOcrPanel(): void {
+  state.ocr.open = false
+  state.ocr.status = 'idle'
+  state.ocr.error = ''
+}
+
+export function sendOcrToTranslation(text: string): void {
+  closeOcrPanel()
+  state.ui.islandPage = 'translation'
+  state.ui.islandExpanded = true
+  openTranslation(text, false)
+}

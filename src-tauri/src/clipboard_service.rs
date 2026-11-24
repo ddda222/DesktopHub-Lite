@@ -33,6 +33,16 @@ pub struct ClipboardStatus {
     history_limit: Option<usize>,
     default_history_limit: usize,
 }
+pub const QUICK_IMAGE_OCR_EVENT: &str = "island-quick-image-ocr";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickImageOcrEvent {
+    pub clip_id: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
 pub fn changed(app: &AppHandle) {
     let _ = app.emit("clipboard-changed", ());
 }
@@ -183,7 +193,7 @@ pub fn start(app: AppHandle) {
         let mut sequence = unsafe { GetClipboardSequenceNumber() };
         let mut failures = 0u8;
         while app.state::<AppState>().running.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(450));
+            std::thread::sleep(Duration::from_millis(250));
             if !app.state::<AppState>().running.load(Ordering::Relaxed) {
                 break;
             }
@@ -254,6 +264,15 @@ pub fn start(app: AppHandle) {
             }
             match captured {
                 Ok(Some((entry, image))) => {
+                    let image_event = if entry.kind == "image" {
+                        Some(QuickImageOcrEvent {
+                            clip_id: entry.id.clone(),
+                            width: entry.width,
+                            height: entry.height,
+                        })
+                    } else {
+                        None
+                    };
                     let result = (|| -> Result<bool, String> {
                         let mut index = state.clipboard.lock().unwrap_or_else(|e| e.into_inner());
                         if index.paused || (image.is_some() && !index.capture_images) {
@@ -273,7 +292,15 @@ pub fn start(app: AppHandle) {
                             failures = 0;
                             if recorded {
                                 changed(&app);
-                                copied(&app);
+                                if let Some(payload) = image_event {
+                                    let _ = app.emit_to(
+                                        crate::windows::BAR,
+                                        QUICK_IMAGE_OCR_EVENT,
+                                        &payload,
+                                    );
+                                } else {
+                                    copied(&app);
+                                }
                             }
                         }
                         Err(_) => {
@@ -353,9 +380,22 @@ pub fn copy_clipboard_entry(app: AppHandle, state: State<'_, AppState>, id: Stri
 }
 #[tauri::command]
 pub fn copy_translation_result(app: AppHandle, text: String) -> Result<(), String> {
-    write_text(&text)?;
-    copied(&app);
-    Ok(())
+    copy_plain_text(&app, &text)
+}
+
+/// 供内部模块按 ID 读取已托管的剪贴板图片 PNG 原始字节。
+pub(crate) fn read_clipboard_image_bytes(state: &AppState, id: &str) -> Result<Vec<u8>, String> {
+    let index = state.clipboard.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = index
+        .entries
+        .iter()
+        .find(|item| item.id == id && item.kind == "image")
+        .ok_or("图片记录已不存在")?;
+    let bytes = std::fs::read(image_path(entry, state)?).map_err(|_| "图片文件缺失")?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("图片超过限制".into());
+    }
+    Ok(bytes)
 }
 #[tauri::command]
 pub fn read_clipboard_thumbnail(

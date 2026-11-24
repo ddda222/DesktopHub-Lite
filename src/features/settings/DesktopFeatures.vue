@@ -29,7 +29,7 @@ watch(() => state.ui.islandAppearance.motion, motion => {
 const wechatBusy = ref(false)
 const startupBusy = ref(false)
 const startupError = ref('')
-const startup = ref<{ enabled: boolean; conflict: boolean } | null>(null)
+const startup = ref<{ enabled: boolean; conflict: boolean; stale?: boolean; systemDisabled?: boolean } | null>(null)
 const updateBusy = ref(false)
 const update = ref<{ state: string; current: string; version?: string; notes?: string; details: string } | null>(null)
 const wechatStatus = computed(() => {
@@ -156,9 +156,24 @@ watch(() => state.ui.settingsOpen, open => {
         : '胶囊收起时常驻显示所选指标；最大化或全屏收为细线时自动休眠停止采集。' }}</p>
     </div>
     <div class="feature-options">
+      <div class="set-row">
+        <span class="set-text">
+          <span class="set-label">应用网格显示名称</span>
+          <span class="set-desc">关闭后仅显示紧凑应用图标，悬停图标时查看完整名称。</span>
+        </span>
+        <button
+          class="switch"
+          type="button"
+          role="switch"
+          aria-label="应用网格显示名称"
+          :class="{ 'is-on': appearance.showAppNames }"
+          :aria-checked="appearance.showAppNames"
+          @click="appearance.showAppNames = !appearance.showAppNames; if (!isDesktop) state.ui.islandAppearance.showAppNames = appearance.showAppNames"
+        ><span class="switch-knob" aria-hidden="true" /></button>
+      </div>
       <label class="check-row"><span><strong>光轨舱门</strong><small>沿边缘巡光，展开时向两侧分流。正文保持实底。</small></span><input v-model="appearance.webgl" type="checkbox" /></label>
       <label class="check-row"><span><strong>减少动画</strong><small>停用动态光效，保留清晰边框。</small></span><input v-model="reducedMotion" type="checkbox" /></label>
-      <label class="check-row"><span><strong>最大化或全屏时收为细线</strong><small>鼠标移入立即展开，移开后收回。</small></span><input v-model="appearance.avoidFullscreen" type="checkbox" /></label>
+      <label class="check-row"><span><strong>最大化或全屏时收为细线</strong><small>鼠标悬停驻留或点击展开，凑巧划过不触发，移开后收回。</small></span><input v-model="appearance.avoidFullscreen" type="checkbox" /></label>
       <label class="check-row"><span><strong>在截图和屏幕共享中隐藏</strong><small>仅隐藏灵动岛，本机屏幕仍可见。共享前请实测。</small></span><input v-model="appearance.hideFromCapture" type="checkbox" :disabled="saving" aria-describedby="capture-scope" /></label>
     </div>
     <p v-if="appearance.hideFromCapture" class="inline-feedback" role="status">远程操作时，你自己也可能看不到灵动岛。可从托盘打开设置，取消勾选并应用以恢复。</p>
@@ -186,7 +201,9 @@ watch(() => state.ui.settingsOpen, open => {
       <span class="set-text"><span class="set-label">Windows 登录时启动</span><span class="set-desc">{{ isDesktop ? '仅修改当前用户的启动项。' : '桌面版可用。' }}</span></span>
       <button class="switch" :class="{ 'is-on': startup?.enabled }" role="switch" aria-label="Windows 登录时启动" :aria-checked="startup?.enabled ?? false" :disabled="!startup || startup.conflict || startupBusy || !isDesktop" @click="toggleStartup"><span class="switch-knob" /></button>
     </div>
-    <p v-if="startupError || startup?.conflict" class="inline-feedback error" role="status">{{ startupError || '发现其他路径的同名启动项，未覆盖或移除。' }}</p>
+    <p v-if="startupError || startup?.conflict" class="inline-feedback error" role="status">{{ startupError || '发现其他有效路径的同名启动项，未覆盖或移除。' }}</p>
+    <p v-else-if="startup?.stale" class="inline-feedback" role="status">原自启路径已失效，开启右侧开关即可更新为当前程序。</p>
+    <p v-else-if="startup?.systemDisabled" class="inline-feedback" role="status">已在系统「启动应用 / 任务管理器」中被禁用，重新开启右侧开关即可恢复。</p>
 
     <h4 class="sub-title">版本更新</h4>
     <div class="actions"><button class="btn" :disabled="updateBusy || !isDesktop" @click="checkUpdate">{{ updateBusy ? '检查中…' : update?.state === 'error' ? '重试检查' : '检查更新' }}</button><button class="btn" :disabled="!isDesktop" @click="openReleases">查看 GitHub 发布</button></div>

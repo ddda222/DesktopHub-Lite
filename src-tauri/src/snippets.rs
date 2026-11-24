@@ -1,10 +1,11 @@
-//! 常用短语与轻量动态模板（Snippets）。
+//! 常用短语与轻量动态模板（Snippets），内置「账密」安全类别。
 //!
 //! 约束：
 //! - 独立持久化在 `snippets.json`，先原子写盘再更新内存并广播，写盘失败绝不污染内存。
-//! - 复制短语只写入系统剪贴板并发送 `"copied"` 状态反馈，绝不模拟粘贴或自动发送。
-//! - 动态占位符采用单趟扫描替换，避免剪贴板文本中的 `{{...}}` 被二次展开，保留未知花括号语法。
-//! - 严禁在任何日志或错误消息中输出短语正文或剪贴板正文。
+//! - 复制短语只写入系统剪贴板并发送 `"copied"` 状态反馈，绝不模拟粘贴或自动发送；系统剪贴板轮询已排除本程序自写序列号，因此复制密码不会回流进普通剪贴板历史。
+//! - 「账密」条目的密码在 Windows 下通过系统 DPAPI 加密后落盘，列表广播结构绝不包含密码字段。
+//! - 动态占位符采用单趟扫描替换，避免剪贴板文本中的 `{{...}}` 被二次展开，保留未知花括号语法；账号与密码不经模板展开。
+//! - 严禁在任何日志或错误消息中输出短语正文、账号、密码或剪贴板正文。
 
 use crate::AppState;
 use serde::{Deserialize, Serialize};
@@ -17,22 +18,75 @@ use tauri::{AppHandle, Emitter, Manager, State};
 pub const SNIPPETS_FILE: &str = "snippets.json";
 pub const SNIPPETS_EVENT: &str = "snippets-changed";
 pub const SCHEMA_VERSION: u32 = 1;
+pub const DEFAULT_GROUP: &str = "未分组";
+pub const CREDENTIAL_GROUP: &str = "账密";
 pub const MAX_SNIPPETS: usize = 1000;
 pub const MAX_GROUPS: usize = 100;
 pub const MAX_TITLE_CHARS: usize = 80;
 pub const MAX_CONTENT_CHARS: usize = 20_000;
+pub const MAX_ACCOUNT_CHARS: usize = 300;
+pub const MAX_PASSWORD_CHARS: usize = 1000;
+pub const MAX_CREDENTIAL_NOTE_CHARS: usize = 500;
 pub const MAX_CLIPBOARD_INJECT_CHARS: usize = 50_000;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SnippetKind {
+    #[default]
+    Text,
+    Credential,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnippetEntry {
     pub id: String,
+    #[serde(default)]
+    pub kind: SnippetKind,
     pub title: String,
+    #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    /// 磁盘密文（`dpapi:v1:<base64>`），绝不通过 `SnippetPayload` 下发给前端列表。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
     pub group: String,
     #[serde(default)]
     pub pinned: bool,
     pub updated_at: i64,
+}
+
+/// 面向前端展示的安全视图，绝不包含密码明文或密文。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnippetView {
+    pub id: String,
+    pub kind: SnippetKind,
+    pub title: String,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    pub has_password: bool,
+    pub group: String,
+    pub pinned: bool,
+    pub updated_at: i64,
+}
+
+impl From<&SnippetEntry> for SnippetView {
+    fn from(entry: &SnippetEntry) -> Self {
+        Self {
+            id: entry.id.clone(),
+            kind: entry.kind,
+            title: entry.title.clone(),
+            content: entry.content.clone(),
+            account: entry.account.clone(),
+            has_password: entry.password.as_deref().is_some_and(|pw| !pw.is_empty()),
+            group: entry.group.clone(),
+            pinned: entry.pinned,
+            updated_at: entry.updated_at,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,14 +113,14 @@ impl Default for SnippetIndex {
 #[serde(rename_all = "camelCase")]
 pub struct SnippetPayload {
     pub groups: Vec<String>,
-    pub entries: Vec<SnippetEntry>,
+    pub entries: Vec<SnippetView>,
 }
 
 impl From<&SnippetIndex> for SnippetPayload {
     fn from(index: &SnippetIndex) -> Self {
         Self {
             groups: index.groups.clone(),
-            entries: index.entries.clone(),
+            entries: index.entries.iter().map(SnippetView::from).collect(),
         }
     }
 }
@@ -75,15 +129,179 @@ impl From<&SnippetIndex> for SnippetPayload {
 #[serde(rename_all = "camelCase")]
 pub struct SnippetDraft {
     pub id: Option<String>,
+    #[serde(default)]
+    pub kind: SnippetKind,
     pub title: String,
+    #[serde(default)]
     pub content: String,
+    #[serde(default)]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
     pub group: String,
     #[serde(default)]
     pub pinned: bool,
 }
 
 fn default_groups() -> Vec<String> {
-    vec!["未分组".into()]
+    vec![DEFAULT_GROUP.into(), CREDENTIAL_GROUP.into()]
+}
+
+#[cfg(windows)]
+mod dpapi {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use std::ptr::{null, null_mut};
+
+    const DPAPI_PREFIX: &str = "dpapi:v1:";
+    const DPAPI_ENTROPY: &[u8] = b"DesktopHub.Lite.Snippets.Credential.v1";
+    const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x01;
+
+    #[repr(C)]
+    struct CryptoApiBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    #[link(name = "crypt32")]
+    unsafe extern "system" {
+        fn CryptProtectData(
+            data_in: *const CryptoApiBlob,
+            data_descr: *const u16,
+            optional_entropy: *const CryptoApiBlob,
+            reserved: *const core::ffi::c_void,
+            prompt_struct: *const core::ffi::c_void,
+            flags: u32,
+            data_out: *mut CryptoApiBlob,
+        ) -> i32;
+
+        fn CryptUnprotectData(
+            data_in: *const CryptoApiBlob,
+            data_descr: *mut *mut u16,
+            optional_entropy: *const CryptoApiBlob,
+            reserved: *const core::ffi::c_void,
+            prompt_struct: *const core::ffi::c_void,
+            flags: u32,
+            data_out: *mut CryptoApiBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn LocalFree(hmem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    }
+
+    pub fn protect(plain: &str) -> Result<String, String> {
+        let mut raw_bytes = plain.as_bytes().to_vec();
+        let mut entropy_bytes = DPAPI_ENTROPY.to_vec();
+        let data_in = CryptoApiBlob {
+            cb_data: u32::try_from(raw_bytes.len()).map_err(|_| "密码过长，无法加密")?,
+            pb_data: raw_bytes.as_mut_ptr(),
+        };
+        let entropy_in = CryptoApiBlob {
+            cb_data: entropy_bytes.len() as u32,
+            pb_data: entropy_bytes.as_mut_ptr(),
+        };
+        let mut data_out = CryptoApiBlob {
+            cb_data: 0,
+            pb_data: null_mut(),
+        };
+
+        let ok = unsafe {
+            CryptProtectData(
+                &data_in,
+                null(),
+                &entropy_in,
+                null(),
+                null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut data_out,
+            )
+        };
+        raw_bytes.fill(0);
+
+        if ok == 0 || data_out.pb_data.is_null() {
+            return Err("无法在本机加密保存密码".into());
+        }
+
+        let encoded = unsafe {
+            let slice = std::slice::from_raw_parts(data_out.pb_data, data_out.cb_data as usize);
+            let b64 = STANDARD.encode(slice);
+            LocalFree(data_out.pb_data.cast());
+            b64
+        };
+        Ok(format!("{DPAPI_PREFIX}{encoded}"))
+    }
+
+    pub fn unprotect(stored: &str) -> Result<String, String> {
+        let Some(encoded) = stored.strip_prefix(DPAPI_PREFIX) else {
+            return Ok(stored.to_owned());
+        };
+        let mut cipher = STANDARD
+            .decode(encoded.trim())
+            .map_err(|_| "保存的密码格式损坏，请重新编辑保存".to_string())?;
+        let mut entropy_bytes = DPAPI_ENTROPY.to_vec();
+        let data_in = CryptoApiBlob {
+            cb_data: u32::try_from(cipher.len()).map_err(|_| "保存的密码格式无效".to_string())?,
+            pb_data: cipher.as_mut_ptr(),
+        };
+        let entropy_in = CryptoApiBlob {
+            cb_data: entropy_bytes.len() as u32,
+            pb_data: entropy_bytes.as_mut_ptr(),
+        };
+        let mut data_out = CryptoApiBlob {
+            cb_data: 0,
+            pb_data: null_mut(),
+        };
+
+        let ok = unsafe {
+            CryptUnprotectData(
+                &data_in,
+                null_mut(),
+                &entropy_in,
+                null(),
+                null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut data_out,
+            )
+        };
+        if ok == 0 || data_out.pb_data.is_null() {
+            return Err("本机无法解密这条密码（可能来自其他 Windows 账户），请重新编辑保存".into());
+        }
+
+        let mut plain_bytes = unsafe {
+            let slice = std::slice::from_raw_parts(data_out.pb_data, data_out.cb_data as usize);
+            let copied = slice.to_vec();
+            std::ptr::write_bytes(data_out.pb_data, 0, data_out.cb_data as usize);
+            LocalFree(data_out.pb_data.cast());
+            copied
+        };
+        match String::from_utf8(std::mem::take(&mut plain_bytes)) {
+            Ok(text) => Ok(text),
+            Err(err) => {
+                err.into_bytes().fill(0);
+                Err("解密后的密码格式无效，请重新编辑保存".into())
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod dpapi {
+    pub fn protect(plain: &str) -> Result<String, String> {
+        Ok(plain.to_owned())
+    }
+
+    pub fn unprotect(stored: &str) -> Result<String, String> {
+        Ok(stored.to_owned())
+    }
+}
+
+pub fn protect_password(plain: &str) -> Result<String, String> {
+    dpapi::protect(plain)
+}
+
+pub fn unprotect_password(stored: &str) -> Result<String, String> {
+    dpapi::unprotect(stored)
 }
 
 fn now_millis() -> i64 {
@@ -116,7 +334,7 @@ fn validate_id(id: &str) -> Result<String, String> {
 fn validate_group_name(group: &str) -> Result<String, String> {
     let trimmed = group.trim();
     if trimmed.is_empty() {
-        return Ok("未分组".into());
+        return Ok(DEFAULT_GROUP.into());
     }
     if trimmed == "全部"
         || trimmed.chars().count() > 40
@@ -155,6 +373,50 @@ fn validate_content(content: &str) -> Result<String, String> {
     Ok(content.to_owned())
 }
 
+fn validate_account(account: Option<&str>) -> Result<String, String> {
+    let normalized: String = account
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .map(|ch| if ch == '\r' || ch == '\n' || ch == '\t' { ' ' } else { ch })
+        .collect();
+    if normalized.trim().is_empty() {
+        return Err("请填写账号".into());
+    }
+    if normalized.chars().count() > MAX_ACCOUNT_CHARS || normalized.chars().any(char::is_control) {
+        return Err(format!("账号需为 1–{MAX_ACCOUNT_CHARS} 个可显示字符"));
+    }
+    Ok(normalized)
+}
+
+/// 校验密码（保留原始首尾空格与特殊字符，不进行 trim 或模板替换）。
+fn validate_password(password: &str) -> Result<(), String> {
+    if password.is_empty() {
+        return Err("请填写密码".into());
+    }
+    if password.contains('\0') {
+        return Err("密码包含不支持的空字符".into());
+    }
+    if password.chars().count() > MAX_PASSWORD_CHARS {
+        return Err(format!("密码不能超过 {MAX_PASSWORD_CHARS} 个字符"));
+    }
+    Ok(())
+}
+
+fn validate_credential_note(note: &str) -> Result<String, String> {
+    let trimmed = note.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    if trimmed.contains('\0') {
+        return Err("备注包含不支持的空字符".into());
+    }
+    if trimmed.chars().count() > MAX_CREDENTIAL_NOTE_CHARS {
+        return Err(format!("备注不能超过 {MAX_CREDENTIAL_NOTE_CHARS} 个字符"));
+    }
+    Ok(trimmed.to_owned())
+}
+
 /// 从多行正文中提取可读默认标题（取首个非空行前 28 个字符）。
 pub fn suggest_title(content: &str, note: &str) -> String {
     let preferred = note.trim();
@@ -184,8 +446,29 @@ pub fn suggest_title(content: &str, note: &str) -> String {
 
 impl SnippetIndex {
     pub fn ensure_invariants(&mut self) {
-        if !self.groups.iter().any(|group| group == "未分组") {
-            self.groups.insert(0, "未分组".into());
+        if !self.groups.iter().any(|group| group == DEFAULT_GROUP) {
+            self.groups.insert(0, DEFAULT_GROUP.into());
+        }
+        if !self.groups.iter().any(|group| group == CREDENTIAL_GROUP) {
+            let pos = self
+                .groups
+                .iter()
+                .position(|group| group == DEFAULT_GROUP)
+                .map_or(1, |idx| idx + 1)
+                .min(self.groups.len());
+            self.groups.insert(pos, CREDENTIAL_GROUP.into());
+        }
+        for entry in &mut self.entries {
+            if entry.kind == SnippetKind::Credential {
+                entry.group = CREDENTIAL_GROUP.into();
+            } else if entry.group == CREDENTIAL_GROUP
+                && entry
+                    .account
+                    .as_deref()
+                    .is_some_and(|account| !account.trim().is_empty())
+            {
+                entry.kind = SnippetKind::Credential;
+            }
         }
         self.normalize_order();
     }
@@ -207,8 +490,48 @@ impl SnippetIndex {
 
     pub fn upsert(&mut self, draft: SnippetDraft, timestamp: i64) -> Result<(), String> {
         let title = validate_title(&draft.title)?;
-        let content = validate_content(&draft.content)?;
-        let group = validate_group_name(&draft.group)?;
+        let requested_group = validate_group_name(&draft.group)?;
+        let is_credential =
+            draft.kind == SnippetKind::Credential || requested_group == CREDENTIAL_GROUP;
+        let kind = if is_credential {
+            SnippetKind::Credential
+        } else {
+            SnippetKind::Text
+        };
+        let group = if is_credential {
+            CREDENTIAL_GROUP.to_string()
+        } else {
+            requested_group
+        };
+
+        let existing_id = draft
+            .id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .map(validate_id)
+            .transpose()?;
+
+        let (content, account, encrypted_password) = if is_credential {
+            let acc = validate_account(draft.account.as_deref())?;
+            let note = validate_credential_note(&draft.content)?;
+            let existing_pw = existing_id.as_deref().and_then(|target_id| {
+                self.entries
+                    .iter()
+                    .find(|item| item.id == target_id)
+                    .and_then(|item| item.password.clone())
+                    .filter(|pw| !pw.is_empty())
+            });
+            let pw = match draft.password {
+                Some(raw) => {
+                    validate_password(&raw)?;
+                    protect_password(&raw)?
+                }
+                None => existing_pw.ok_or_else(|| "请填写密码".to_string())?,
+            };
+            (note, Some(acc), Some(pw))
+        } else {
+            (validate_content(&draft.content)?, None, None)
+        };
 
         if !self.groups.contains(&group) {
             if self.groups.len() >= MAX_GROUPS {
@@ -217,11 +540,13 @@ impl SnippetIndex {
             self.groups.push(group.clone());
         }
 
-        if let Some(raw_id) = draft.id.as_deref().filter(|id| !id.trim().is_empty()) {
-            let id = validate_id(raw_id)?;
-            if let Some(existing) = self.entries.iter_mut().find(|item| item.id == id) {
+        if let Some(ref id) = existing_id {
+            if let Some(existing) = self.entries.iter_mut().find(|item| &item.id == id) {
+                existing.kind = kind;
                 existing.title = title;
                 existing.content = content;
+                existing.account = account;
+                existing.password = encrypted_password;
                 existing.group = group;
                 existing.pinned = draft.pinned;
                 existing.updated_at = timestamp;
@@ -234,16 +559,16 @@ impl SnippetIndex {
             return Err(format!("最多保存 {MAX_SNIPPETS} 条常用短语"));
         }
 
-        let id = match draft.id.as_deref().filter(|id| !id.trim().is_empty()) {
-            Some(raw_id) => validate_id(raw_id)?,
-            None => next_id(),
-        };
+        let id = existing_id.unwrap_or_else(next_id);
         self.entries.insert(
             0,
             SnippetEntry {
                 id,
+                kind,
                 title,
                 content,
+                account,
+                password: encrypted_password,
                 group,
                 pinned: draft.pinned,
                 updated_at: timestamp,
@@ -297,13 +622,14 @@ impl SnippetIndex {
     }
 
     pub fn remove_group(&mut self, group: &str) -> Result<(), String> {
-        if group.trim() == "未分组" {
-            return Err("默认分组不能删除".into());
+        let target = group.trim();
+        if target == DEFAULT_GROUP || target == CREDENTIAL_GROUP {
+            return Err("默认分组和账密类别不能删除".into());
         }
-        self.groups.retain(|name| name != group.trim());
+        self.groups.retain(|name| name != target);
         for entry in &mut self.entries {
-            if entry.group == group.trim() {
-                entry.group = "未分组".into();
+            if entry.group == target {
+                entry.group = DEFAULT_GROUP.into();
             }
         }
         self.ensure_invariants();
@@ -579,19 +905,28 @@ pub fn save_clip_as_snippet(
         Some(custom) if !custom.is_empty() => custom.to_owned(),
         _ => fallback_title,
     };
-    let final_group = group
-        .as_deref()
-        .map(str::trim)
-        .filter(|g| !g.is_empty())
-        .unwrap_or(&clip_group)
-        .to_owned();
+    let final_group = {
+        let candidate = group
+            .as_deref()
+            .map(str::trim)
+            .filter(|g| !g.is_empty())
+            .unwrap_or(&clip_group);
+        if candidate == CREDENTIAL_GROUP {
+            DEFAULT_GROUP.to_owned()
+        } else {
+            candidate.to_owned()
+        }
+    };
     let timestamp = now_millis();
     mutate_snippets(&app, |index| {
         index.upsert(
             SnippetDraft {
                 id: None,
+                kind: SnippetKind::Text,
                 title: final_title,
                 content,
+                account: None,
+                password: None,
                 group: final_group,
                 pinned: false,
             },
@@ -600,38 +935,136 @@ pub fn save_clip_as_snippet(
     })
 }
 
+/// 解析待复制文本；账密条目绝不走模板占位符展开，保持账号与密码原始字面量。
+pub fn resolve_copy_text(
+    entry: &SnippetEntry,
+    raw: bool,
+    field: Option<&str>,
+    clock: LocalClock,
+    read_board: impl FnOnce() -> Option<String>,
+) -> Result<String, String> {
+    if entry.kind == SnippetKind::Credential {
+        return match field.unwrap_or("account") {
+            "account" => entry
+                .account
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| "这条账密尚未填写账号".to_string()),
+            "password" => {
+                let stored = entry
+                    .password
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "这条账密尚未设置密码".to_string())?;
+                unprotect_password(stored)
+            }
+            _ => Err("不支持的复制字段".into()),
+        };
+    }
+
+    if raw {
+        return Ok(entry.content.clone());
+    }
+    let board = if template_uses_clipboard(&entry.content) {
+        read_board()
+    } else {
+        None
+    };
+    Ok(expand_template(&entry.content, clock, board.as_deref()))
+}
+
 #[tauri::command]
 pub fn copy_snippet(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     raw: Option<bool>,
+    field: Option<String>,
 ) -> Result<(), String> {
-    let content = {
+    let entry = {
         let guard = state.snippets.lock().unwrap_or_else(|e| e.into_inner());
         guard
             .entries
             .iter()
             .find(|item| item.id == id)
-            .map(|item| item.content.clone())
+            .cloned()
             .ok_or("这条常用短语已不存在")?
     };
-    let final_text = if raw.unwrap_or(false) {
-        content
-    } else {
-        let board = if template_uses_clipboard(&content) {
-            crate::clipboard_service::read_current_text()
-        } else {
-            None
-        };
-        expand_template(&content, LocalClock::now(), board.as_deref())
-    };
+    let final_text = resolve_copy_text(
+        &entry,
+        raw.unwrap_or(false),
+        field.as_deref(),
+        LocalClock::now(),
+        crate::clipboard_service::read_current_text,
+    )?;
     crate::clipboard_service::copy_plain_text(&app, &final_text)
+}
+
+#[tauri::command]
+pub fn reveal_snippet_password(state: State<'_, AppState>, id: String) -> Result<String, String> {
+    let stored = {
+        let guard = state.snippets.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = guard
+            .entries
+            .iter()
+            .find(|item| item.id == id)
+            .ok_or("这条账密已不存在")?;
+        if entry.kind != SnippetKind::Credential {
+            return Err("只有账密条目支持查看密码".into());
+        }
+        entry
+            .password
+            .as_deref()
+            .filter(|pw| !pw.is_empty())
+            .map(str::to_owned)
+            .ok_or("这条账密尚未设置密码")?
+    };
+    unprotect_password(&stored)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn text_draft(
+        id: Option<&str>,
+        title: &str,
+        content: &str,
+        group: &str,
+        pinned: bool,
+    ) -> SnippetDraft {
+        SnippetDraft {
+            id: id.map(str::to_owned),
+            kind: SnippetKind::Text,
+            title: title.into(),
+            content: content.into(),
+            account: None,
+            password: None,
+            group: group.into(),
+            pinned,
+        }
+    }
+
+    fn credential_draft(
+        id: Option<&str>,
+        title: &str,
+        account: &str,
+        password: Option<&str>,
+        note: &str,
+        pinned: bool,
+    ) -> SnippetDraft {
+        SnippetDraft {
+            id: id.map(str::to_owned),
+            kind: SnippetKind::Credential,
+            title: title.into(),
+            content: note.into(),
+            account: Some(account.into()),
+            password: password.map(str::to_owned),
+            group: CREDENTIAL_GROUP.into(),
+            pinned,
+        }
+    }
 
     fn sample_clock() -> LocalClock {
         LocalClock {
@@ -677,37 +1110,20 @@ mod tests {
     fn upsert_keeps_pinned_first_and_manages_groups() {
         let mut index = SnippetIndex::default();
         index
-            .upsert(
-                SnippetDraft {
-                    id: Some("a".into()),
-                    title: "普通短语".into(),
-                    content: "第一条内容".into(),
-                    group: "工作".into(),
-                    pinned: false,
-                },
-                100,
-            )
+            .upsert(text_draft(Some("a"), "普通短语", "第一条内容", "工作", false), 100)
             .unwrap();
         index
-            .upsert(
-                SnippetDraft {
-                    id: Some("b".into()),
-                    title: "置顶模板".into(),
-                    content: "第二条 {{date}}".into(),
-                    group: "代码".into(),
-                    pinned: true,
-                },
-                200,
-            )
+            .upsert(text_draft(Some("b"), "置顶模板", "第二条 {{date}}", "代码", true), 200)
             .unwrap();
-        assert_eq!(index.groups, vec!["未分组", "工作", "代码"]);
+        assert_eq!(index.groups, vec!["未分组", "账密", "工作", "代码"]);
         assert_eq!(
             index.entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(),
             vec!["b", "a"]
         );
 
-        // 删除分组后，该组短语自动回到“未分组”，默认分组不可删除
+        // 删除分组后，该组短语自动回到“未分组”，默认分组和账密类别不可删除
         assert!(index.remove_group("未分组").is_err());
+        assert!(index.remove_group("账密").is_err());
         index.remove_group("工作").unwrap();
         assert_eq!(index.entries[1].group, "未分组");
     }
@@ -717,16 +1133,7 @@ mod tests {
         let mut index = SnippetIndex::default();
         for (id, pinned) in [("p1", true), ("p2", true), ("n1", false), ("n2", false)] {
             index
-                .upsert(
-                    SnippetDraft {
-                        id: Some(id.into()),
-                        title: id.into(),
-                        content: id.into(),
-                        group: "未分组".into(),
-                        pinned,
-                    },
-                    1,
-                )
+                .upsert(text_draft(Some(id), id, id, "未分组", pinned), 1)
                 .unwrap();
         }
         index
@@ -743,33 +1150,130 @@ mod tests {
     fn validates_boundaries_and_suggests_clean_titles() {
         let mut index = SnippetIndex::default();
         assert!(index
-            .upsert(
-                SnippetDraft {
-                    id: None,
-                    title: "   ".into(),
-                    content: "正文".into(),
-                    group: "未分组".into(),
-                    pinned: false,
-                },
-                1
-            )
+            .upsert(text_draft(None, "   ", "正文", "未分组", false), 1)
             .is_err());
         assert!(index
-            .upsert(
-                SnippetDraft {
-                    id: None,
-                    title: "标题".into(),
-                    content: "   ".into(),
-                    group: "全部".into(),
-                    pinned: false,
-                },
-                1
-            )
+            .upsert(text_draft(None, "标题", "   ", "全部", false), 1)
             .is_err());
         assert_eq!(
             suggest_title("\n  第一行很长的内容摘要用于生成默认标题测试超过二十八个字自动省略号  \n第二行", ""),
             "第一行很长的内容摘要用于生成默认标题测试超过二十八个字自…"
         );
         assert_eq!(suggest_title("正文", "已有备注"), "已有备注");
+    }
+
+    #[test]
+    fn legacy_snippets_json_loads_and_adds_credential_group() {
+        let legacy_json = r#"{
+            "schemaVersion": 1,
+            "groups": ["未分组", "工作"],
+            "entries": [
+                {
+                    "id": "legacy-1",
+                    "title": "旧版模板",
+                    "content": "每日汇报 {{date}}",
+                    "group": "工作",
+                    "pinned": false,
+                    "updatedAt": 123456
+                }
+            ]
+        }"#;
+        let mut index: SnippetIndex = serde_json::from_str(legacy_json).unwrap();
+        index.ensure_invariants();
+        assert_eq!(index.groups, vec!["未分组", "账密", "工作"]);
+        assert_eq!(index.entries[0].kind, SnippetKind::Text);
+        assert_eq!(index.entries[0].account, None);
+        assert_eq!(index.entries[0].password, None);
+    }
+
+    #[test]
+    fn credential_dpapi_roundtrip_upsert_copy_and_view_redaction() {
+        let secret = "  P@ss#{{date}}中文空格!  ";
+        let mut index = SnippetIndex::default();
+
+        // 缺少密码或账号时拒绝新建
+        assert!(index
+            .upsert(
+                credential_draft(Some("bad"), "缺密码", "user@test.com", None, "", false),
+                1
+            )
+            .is_err());
+        assert!(index
+            .upsert(
+                credential_draft(Some("bad2"), "缺账号", "   ", Some("abc"), "", false),
+                1
+            )
+            .is_err());
+
+        // 新建账密并验证 DPAPI 密文、列表脱敏、原样复制账号/密码（不展开 {{date}}、不裁剪空格）
+        index
+            .upsert(
+                credential_draft(
+                    Some("cred-1"),
+                    "测试后台",
+                    "admin@example.com",
+                    Some(secret),
+                    "联调环境",
+                    true,
+                ),
+                100,
+            )
+            .unwrap();
+        let entry = &index.entries[0];
+        assert_eq!(entry.kind, SnippetKind::Credential);
+        assert_eq!(entry.group, "账密");
+        assert_eq!(entry.account.as_deref(), Some("admin@example.com"));
+        let stored_cipher = entry.password.as_deref().unwrap().to_owned();
+        assert!(stored_cipher.starts_with("dpapi:v1:"));
+        assert!(!stored_cipher.contains("P@ss"));
+        assert!(!stored_cipher.contains("中文空格"));
+
+        let payload = SnippetPayload::from(&index);
+        let payload_json = serde_json::to_string(&payload).unwrap();
+        assert!(payload.entries[0].has_password);
+        assert!(!payload_json.contains("dpapi:v1:"));
+        assert!(!payload_json.contains("P@ss"));
+
+        let clock = sample_clock();
+        assert_eq!(
+            resolve_copy_text(entry, false, None, clock, || None).unwrap(),
+            "admin@example.com"
+        );
+        assert_eq!(
+            resolve_copy_text(entry, false, Some("account"), clock, || None).unwrap(),
+            "admin@example.com"
+        );
+        assert_eq!(
+            resolve_copy_text(entry, false, Some("password"), clock, || None).unwrap(),
+            secret
+        );
+
+        // 置顶/编辑不传 password 时保留原有密码密文
+        index
+            .upsert(
+                credential_draft(
+                    Some("cred-1"),
+                    "测试后台",
+                    "admin@example.com",
+                    None,
+                    "联调环境",
+                    false,
+                ),
+                200,
+            )
+            .unwrap();
+        assert_eq!(index.entries[0].password.as_deref(), Some(stored_cipher.as_str()));
+        assert_eq!(
+            unprotect_password(index.entries[0].password.as_deref().unwrap()).unwrap(),
+            secret
+        );
+
+        // 切回普通短语时彻底清除原密码与账号字段
+        index
+            .upsert(text_draft(Some("cred-1"), "普通短语", "新正文", "未分组", false), 300)
+            .unwrap();
+        assert_eq!(index.entries[0].kind, SnippetKind::Text);
+        assert_eq!(index.entries[0].account, None);
+        assert_eq!(index.entries[0].password, None);
     }
 }

@@ -49,6 +49,7 @@ export interface IslandAppearance {
   telemetryNet: boolean
   telemetryCpu: boolean
   telemetryMemory: boolean
+  showAppNames: boolean
 }
 
 export function defaultIslandAppearance(): IslandAppearance {
@@ -65,7 +66,8 @@ export function defaultIslandAppearance(): IslandAppearance {
     telemetryMode: 'smart',
     telemetryNet: true,
     telemetryCpu: true,
-    telemetryMemory: true
+    telemetryMemory: true,
+    showAppNames: true
   }
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId } from 'vue'
 
-export type IslandVariant = 'standard' | 'telemetry' | 'mecha' | 'scroll' | 'pixel' | 'blueprint' | 'neon' | 'clay'
+export type IslandVariant = 'standard' | 'liquid' | 'telemetry' | 'mecha' | 'scroll' | 'pixel' | 'blueprint' | 'neon' | 'clay'
 
 const props = withDefaults(defineProps<{
   width: number
@@ -30,6 +30,8 @@ const gridPattern = 'island-grid-' + uid
 const neonGradient = 'island-neon-' + uid
 const clayShade = 'island-clay-' + uid
 const clayRim = 'island-clay-rim-' + uid
+const liquidFill = 'island-liquid-fill-' + uid
+const liquidRim = 'island-liquid-rim-' + uid
 
 /** 圆角矩形轮廓；三套新主题共用，半径按可用尺寸收紧。 */
 function roundedRect(x: number, y: number, w: number, h: number, r: number): string {
@@ -125,6 +127,19 @@ const contours = computed(() => {
     return { face: `path('${face}')`, sheen: `path('${sheen}')`, hem: `path('${hem}')`, extra: '', ruler: slots, tail: '' }
   }
 
+  if (v === 'liquid') {
+    const r = Math.min(expanded ? 22 : line ? 4 : 26, h / 2, w / 2)
+    const face = roundedRect(0.8, 0.8, w - 1.6, h - 1.6, r)
+    if (line) {
+      return { face: `path('${face}')`, sheen: `path('M 0 0 H 0')`, hem: `path('M 0 0 H 0')`, extra: '', ruler: `M 6 ${midY} H ${Math.max(6, w - 6)}`, tail: '' }
+    }
+    const inner = roundedRect(2.6, 2.6, w - 5.2, h - 5.2, Math.max(2, r - 2))
+    const arcX1 = Math.min(w * 0.22, r + 10)
+    const arcX2 = Math.max(arcX1 + 12, w - arcX1)
+    const gloss = `M ${arcX1} 2.2 H ${arcX2}`
+    return { face: `path('${face}')`, sheen: `path('${gloss}')`, hem: `path('M ${Math.max(r, w * 0.14)} ${h - 1.4} H ${Math.min(w - r, w * 0.86)}')`, extra: inner, ruler: gloss, tail: '' }
+  }
+
   // standard / telemetry
   const baseRadius = v === 'telemetry' ? (expanded ? 12 : line ? 4 : 10) : (expanded ? 18 : line ? 5 : 24)
   const radius = Math.min(baseRadius, h / 2, w / 2)
@@ -173,10 +188,20 @@ const contours = computed(() => {
         <stop offset="55%" stop-color="#ffffff" stop-opacity=".2" />
         <stop offset="100%" stop-color="#c4ab90" stop-opacity=".55" />
       </linearGradient>
+      <linearGradient v-if="props.variant === 'liquid'" :id="liquidFill" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#14223a" />
+        <stop offset="52%" stop-color="#0d1526" />
+        <stop offset="100%" stop-color="#131930" />
+      </linearGradient>
+      <linearGradient v-if="props.variant === 'liquid'" :id="liquidRim" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#e0f2fe" stop-opacity=".88" />
+        <stop offset="46%" stop-color="#7dd3fc" stop-opacity=".52" />
+        <stop offset="100%" stop-color="#d8b4fe" stop-opacity=".78" />
+      </linearGradient>
     </defs>
     <path class="skin"
-      :fill="props.variant === 'clay' ? `url(#${clayShade})` : undefined"
-      :stroke="props.variant === 'neon' ? `url(#${neonGradient})` : undefined"
+      :fill="props.variant === 'clay' ? `url(#${clayShade})` : props.variant === 'liquid' ? `url(#${liquidFill})` : undefined"
+      :stroke="props.variant === 'neon' ? `url(#${neonGradient})` : props.variant === 'liquid' ? `url(#${liquidRim})` : undefined"
       :style="{ d: contours.face }" />
     <path v-if="props.variant === 'blueprint' && props.shape !== 'line'" class="bp-grid" :fill="`url(#${gridPattern})`" :style="{ d: contours.face }" />
     <path v-if="props.shape !== 'line' && props.variant !== 'blueprint' && props.variant !== 'neon' && props.variant !== 'clay'" class="sheen" :style="{ d: contours.sheen }" />
@@ -214,6 +239,10 @@ const contours = computed(() => {
     <!-- 软糖黏土立体高光圈与左上果冻反光 -->
     <path v-if="props.variant === 'clay' && props.shape !== 'line'" class="clay-rim" :stroke="`url(#${clayRim})`" :d="contours.extra" />
     <path v-if="props.variant === 'clay' && props.shape !== 'line'" class="clay-gloss" :d="contours.ruler" />
+
+    <!-- 液态琉璃菲涅尔折射内环与细线冷光丝 -->
+    <path v-if="props.variant === 'liquid' && props.shape !== 'line'" class="liquid-inner-rim" :stroke="`url(#${liquidRim})`" :d="contours.extra" />
+    <path v-if="props.variant === 'liquid' && props.shape === 'line'" class="liquid-line" :stroke="`url(#${liquidRim})`" :d="contours.ruler" />
   </svg>
 </template>
 
@@ -245,6 +274,9 @@ const contours = computed(() => {
 .neon-line { fill:none; stroke-width:2.2px; stroke-linecap:round; }
 .clay-rim { fill:none; stroke-width:2.2px; }
 .clay-gloss { fill:none; stroke:rgba(255, 255, 255, .88); stroke-width:2.8px; stroke-linecap:round; }
+.variant-liquid .skin { stroke-width:1.35px; }
+.liquid-inner-rim { fill:none; stroke-width:1px; opacity:.34; }
+.liquid-line { fill:none; stroke-width:2px; stroke-linecap:round; }
 @media (forced-colors:active) {
   .skin { fill:Canvas; stroke:CanvasText; }
   .sheen, .hem, .reticles, .ruler, .mecha-rails, .mecha-seam, .scroll-frame, .scroll-tail, .scroll-line, .pixel-slots,
