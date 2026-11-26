@@ -17,10 +17,10 @@ import '@/features/settings-lab/lab-theme.css'
 import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
 import { isDarkThemeMode, THEME_LABELS, THEME_MODES, type ThemeMode } from '@/lib/themes'
 import {
-  isMotionMode,
   MOTION_LABELS,
   MOTION_MODES,
   MOTION_TIMINGS,
+  normalizeMotionMode,
   type MotionMode
 } from '@/lib/motions'
 import { defaultIslandAppearance, invokeHost, isDesktop } from '@/lib/desktop/desktop'
@@ -80,17 +80,13 @@ const themeMaterials: Record<ThemeMode, { orb: string; desc: string }> = {
 
 const motionCurves: Record<MotionMode, string> = {
   glide: 'M 2 18 C 18 18, 26 3, 78 3',
-  sweep: 'M 2 18 L 32 18 C 42 18, 46 3, 78 3',
   bounce: 'M 2 18 C 16 18, 26 1, 44 2 C 56 3, 64 7, 78 3',
-  step: 'M 2 18 H 20 V 13 H 40 V 8 H 60 V 3 H 78',
-  flicker: 'M 2 18 L 14 3 L 78 3',
-  unroll: 'M 2 18 C 12 9, 28 3, 78 3'
+  flicker: 'M 2 18 L 14 3 L 78 3'
 }
 
-const currentMotion = computed<MotionMode>(() => {
-  const raw = state.ui.islandAppearance.motion
-  return isMotionMode(raw) ? raw : 'glide'
-})
+const currentMotion = computed<MotionMode>(() =>
+  normalizeMotionMode(state.ui.islandAppearance.motion)
+)
 
 const anchor = computed<'left' | 'center' | 'right'>({
   get: () => (state.ui.islandAnchor === 'left' || state.ui.islandAnchor === 'right' ? state.ui.islandAnchor : 'center'),

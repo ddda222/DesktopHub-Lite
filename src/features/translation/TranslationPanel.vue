@@ -141,43 +141,35 @@ function onPanelKeydown(event: KeyboardEvent): void {
     </header>
 
     <div class="content">
-      <!-- 方向 -->
-      <div class="languages" role="group" aria-label="翻译方向">
-        <select aria-label="原文语言" :value="sourceLanguage" @change="chooseLanguage($event, true)">
-          <option value="zh">中文</option><option value="en">英语</option><option value="auto">自动检测</option>
-        </select>
-        <button class="swap" type="button" title="交换翻译方向" aria-label="交换翻译方向" @click="swapLanguages">
-          <Icon name="swap" :size="16" :class="{ reversed: sourceLanguage === 'en' }" />
-        </button>
-        <select aria-label="译文语言" :value="targetLanguage" @change="chooseLanguage($event, false)">
-          <option v-if="targetLanguage === 'auto'" value="auto" disabled>自动匹配</option>
-          <option value="en">英语</option><option value="zh">中文</option>
-        </select>
+      <!-- 方向与快捷填充合一 -->
+      <div class="top-bar">
+        <div class="languages" role="group" aria-label="翻译方向">
+          <select aria-label="原文语言" :value="sourceLanguage" @change="chooseLanguage($event, true)">
+            <option value="zh">中文</option><option value="en">英语</option><option value="auto">自动检测</option>
+          </select>
+          <button class="swap" type="button" title="交换翻译方向" aria-label="交换翻译方向" @click="swapLanguages">
+            <Icon name="swap" :size="16" :class="{ reversed: sourceLanguage === 'en' }" />
+          </button>
+          <select aria-label="译文语言" :value="targetLanguage" @change="chooseLanguage($event, false)">
+            <option v-if="targetLanguage === 'auto'" value="auto" disabled>自动匹配</option>
+            <option value="en">英语</option><option value="zh">中文</option>
+          </select>
+        </div>
+
+        <div class="source-head-actions">
+          <button
+            v-if="latestClipText"
+            class="link-btn"
+            type="button"
+            title="将最近一条文本剪贴板填入原文框（仍需手动点翻译）"
+            @click="fillFromLatestClip"
+          >填入最新剪贴板</button>
+          <button v-if="hasSource" class="link-btn" type="button" @click="onClear">清空</button>
+        </div>
       </div>
 
       <!-- 原文 -->
       <div class="source">
-        <div class="source-head">
-          <span class="label">原文</span>
-          <div class="source-head-actions">
-            <button
-              v-if="latestClipText"
-              class="link-btn"
-              type="button"
-              title="将最近一条文本剪贴板填入原文框（仍需手动点翻译）"
-              @click="fillFromLatestClip"
-            >填入最新剪贴板</button>
-            <button v-if="hasSource" class="link-btn" type="button" @click="onClear">清空</button>
-          </div>
-        </div>
-
-        <div v-if="state.translation.filledFromClip" class="chip-row">
-          <span class="chip">
-            <Icon name="clipboard" :size="12" />
-            来自剪贴板记录 · 仍需手动提交
-          </span>
-        </div>
-
         <div class="field">
           <textarea
             class="textarea"
@@ -188,8 +180,9 @@ function onPanelKeydown(event: KeyboardEvent): void {
             spellcheck="false"
             @input="onSourceInput"
           />
-          <span class="counter" :class="{ 'is-near': nearLimit }">{{ count }} / {{ MAX_CHARS }}</span>
           <span v-if="atLimit" class="limit-note">已到 {{ MAX_CHARS }} 字上限，超出部分会被截断</span>
+          <span v-else-if="state.translation.filledFromClip" class="clip-note">来自剪贴板 · 需手动提交</span>
+          <span class="counter" :class="{ 'is-near': nearLimit }">{{ count }} / {{ MAX_CHARS }}</span>
         </div>
       </div>
 
@@ -216,7 +209,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
           >
             样稿模拟结果
           </span>
-          <span v-if="status === 'done'" class="meta" :title="resultMeta">{{ resultMeta }}</span>
+          <span class="head-spacer" />
           <button v-if="status === 'done'" class="ghost copy" type="button" @click="onCopy">
             <Icon name="copy" :size="13" />复制译文
           </button>
@@ -230,6 +223,10 @@ function onPanelKeydown(event: KeyboardEvent): void {
           </div>
           <p v-else class="result-text model-response" tabindex="0" aria-label="译文内容">{{ resultText }}</p>
         </div>
+
+        <footer v-if="status === 'done'" class="result-foot">
+          <span class="meta" :title="resultMeta">{{ resultMeta }}</span>
+        </footer>
       </div>
     </div>
 
@@ -300,7 +297,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .content {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-height: 0;
   padding: var(--space-3) var(--space-4);
   overflow-y: auto;
@@ -324,9 +321,17 @@ function onPanelKeydown(event: KeyboardEvent): void {
   background: transparent;
 }
 
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .languages {
+  flex: none;
   display: inline-flex;
-  align-self: flex-start;
   align-items: center;
   padding: 2px;
   border: 1px solid var(--line-strong);
@@ -424,7 +429,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .textarea {
   display: block;
   width: 100%;
-  height: 68px;
+  height: 76px;
   padding: 9px 10px 24px;
   color: var(--text);
   font: inherit;
@@ -476,13 +481,21 @@ function onPanelKeydown(event: KeyboardEvent): void {
   color: var(--danger);
 }
 
-.limit-note {
+.limit-note,
+.clip-note {
   position: absolute;
   left: 10px;
   bottom: 5px;
-  color: var(--danger);
   font-size: var(--text-xs);
   pointer-events: none;
+}
+
+.limit-note {
+  color: var(--danger);
+}
+
+.clip-note {
+  color: var(--text-3);
 }
 
 /* 提交 */
@@ -595,6 +608,13 @@ function onPanelKeydown(event: KeyboardEvent): void {
   gap: var(--space-2);
 }
 .result-head .label { flex: none; color: var(--text); font-weight: 600; }
+.head-spacer { flex: 1; }
+.result-foot {
+  display: flex;
+  align-items: center;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
 
 .badge {
   display: inline-flex;
@@ -620,7 +640,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
 }
 
 .result-text {
-  max-height: 5.8em;
+  max-height: 7.2em;
   margin: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -665,7 +685,8 @@ function onPanelKeydown(event: KeyboardEvent): void {
   min-width: 0;
   overflow: hidden;
   color: var(--text-3);
-  font-size: var(--text-xs);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-overflow: ellipsis;
 }

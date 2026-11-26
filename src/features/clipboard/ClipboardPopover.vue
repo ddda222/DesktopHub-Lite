@@ -1862,7 +1862,7 @@ function openDetectedUrl(url: string): void {
 /* 顶部模式切换栏 */
 .mode-bar {
   flex: none;
-  padding: 8px 10px 0;
+  padding: 6px 10px 0;
 }
 
 .mode-seg {
@@ -1880,7 +1880,7 @@ function openDetectedUrl(url: string): void {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 26px;
+  height: 24px;
   padding: 0 10px;
   border-radius: calc(var(--r-chip) - 2px);
   font-size: var(--text-xs);
@@ -1921,7 +1921,7 @@ function openDetectedUrl(url: string): void {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 8px 10px;
+  padding: 6px 10px;
 }
 
 .search {
@@ -1930,7 +1930,7 @@ function openDetectedUrl(url: string): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
+  height: 30px;
   padding: 0 8px;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -1996,7 +1996,7 @@ function openDetectedUrl(url: string): void {
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 32px;
+  height: 30px;
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: var(--r-chip);
@@ -2075,7 +2075,7 @@ function openDetectedUrl(url: string): void {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
-  padding: 0 10px 8px;
+  padding: 0 10px 6px;
 }
 
 .chips {
@@ -2083,7 +2083,7 @@ function openDetectedUrl(url: string): void {
   min-width: 0;
   display: flex;
   gap: 4px;
-  padding: 2px;
+  padding: 1px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -2109,8 +2109,8 @@ function openDetectedUrl(url: string): void {
 
 .chip {
   flex: none;
-  height: 24px;
-  padding: 0 9px;
+  height: 22px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: var(--r-chip);
   font-size: var(--text-xs);
@@ -2152,8 +2152,8 @@ function openDetectedUrl(url: string): void {
 .row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 7px 8px;
+  gap: 8px;
+  padding: 6px 8px;
   border-radius: var(--r-tile);
   cursor: pointer;
   user-select: none;
@@ -2161,7 +2161,7 @@ function openDetectedUrl(url: string): void {
 }
 
 .row + .row {
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .row:hover {
@@ -2183,23 +2183,23 @@ function openDetectedUrl(url: string): void {
 .thumb {
   position: relative;
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   overflow: hidden;
   background: var(--thumb-bg);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--text-2);
 }
 
 .color-swatch {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
 .index-kbd {
@@ -2267,6 +2267,7 @@ function openDetectedUrl(url: string): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-base);
+  font-weight: 500;
   color: var(--text);
 }
 
@@ -2306,6 +2307,7 @@ function openDetectedUrl(url: string): void {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
 
@@ -3020,9 +3022,10 @@ function openDetectedUrl(url: string): void {
 /* 底部提示 */
 .foot {
   flex: none;
-  padding: 7px 12px;
+  padding: 5px 10px;
   border-top: 1px solid var(--line);
-  font-size: var(--text-xs);
+  font-size: 10.5px;
   color: var(--text-3);
+  opacity: 0.82;
 }
 </style>

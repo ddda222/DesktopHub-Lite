@@ -12,6 +12,7 @@ pub const PANEL_APPLICATIONS: &str = "applications";
 pub const PANEL_CLIPBOARD: &str = "clipboard";
 pub const PANEL_TRANSLATION: &str = "translation";
 pub const PANEL_FILES: &str = "files";
+pub const PANEL_PACK: &str = "pack";
 pub const PANEL_CATEGORY: &str = "category";
 pub const PANEL_OVERFLOW: &str = "overflow";
 
@@ -214,6 +215,6 @@ fn default_leave() -> u32 {
 pub fn valid_island_page(page: &str) -> bool {
     matches!(
         page,
-        PANEL_APPLICATIONS | PANEL_CLIPBOARD | PANEL_TRANSLATION | PANEL_FILES | "audio"
+        PANEL_APPLICATIONS | PANEL_CLIPBOARD | PANEL_TRANSLATION | PANEL_FILES | "audio" | PANEL_PACK
     )
 }

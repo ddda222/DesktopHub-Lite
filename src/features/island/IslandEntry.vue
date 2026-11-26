@@ -29,6 +29,8 @@ import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
 import AudioMixer from '@/features/audio/AudioMixer.vue'
 import { addShelfFiles, shelf, subscribeShelf } from '@/features/files/shelf'
+import PackConsole from '@/features/pack/PackConsole.vue'
+import { capsuleTaskText, useTaskRunner } from '@/features/pack/useTaskRunner'
 import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
@@ -50,7 +52,7 @@ import {
   state,
   visibleApps
 } from '@/store'
-import { isMotionMode, MOTION_TIMINGS, type MotionMode } from '@/lib/motions'
+import { MOTION_TIMINGS, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 
 const props = defineProps<{
   previewFeedback?: { kind: string; sequence: number }
@@ -142,6 +144,8 @@ const mailSummary = computed(() => {
 })
 const { current: approval, count: approvalCount, busy: answering, answer: answerApproval } =
   useApprovals(message => pushToast(message, 'error'))
+// 打包 / 联调台的任务状态：只在运行中占用胶囊中间的位置。
+const { task: runTask, elapsedMs: runElapsed } = useTaskRunner(message => pushToast(message, 'error'))
 const suppressed = computed(() => state.ui.fullscreenSuppressed)
 const hoverClosing = ref(false)
 const expanded = computed(() => !!approval.value || (hostExpanded.value && !hoverClosing.value))
@@ -149,6 +153,13 @@ watch([mailNotices, viewingMail, expanded, approval], ([items, selected, open, p
   if (!items.length) mailSelected.value = false
   const ids = items.map(item => item.id)
   seenMail.value = selected && open && !prompt ? ids : seenMail.value.filter(id => ids.includes(id))
+})
+// 打包/联调任务结束才给胶囊反馈；before === 'idle' 表示只是加载到上次结果，不补播过期提示。
+watch(() => runTask.value.stage, (stage, before) => {
+  if (before === 'idle') return
+  if (stage === 'done') showFeedback('task-done', runTask.value.kind === 'pack' ? '打包完成' : '执行完成')
+  else if (stage === 'cancelled') showFeedback('task-cancelled', '已取消')
+  else if (stage === 'error') showFeedback('task-error', '执行失败')
 })
 // 避让只决定收起形态；细线也能悬停展开。
 const tucked = computed(() => suppressed.value && !expanded.value)
@@ -199,6 +210,8 @@ const showQuickOcr = computed(() =>
 )
 const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: string; icon: IconName | null; kind: string }>(() => {
   if (approval.value) return { text: approval.value.kind === 'approval' ? '待审批' : '有提问', ariaText: approval.value.title, icon: 'info', kind: 'approval' }
+  // 打包/联调任务运行中：胶囊中间实时显示「任务名 · 约剩 mm:ss」
+  if (runTask.value.stage === 'running') return { text: capsuleTaskText(runTask.value, runElapsed.value), ariaText: `${runTask.value.name}：${runTask.value.message}`, tooltip: '打包 / 联调任务运行中', icon: 'terminal', kind: 'working' }
   if (receivingFiles.value) return { text: '松开暂存', icon: 'folder', kind: 'working' }
   if (shelf.busy) return { text: shelf.activity || '文件处理中', icon: 'folder', kind: 'working' }
   const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
@@ -275,10 +288,7 @@ const keepTaskOpen = computed(() => ocrPanelOpen.value || (!viewingMail.value &&
   ((page.value === 'translation' && shouldKeepTranslationOpen(state.translation)) ||
    (page.value === 'clipboard' && readingExplanation.value))))
 const appearance = computed(() => state.ui.islandAppearance)
-const motionMode = computed<MotionMode>(() => {
-  const raw = appearance.value.motion
-  return isMotionMode(raw) ? raw : 'glide'
-})
+const motionMode = computed<MotionMode>(() => normalizeMotionMode(appearance.value.motion))
 const materialAllowed = computed(() => materialRequested.value && !motionReduced.value && !plainMaterial.value)
 const materialReady = ref(false)
 watch([effectsActive, materialAllowed], ([active, allowed]) => {
@@ -297,6 +307,7 @@ const visibleWidth = computed(() => {
     : showQuickCode.value
       ? 112 * scale.value
       : capsuleBadges.value.reduce((acc, item) => acc + (item.text.length > 2 ? 48 : 34) * scale.value, 0)
+  // 快捷操作条 5 个按钮时的宽度下限。
   const menuFloor = quickMenuOpen.value ? 412 * scale.value : 0
   if (capsuleStatus.value.kind === 'telemetry' && telemetryReadout.value) {
     const count = telemetryReadout.value.metricCount
@@ -322,6 +333,9 @@ const visibleWidth = computed(() => {
   else if (variant.value === 'scroll') baseWidth = (idle ? 164 : 196) * scale.value
   else if (variant.value === 'blueprint' || variant.value === 'neon') baseWidth = (idle ? 184 : 216) * scale.value
   else if (variant.value === 'clay') baseWidth = (idle ? 168 : 200) * scale.value
+  if (runTask.value.stage === 'running') {
+    baseWidth = Math.max(baseWidth, 236 * scale.value)
+  }
   return Math.min(availableWidth.value - 24, Math.max(menuFloor, Math.round(baseWidth + badgeExtra)))
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
@@ -373,12 +387,15 @@ const sections = [
   { value: 'clipboard', label: '剪贴板', icon: 'clipboard' },
   { value: 'translation', label: '翻译', icon: 'translate' },
   { value: 'files', label: '文件中转', icon: 'folder' },
-  { value: 'audio', label: '调音台', icon: 'volume' }
+  { value: 'audio', label: '调音台', icon: 'volume' },
+  { value: 'pack', label: '打包', icon: 'terminal' }
 ] as const
-let navMeasureTimer: ReturnType<typeof setTimeout> | undefined
+let navMeasureRaf = 0
 const pageSwitching = ref(false)
 let pageSwitchTimer: ReturnType<typeof setTimeout> | undefined
+const pageSwitchDuration = () => (motionMode.value === 'flicker' ? 110 : motionMode.value === 'bounce' ? 185 : 150)
 function revealSelectedPage(): void {
+  navMeasureRaf = 0
   const nav = modeNav.value
   const selected = nav?.querySelector<HTMLElement>('button.selected')
   if (!nav || !selected) return
@@ -392,8 +409,8 @@ function revealSelectedPage(): void {
 }
 function syncSelectedIndicator(): void {
   revealSelectedPage()
-  clearTimeout(navMeasureTimer)
-  navMeasureTimer = setTimeout(revealSelectedPage, 60)
+  cancelAnimationFrame(navMeasureRaf)
+  navMeasureRaf = requestAnimationFrame(revealSelectedPage)
 }
 watch([page, expanded, variant, viewingMail], syncSelectedIndicator, { flush: 'post' })
 watch(scale, syncSelectedIndicator, { flush: 'post' })
@@ -605,13 +622,13 @@ function reserveGeometry(): void {
   }
   const durationMs = Math.max(
     expanded.value ? expandMs.value : collapseMs.value,
-    pageSwitching.value ? 230 : 0
+    pageSwitching.value ? pageSwitchDuration() : 0
   )
   geometryTimer = setTimeout(() => {
     viewportSize.value = { ...bounds.value }
     geometryMoving.value = false
     queueGeometry()
-  }, durationMs + 60)
+  }, durationMs + 24)
 }
 
 watch([bounds, expanded, () => state.ui.islandReducedMotion, reducedMotion], reserveGeometry, { flush: 'sync' })
@@ -977,7 +994,7 @@ watch(hostExpanded, value => {
     clearTimeout(leaveTimer)
     composing.value = false
     pressed.value = false
-    if (shouldReopen) scheduleHoverOpen()
+    if (shouldReopen && !quickMenuOpen.value && !hoveringQuickAction.value) expand(true)
   }
 })
 
@@ -992,7 +1009,7 @@ watch(page, (nextPage, prevPage) => {
   if (expanded.value && prevPage && nextPage !== prevPage && !motionReduced.value) {
     pageSwitching.value = true
     clearTimeout(pageSwitchTimer)
-    pageSwitchTimer = setTimeout(() => { pageSwitching.value = false }, 220)
+    pageSwitchTimer = setTimeout(() => { pageSwitching.value = false }, pageSwitchDuration())
   }
 }, { flush: 'sync' })
 watch(() => props.previewKeepOpen, value => { if (!value && !hovering.value) leave() })
@@ -1068,10 +1085,10 @@ function keydown(event: KeyboardEvent): void {
   const target = event.target instanceof HTMLElement ? event.target : null
   const inTextField = !!target?.closest('input, textarea, select, [contenteditable="true"]')
 
-  // Alt+1~5 或非输入态 1~5 快切功能页
-  if ((event.altKey || !inTextField) && !event.ctrlKey && !event.metaKey && event.key >= '1' && event.key <= '5') {
-    const idx = Number(event.key) - 1
-    const section = sections[idx]
+  // Alt+1~N 或非输入态 1~N 快切功能页（N 随标签数量变化）
+  const digit = Number(event.key)
+  if ((event.altKey || !inTextField) && !event.ctrlKey && !event.metaKey && Number.isInteger(digit) && digit >= 1 && digit <= sections.length) {
+    const section = sections[digit - 1]
     if (section) {
       event.preventDefault()
       void selectPage(section.value)
@@ -1297,7 +1314,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', updateClock)
   clearTimeout(closeTimer)
   clearTimeout(geometryTimer)
-  clearTimeout(navMeasureTimer)
+  cancelAnimationFrame(navMeasureRaf)
   clearTimeout(pageSwitchTimer)
   window.removeEventListener('pointerup', handlePointerUp)
   window.removeEventListener('pointercancel', handlePointerUp)
@@ -1316,9 +1333,9 @@ onBeforeUnmount(() => {
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
     <div ref="panel" class="island solid-surface" :data-motion="motionMode" :class="[{ expanded, 'page-switching': pageSwitching, tucked: !revealed, telemetry, 'has-quick-menu': quickMenuOpen && !expanded, 'no-physics': !(effectsActive && quality === 'full') && !motionReduced }, `variant-${variant}`, `motion-${motionMode}`]"
       :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
-      <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" />
+      <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" :moving="geometryMoving || pageSwitching" />
       <GlassLight v-if="materialReady && glassAvailable"
-        :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :corner-radius="cornerRadius" :palette="glassPalette" @unavailable="glassAvailable = false" />
+        :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :paused="geometryMoving || pageSwitching" :corner-radius="cornerRadius" :palette="glassPalette" @unavailable="glassAvailable = false" />
       <IslandParticles v-if="materialReady"
         :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" :motion="motionMode" />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
@@ -1426,12 +1443,12 @@ onBeforeUnmount(() => {
               </button>
             </nav>
             <div class="tools">
-              <button v-if="mailNotices.length" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="closeOcrPanel(); mailSelected = !viewingMail"><Icon name="mail" :size="18" /></button>
-              <button class="round-action" type="button" :title="`截图识字（${state.shortcuts.ocr || 'Ctrl+Shift+O'}）`" aria-label="截图识字" :aria-pressed="ocrPanelOpen" @click="startScreenOcr"><Icon name="scan-text" :size="18" /></button>
-              <button v-if="!viewingMail && !ocrPanelOpen && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="18" /></button>
-              <button class="round-action pin-action" type="button" :title="pinned ? '已钉住展开（点击或按 Esc 取消）' : '钉住展开，移开鼠标不自动收起（Alt+P）'" aria-label="钉住灵动岛" :aria-pressed="pinned" @click="pinned = !pinned"><Icon name="pin" :size="17" /></button>
-              <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="19" /></button>
-              <button class="round-action collapse-action" type="button" title="收起（Esc）" aria-label="收起灵动岛" @click="collapseNow(true)"><Icon name="chevron-down" :size="19" /></button>
+              <button v-if="mailNotices.length" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="closeOcrPanel(); mailSelected = !viewingMail"><Icon name="mail" :size="16" /></button>
+              <button class="round-action" type="button" :title="`截图识字（${state.shortcuts.ocr || 'Ctrl+Shift+O'}）`" aria-label="截图识字" :aria-pressed="ocrPanelOpen" @click="startScreenOcr"><Icon name="scan-text" :size="16" /></button>
+              <button v-if="!viewingMail && !ocrPanelOpen && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="16" /></button>
+              <button class="round-action pin-action" type="button" :title="pinned ? '已钉住展开（点击或按 Esc 取消）' : '钉住展开，移开鼠标不自动收起（Alt+P）'" aria-label="钉住灵动岛" :aria-pressed="pinned" @click="pinned = !pinned"><Icon name="pin" :size="15" /></button>
+              <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="16" /></button>
+              <button class="round-action collapse-action" type="button" title="收起（Esc）" aria-label="收起灵动岛" @click="collapseNow(true)"><Icon name="chevron-down" :size="16" /></button>
             </div>
           </header>
           <div v-if="state.ui.wechatAttention" class="attention-strip" role="status">
@@ -1484,6 +1501,7 @@ onBeforeUnmount(() => {
               <TranslationPanel v-else-if="page === 'translation'" />
               <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
               <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
+              <PackConsole v-else-if="page === 'pack'" />
             </div>
           </Transition>
           </div>
@@ -1546,6 +1564,11 @@ onBeforeUnmount(() => {
   background: transparent;
   isolation: isolate;
 }
+.island.variant-standard,
+.island.variant-telemetry {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--island-rim, var(--island-outline)), inset 0 1px 0 var(--island-top-sheen);
+}
 .island {
   position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%); transform-origin: 50% 0;
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
@@ -1594,20 +1617,19 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: .04em; cursor: pointer;
   transform-origin: right center;
   touch-action: manipulation;
-  transition: transform 170ms var(--ease-out), opacity 170ms var(--ease-out), filter 170ms var(--ease-out), background-color 140ms ease, color 140ms ease;
+  transition: transform 150ms var(--ease-out), opacity 150ms var(--ease-out), background-color 120ms ease, color 120ms ease;
 }
 .capsule-code-btn:hover { background: var(--accent); color: var(--accent-text); }
 .capsule-ocr-actions {
   position: relative; z-index: 3; flex: none; display: inline-flex; align-items: center; gap: 4px;
   transform-origin: right center;
-  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out), filter 180ms var(--ease-out);
+  transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
 }
 @starting-style {
   .capsule-ocr-actions,
   .capsule-code-btn {
     opacity: 0;
-    transform: translate3d(-4px, 0, 0) scale(.92);
-    filter: blur(1.5px);
+    transform: translate3d(-4px, 0, 0) scale(.94);
   }
 }
 .capsule-ocr-btn { font-family: var(--font-sans); letter-spacing: 0; }
@@ -1679,38 +1701,38 @@ onBeforeUnmount(() => {
 .ordinary-pane { position: relative; display: block; overflow: clip; }
 .island-pane-enter-active {
   will-change: transform, opacity;
-  transition: opacity 155ms var(--ease-out), transform 175ms var(--ease-out), filter 155ms var(--ease-out);
+  transition: opacity 115ms var(--ease-out), transform 130ms var(--ease-out);
 }
 .island-pane-leave-active {
   position: absolute; top: 0; left: 0; right: 0;
   pointer-events: none;
   will-change: transform, opacity;
-  transition: opacity 95ms var(--ease-out), transform 105ms var(--ease-out), filter 95ms var(--ease-out);
+  transition: opacity 75ms var(--ease-out), transform 85ms var(--ease-out);
 }
-.island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 12px), 0, 0) scale(.992); filter: blur(1.5px); }
-.island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -8px), 0, 0) scale(.992); filter: blur(1.5px); }
+.island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 6px), 0, 0); }
+.island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -4px), 0, 0); }
 .toolbar {
   display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
-  gap: 8px; margin-bottom: 10px; padding: 0 0 8px; border-bottom: 1px solid var(--line);
+  gap: 6px; margin-bottom: 8px; padding: 0 0 7px; border-bottom: 1px solid var(--line);
 }
-.tools { display: flex; align-items: center; gap: 4px; flex: none; }
+.tools { display: flex; align-items: center; gap: 2px; flex: none; }
 .round-action {
-  display: grid; place-items: center; flex: none; width: 34px; height: 34px;
-  border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text-2);
+  display: grid; place-items: center; flex: none; width: 28px; height: 28px;
+  border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text-3);
 }
 .collapse-action svg { transform: rotate(180deg); }
 .round-action:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
 .tools .round-action[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
-.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 80px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin: 0 0 10px; padding: 2px; }
-.categories button { flex: none; padding: 5px 12px; border-radius: 20px; border: 1px solid transparent; min-height: 32px; font-size: 13px; color: var(--text-2); }
+.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-height: 74px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin: 0 0 8px; padding: 1px; }
+.categories button { flex: none; padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; min-height: 26px; font-size: 12px; color: var(--text-2); }
 .categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line-strong); }
 .categories button:hover:not(.selected) { color: var(--text); background: var(--hover); border-color: var(--line); }
 .app-toolbar {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
 }
 .app-search-box {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
-  height: 32px; padding: 0 10px; border-radius: 10px;
+  height: 30px; padding: 0 9px; border-radius: 9px;
   background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2);
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
@@ -1731,9 +1753,9 @@ onBeforeUnmount(() => {
   scrollbar-width: thin; scrollbar-color: transparent transparent;
 }
 .app-grid.with-names {
-  --app-cell-size: 68px;
-  grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
-  grid-auto-rows: 66px;
+  --app-cell-size: 62px;
+  grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+  grid-auto-rows: 62px;
   max-height: 220px;
 }
 .app-tile {
@@ -1761,39 +1783,42 @@ onBeforeUnmount(() => {
 }
 .empty { display: flex; align-items: center; min-height: 64px; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.8; padding: 16px 4px; }
 .mode-nav {
-  position: relative; display: flex; flex: 1; align-items: center; gap: 4px;
-  min-width: 0; width: auto; height: 42px; padding: 2px;
-  overflow-x: auto; scrollbar-width: none; color: var(--text);
+  position: relative; display: flex; flex: 1; align-items: center; gap: 2px;
+  min-width: 0; width: auto; height: 38px; padding: 2px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; color: var(--text);
 }
+.island .mode-nav::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .mode-selection {
-  position: absolute; top: 3px; bottom: 3px; left: 0;
-  width: 40px; border-radius: 11px;
+  position: absolute; top: 2px; bottom: 2px; left: 0;
+  width: 36px; border-radius: 10px;
   background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--line-strong);
+  contain: layout style;
+  will-change: transform;
   transform: translate3d(2px, 0, 0);
-  transition: transform 185ms var(--ease-out), width 175ms var(--ease-out);
+  transition: transform 150ms var(--ease-out), width 150ms var(--ease-out);
   pointer-events: none;
 }
 .mode-nav button {
   position: relative; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 0;
-  height: 36px; min-width: 38px; padding: 0 9px; border-radius: 11px; color: var(--text-2); font-size: 12.5px;
+  height: 34px; min-width: 34px; padding: 0 7px; border-radius: 10px; color: var(--text-2); font-size: 12.5px;
   transition: transform 150ms var(--ease-out), color 130ms ease;
 }
 .mode-nav .mode-label {
   max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 650;
   transition: opacity 140ms ease;
 }
-.mode-nav button.selected { gap: 6px; padding: 0 12px; color: var(--text); font-weight: 600; }
+.mode-nav button.selected { gap: 5px; padding: 0 10px; color: var(--text); font-weight: 600; }
 .mode-nav button.selected .mode-label { max-width: 64px; opacity: 1; }
-.narrow .mode-nav button.selected { gap: 0; padding: 0 9px; }
+.narrow .mode-nav button.selected { gap: 0; padding: 0 7px; }
 .narrow .mode-nav button.selected .mode-label { max-width: 0; opacity: 0; }
 .mode-nav .selected svg { color: var(--accent); }
 .mode-nav button:hover { color: var(--text); }
 button {
   touch-action: manipulation;
-  transition: transform 150ms var(--ease-out), background-color 140ms ease, color 140ms ease, border-color 140ms ease;
+  transition: transform 90ms var(--ease-out), background-color 110ms ease, color 110ms ease, border-color 110ms ease;
 }
 :where(.round-action, .mode-nav button, .categories button, .attention-strip button, .feature-pane button, .app-tile, .capsule-code-btn, .capsule-ocr-dismiss, .capsule-quick-menu button):active:not(:disabled) {
-  transform: scale(.965);
+  transform: scale(.97);
   transition-duration: 70ms;
 }
 /* 启用 physics.ts 时由内层图标弹簧承担主按压微缩，外框仅轻微沉降避免双重过度缩水。 */
@@ -1812,25 +1837,26 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .feature-pane :deep(.panel > .head) { display: none; }
 .feature-pane :deep(button:disabled) { opacity: 1; color: var(--text-3); background: var(--surface-2); cursor: not-allowed; }
 .feature-pane :deep(.pop > .mode-bar), .feature-pane :deep(.pop > .head), .feature-pane :deep(.pop > .detail), .feature-pane :deep(.pop > .foot), .feature-pane :deep(.panel > .content) { padding-left: 0; padding-right: 0; }
-.feature-pane :deep(.pop > .mode-bar) { padding-top: 2px; }
+.feature-pane :deep(.panel > .content) { overflow: visible; scrollbar-gutter: auto; }
+.feature-pane :deep(.pop > .mode-bar) { padding-top: 0; }
 .feature-pane { --r-chip: 8px; --r-tile: 10px; }
-.feature-pane :deep(.search) { height: 36px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color 120ms ease, box-shadow 120ms ease; }
+.feature-pane :deep(.search) { height: 32px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color 120ms ease, box-shadow 120ms ease; }
 .feature-pane :deep(.search:hover) { border-color: var(--line-strong); }
 .feature-pane :deep(.search:focus-within) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
-.feature-pane :deep(.pause) { height: 36px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface-2); }
-.feature-pane :deep(.filter-bar) { padding: 0 0 8px; }
-.feature-pane :deep(.chips) { gap: 4px; padding: 2px; }
-.feature-pane :deep(.chip) { height: 30px; padding: 0 12px; }
-.feature-pane :deep(.filter-bar .chip) { height: 28px; padding: 0 8px; }
-.feature-pane :deep(.var-bar .chip) { height: 24px; padding: 0 8px; }
+.feature-pane :deep(.pause) { height: 32px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); }
+.feature-pane :deep(.filter-bar) { padding: 0 0 6px; }
+.feature-pane :deep(.chips) { gap: 4px; padding: 1px; }
+.feature-pane :deep(.chip) { height: 26px; padding: 0 10px; }
+.feature-pane :deep(.filter-bar .chip) { height: 24px; padding: 0 8px; }
+.feature-pane :deep(.var-bar .chip) { height: 22px; padding: 0 7px; }
 .feature-pane :deep(.chips .chip:not(.is-on)) { border-color: transparent; background: var(--surface-2); }
 .feature-pane :deep(.chips .chip:not(.is-on):hover) { background: var(--hover); border-color: var(--line); }
 .feature-pane :deep(.chips .chip.is-on) { box-shadow: inset 0 0 0 1px var(--accent-weak); }
 .feature-pane :deep(.list) { padding-left: 0; padding-right: 0; }
-.feature-pane :deep(.row) { padding: 10px; border-radius: 9px; border-bottom: 1px solid var(--line); }
+.feature-pane :deep(.row) { padding: 7px 8px; border-radius: 9px; border-bottom: 1px solid var(--line); }
 .feature-pane :deep(.row.is-active) { background: var(--accent-weak); box-shadow: inset 2px 0 0 var(--accent); }
-.feature-pane :deep(.seg) { padding: 4px; border-radius: 22px; background: var(--surface-2); border: 1px solid var(--line); }
-.feature-pane :deep(.seg-btn) { height: 30px; border-radius: 18px; }
+.feature-pane :deep(.seg) { padding: 3px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
+.feature-pane :deep(.seg-btn) { height: 26px; border-radius: 11px; }
 .feature-pane :deep(.seg-btn.is-active) { box-shadow: inset 0 0 0 1px var(--line-strong), 0 1px 2px rgb(0 0 0 / .06); }
 .feature-pane :deep(.textarea) { border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); transition: border-color 120ms ease, box-shadow 120ms ease; }
 .feature-pane :deep(.textarea:focus-visible) { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); }
@@ -2068,7 +2094,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 }
 .variant-pixel .toolbar { border-bottom: 0; margin-bottom: 8px; padding-bottom: 2px; }
 .variant-pixel .mode-selection { display: none; }
-.variant-pixel .mode-nav { gap: 6px; padding: 2px 2px 5px; }
+.variant-pixel .mode-nav { gap: 4px; padding: 2px 2px 5px; }
 .variant-pixel .mode-nav button,
 .variant-pixel .round-action {
   border-radius: 0; background: #4a436b; color: #e2e8f0;

@@ -521,11 +521,8 @@ const MODE_INDEX: Record<SceneMode, number> = {
 
 const MOTION_INDEX: Record<MotionMode, number> = {
   glide: 0,
-  sweep: 1,
   bounce: 2,
-  step: 3,
-  flicker: 4,
-  unroll: 5
+  flicker: 4
 }
 
 /** 原生 WebGL 3D 液态玻璃与光影流体引擎：零外部依赖，60fps 响应每一个设置项变化。 */

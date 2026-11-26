@@ -47,8 +47,8 @@ function submit(decision: ApprovalAnswer) {
     </footer>
     <footer v-else-if="card.kind === 'approval'">
       <button type="button" class="delegate" :disabled="busy || !accepting" @click="submit('delegate')">回原应用审批</button>
-      <button type="button" :disabled="busy || !accepting" @click="submit('deny')"><Icon name="close" :size="16" />拒绝本次</button>
-      <button type="button" class="allow" :disabled="busy || !accepting" @click="submit('allow')"><Icon name="check" :size="16" />允许本次</button>
+      <button type="button" class="deny" :disabled="busy || !accepting" @click="submit('deny')"><Icon name="close" :size="15" />拒绝本次</button>
+      <button type="button" class="allow" :disabled="busy || !accepting" @click="submit('allow')"><Icon name="check" :size="15" />允许本次</button>
     </footer>
   </section>
 </template>
@@ -56,22 +56,27 @@ function submit(decision: ApprovalAnswer) {
 <style scoped>
 .approval { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; color: var(--text); }
 header, footer, button { display: flex; align-items: center; gap: 6px; }
-header { flex-wrap: wrap; gap: 3px 8px; font-size: 12px; overflow-wrap: anywhere; }
-header span { min-width: 0; }
-header span, header small, .context, .delegate { color: var(--text-2); }
-header small { margin-inline-start: auto; flex: none; }
+header { flex-wrap: wrap; gap: 3px 6px; font-size: 12px; overflow-wrap: anywhere; }
+header strong { font-weight: 600; color: var(--text); }
+header span { min-width: 0; color: var(--text-3); }
+header small { margin-inline-start: auto; flex: none; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .request-summary { max-height: 98px; overflow-wrap: anywhere; user-select: text; }
-h2 { margin: 0; font-size: 16px; line-height: 1.45; }
-.context { margin: 0; font-size: 12px; white-space: pre-wrap; }
+h2 { margin: 0; font-size: 15px; line-height: 1.4; font-weight: 600; }
+.context { margin: 0; font-size: 11.5px; color: var(--text-2); white-space: pre-wrap; }
 h2 + .context { margin-top: 4px; }
-.approval-body { max-height: 210px; margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-tile); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
-pre { font: 12px/1.6 var(--font-mono); tab-size: 4; }
-.notice { font-size: 14px; line-height: 1.6; }
+.approval-body { max-height: 210px; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-tile); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+pre { font: 11.5px/1.6 var(--font-mono); tab-size: 4; }
+.notice { font-size: 13.5px; line-height: 1.6; }
 footer { justify-content: flex-end; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--line); }
-button { justify-content: center; min-height: 32px; padding: 4px 9px; border: 1px solid var(--line-strong); border-radius: var(--r-chip); }
+button { justify-content: center; min-height: 30px; padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-chip); font-size: 12px; transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease; }
 button:hover:enabled { background: var(--hover); }
+button:active:enabled { transform: scale(0.97); }
 button:focus-visible, .scroll-y:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.allow { background: var(--surface-2); font-weight: 650; }
-.delegate { margin-inline-end: auto; border-color: transparent; font-size: 12px; }
-button:disabled { opacity: .55; cursor: default; }
+.allow { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.allow:hover:enabled { background: var(--accent-hover); border-color: var(--accent-hover); }
+.deny { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); background: transparent; }
+.deny:hover:enabled { background: var(--danger-weak); border-color: var(--danger); }
+.delegate { margin-inline-end: auto; border-color: transparent; color: var(--text-3); font-size: 11.5px; padding-inline: 6px; }
+.delegate:hover:enabled { color: var(--text); }
+button:disabled { opacity: .5; cursor: default; }
 </style>

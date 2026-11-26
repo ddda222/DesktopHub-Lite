@@ -7,6 +7,8 @@
 //!
 //! 剪贴板与翻译只登记契约，不读写真实数据、不发真实请求（阶段 3 / 4）。
 
+mod adb;
+mod app_pack;
 mod applications;
 mod approvals;
 mod clipboard;
@@ -14,6 +16,7 @@ mod clipboard_service;
 mod capture_privacy;
 mod desktop_support;
 mod desktop_features;
+mod exec;
 mod file_shelf;
 mod icons;
 mod image_preview;
@@ -25,10 +28,12 @@ mod launcher;
 mod logging;
 mod mail;
 mod ocr;
+mod pack_scripts;
 mod snippets;
 mod state;
 mod storage;
 mod system_apps;
+mod task_runner;
 mod telemetry;
 mod translation;
 mod file_preview;
@@ -1016,6 +1021,9 @@ fn build_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "quit" => {
+                if let Some(runner) = app.try_state::<task_runner::TaskRunner>() {
+                    runner.shutdown();
+                }
                 if let Some(state) = app.try_state::<AppState>() {
                     state.running.store(false, Ordering::Relaxed);
                     for (_, pending) in state.translation_cancel.lock().unwrap_or_else(|e| e.into_inner()).drain() { let _ = pending.sender.send(()); }
@@ -1155,6 +1163,7 @@ pub fn run() {
             let shortcuts = store.read(desktop_support::SHORTCUTS_FILE).unwrap_or_default();
 
             app.manage(image_preview::Previews::default());
+            app.manage(task_runner::TaskRunner::default());
             app.manage(approvals::Approvals::default());
             app.manage(mail::Mail::load(&store));
             app.manage(audio::AudioState::default());
@@ -1208,6 +1217,7 @@ pub fn run() {
                 update_status: Mutex::new(None),
                 update_check_gate: tokio::sync::Mutex::new(()),
             });
+            app_pack::recover_pending_backup(&handle);
 
             #[cfg(windows)]
             windows::install_bar_frame_guard(&handle);
@@ -1373,6 +1383,20 @@ pub fn run() {
             image_preview::image_preview_content,
             image_preview::pin_image_preview,
             current_window_label,
+            app_pack::pack_settings,
+            app_pack::save_pack_settings,
+            app_pack::open_pack_dir,
+            app_pack::install_pack_apk,
+            adb::adb_status,
+            adb::adb_set_device,
+            adb::adb_reverse,
+            pack_scripts::list_pack_scripts,
+            pack_scripts::save_pack_script,
+            pack_scripts::delete_pack_script,
+            task_runner::task_state,
+            task_runner::task_log,
+            task_runner::start_pack_task,
+            task_runner::cancel_pack_task,
             approvals::approval_snapshot,
             approvals::answer_approval,
             approvals::setup::list_approval_agents,

@@ -10,7 +10,7 @@ import ImagePreviewWindow from './ImagePreviewWindow.vue'
 import { browserImagePreview } from '@/mock/image-preview'
 import { closeSettings, isDarkTheme, setMotion, setTheme, state } from '@/store'
 import { THEME_LABELS, THEME_MODES } from '@/lib/themes'
-import { MOTION_LABELS, MOTION_MODES, type MotionMode } from '@/lib/motions'
+import { MOTION_LABELS, MOTION_MODES, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import { previewApps, previewIcons } from '@/mock/preview-icons'
 import { makeShelfSamples } from '@/mock/shelf-samples'
 import { closeShelfPreview, loadBrowserShelfSamples, openShelfPreview, removeShelfFiles, shelf, undoShelfRemove } from '@/features/files/shelf'
@@ -158,7 +158,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
         <a href="?preview=styles" style="color: inherit; font-weight: 600">十款样式实验室 ↗</a>
         <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button v-for="mode in previewThemes" :key="mode" type="button" :aria-pressed="state.settings.theme === mode" @click="setTheme(mode)">{{ THEME_LABELS[mode] }}</button>
-        <label>动效<select :value="state.ui.islandAppearance.motion" aria-label="动态效果" @change="selectPreviewMotion(($event.target as HTMLSelectElement).value as MotionMode)"><option v-for="m in MOTION_MODES" :key="m" :value="m">{{ MOTION_LABELS[m] }}</option></select></label>
+        <label>动效<select :value="normalizeMotionMode(state.ui.islandAppearance.motion)" aria-label="动态效果" @change="selectPreviewMotion(($event.target as HTMLSelectElement).value as MotionMode)"><option v-for="m in MOTION_MODES" :key="m" :value="m">{{ MOTION_LABELS[m] }}</option></select></label>
         <label>尺寸<select v-model.number="state.ui.islandAppearance.scale"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option></select></label>
         <label><input v-model="plain" type="checkbox" />纯色背景</label>
         <label>场景<select v-model="scene" aria-label="模拟窗口状态"><option value="normal">桌面／普通窗口</option><option value="maximized">窗口最大化</option><option value="fullscreen">游戏／全屏</option></select></label>

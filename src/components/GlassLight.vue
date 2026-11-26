@@ -6,10 +6,11 @@ const props = withDefaults(defineProps<{
   lightSurface: boolean
   signal?: string
   active?: boolean
+  paused?: boolean
   quality?: 'full' | 'low'
   cornerRadius?: number
   palette?: 'cool' | 'liquid' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'
-}>(), { active: true, quality: 'full', palette: 'cool' })
+}>(), { active: true, paused: false, quality: 'full', palette: 'cool' })
 const emit = defineEmits<{ unavailable: [] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 let dispose: (() => void) | undefined
@@ -43,7 +44,7 @@ onMounted(() => {
   let tone = Number(props.lightSurface)
   let originX = .5, originY = 1
   let rippleStart = -Infinity
-  const enabled = () => !disposed && !!pass && props.active && inView && !document.hidden && !media.matches
+  const enabled = () => !disposed && !!pass && props.active && !props.paused && inView && !document.hidden && !media.matches
 
   function schedule(): void {
     if (!frame && enabled()) frame = requestAnimationFrame(draw)
@@ -144,7 +145,14 @@ onMounted(() => {
     inView = entries.at(-1)?.isIntersecting ?? false
     sync()
   })
-  const stopActive = watch(() => props.active, sync)
+  const stopActive = watch(() => [props.active, props.paused] as const, ([active, paused], [, prevPaused]) => {
+    if (active && !paused && prevPaused) {
+      width = element.clientWidth
+      height = element.clientHeight
+      trim = true
+    }
+    sync()
+  })
   const stopTone = watch(() => [props.lightSurface, props.cornerRadius, props.palette], schedule)
   const stopQuality = watch(() => props.quality, () => { trim = true; schedule() })
   const stopSignal = watch(() => props.signal, signal => {

@@ -58,13 +58,13 @@ onBeforeUnmount(() => {
   <section class="ocr-panel" aria-labelledby="ocr-panel-title">
     <header class="ocr-head">
       <div class="ocr-title-row">
-        <Icon name="scan-text" :size="16" />
+        <Icon name="scan-text" :size="15" />
         <h3 id="ocr-panel-title">截图识字</h3>
-        <span class="ocr-meta-tag">{{ sourceLabel }}</span>
-        <span v-if="state.ocr.status === 'done'" class="ocr-meta-stats">
-          {{ liveLines }} 行 · {{ liveChars }} 字
-          <template v-if="state.ocr.language"> · {{ state.ocr.language }}</template>
-          <template v-if="state.ocr.elapsedMs"> · {{ state.ocr.elapsedMs }} ms</template>
+        <span class="ocr-meta-stats">
+          {{ sourceLabel }}
+          <template v-if="state.ocr.status === 'done'">
+            · {{ liveLines }} 行 · {{ liveChars }} 字<template v-if="state.ocr.language"> · {{ state.ocr.language }}</template><template v-if="state.ocr.elapsedMs"> · {{ state.ocr.elapsedMs }} ms</template>
+          </template>
         </span>
       </div>
       <button
@@ -88,7 +88,6 @@ onBeforeUnmount(() => {
         <button class="ocr-btn ocr-btn-primary" type="button" @click="startScreenOcr()">
           重新截图
         </button>
-        <button class="ocr-btn" type="button" @click="closeOcrPanel">关闭</button>
       </div>
     </div>
 
@@ -124,7 +123,6 @@ onBeforeUnmount(() => {
           <Icon name="scan-text" :size="14" />
           重新截图
         </button>
-        <button class="ocr-btn" type="button" @click="closeOcrPanel">关闭</button>
       </div>
     </template>
   </section>
@@ -163,17 +161,9 @@ onBeforeUnmount(() => {
   font-size: 13.5px;
   font-weight: 600;
 }
-.ocr-meta-tag {
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  color: var(--text-2);
-  font-size: 11px;
-}
 .ocr-meta-stats {
   font-size: 11px;
-  color: var(--text-2);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 .ocr-close-btn {

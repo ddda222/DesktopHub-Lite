@@ -7,6 +7,7 @@ import AppManagement from './AppManagement.vue'
 import MixerSettings from './MixerSettings.vue'
 import MailSettings from './MailSettings.vue'
 import ApprovalSettings from './ApprovalSettings.vue'
+import PackSettings from './PackSettings.vue'
 import DataStorageSettings, { type QuickDataPrompt } from './DataStorageSettings.vue'
 import ConfigBackup from './ConfigBackup.vue'
 import './settings.css'
@@ -31,7 +32,7 @@ import {
 } from '@/store'
 import type { ThemeMode, TranslateDirection } from '@/lib/desktop/types'
 import { THEME_LABELS, THEME_MODES } from '@/lib/themes'
-import { isMotionMode, MOTION_DESCRIPTIONS, MOTION_LABELS, MOTION_MODES, type MotionMode } from '@/lib/motions'
+import { MOTION_DESCRIPTIONS, MOTION_LABELS, MOTION_MODES, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import { translationProviderPresets } from '@/lib/desktop/providers'
 import { isDesktop } from '@/lib/desktop/desktop'
 import { useWindowDrag } from '@/lib/useWindowDrag'
@@ -64,15 +65,15 @@ const sections: { id: SettingsSection; label: string }[] = [
   { id: 'translation', label: '模型与翻译' },
   { id: 'audio', label: '调音台' },
   { id: 'mail', label: '邮箱通知' },
-  { id: 'approvals', label: '智能体连接' }
+  { id: 'approvals', label: '智能体连接' },
+  { id: 'pack', label: '打包与联调' }
 ]
 
 const themeOptions: { value: ThemeMode; label: string }[] = THEME_MODES.map(value => ({ value, label: THEME_LABELS[value] }))
 const motionOptions: { value: MotionMode; label: string }[] = MOTION_MODES.map(value => ({ value, label: MOTION_LABELS[value] }))
-const currentMotion = computed<MotionMode>(() => {
-  const raw = state.ui.islandAppearance.motion
-  return isMotionMode(raw) ? raw : 'glide'
-})
+const currentMotion = computed<MotionMode>(() =>
+  normalizeMotionMode(state.ui.islandAppearance.motion)
+)
 
 const directionOptions: { value: TranslateDirection; label: string }[] = [
   { value: 'zh-en', label: '中 → 英' },
@@ -350,6 +351,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
           <MixerSettings v-if="state.ui.settingsSection === 'audio' && state.ui.settingsOpen" />
           <MailSettings v-if="state.ui.settingsSection === 'mail' && state.ui.settingsOpen" />
           <KeepAlive><ApprovalSettings v-if="state.ui.settingsSection === 'approvals' && state.ui.settingsOpen" /></KeepAlive>
+          <PackSettings v-if="state.ui.settingsSection === 'pack' && state.ui.settingsOpen" />
 
           <!-- 剪贴板 -->
           <div v-show="state.ui.settingsSection === 'clipboard'" class="panel">

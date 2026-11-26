@@ -20,7 +20,7 @@ pub const LEGACY_APPLY_DATA_DIR: &str = r"D:\apply\DesktopHub-Lite\data";
 pub const ISOLATED_FLAG: &str = "portable-isolated.flag";
 pub const LEGACY_PORTABLE_FLAG: &str = "portable.flag";
 
-pub const USER_JSON_FILES: [&str; 10] = [
+pub const USER_JSON_FILES: [&str; 12] = [
     "applications.json",
     "ui-preferences.json",
     "clipboard-index.json",
@@ -31,6 +31,8 @@ pub const USER_JSON_FILES: [&str; 10] = [
     "audio-profiles.json",
     "shortcuts.json",
     "window-state.json",
+    "app-pack.json",
+    "pack-scripts.json",
 ];
 
 pub const USER_SUBDIRS: [&str; 2] = ["clipboard-images", "icons"];
@@ -411,6 +413,55 @@ pub fn has_meaningful_data(dir: &Path) -> bool {
             });
         if has_custom_app || has_custom_cat {
             return true;
+        }
+    }
+    if let Ok(Some(val)) = read_json_value(&dir.join("app-pack.json")) {
+        let non_empty_str = |key: &str| {
+            val.get(key)
+                .and_then(Value::as_str)
+                .is_some_and(|s| !s.trim().is_empty())
+        };
+        let has_paths = [
+            "cli",
+            "hbuilderRoot",
+            "project",
+            "packagename",
+            "outputDir",
+            "adb",
+            "device",
+        ]
+        .iter()
+        .any(|k| non_empty_str(k));
+        let auto_install = val.get("autoInstall").and_then(Value::as_bool).unwrap_or(false);
+        let custom_port = val
+            .get("reversePort")
+            .and_then(Value::as_u64)
+            .is_some_and(|p| p != 11034);
+        let has_ignore_files = val
+            .get("remoteIgnoreFiles")
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty());
+        if has_paths || auto_install || custom_port || has_ignore_files {
+            return true;
+        }
+    }
+    if let Ok(Some(val)) = read_json_value(&dir.join("pack-scripts.json")) {
+        if let Some(scripts) = val.get("scripts").and_then(Value::as_array) {
+            let has_custom = scripts.iter().any(|item| {
+                let id = item.get("id").and_then(Value::as_str).unwrap_or("");
+                let is_builtin = matches!(
+                    id,
+                    "builtin-local-reverse" | "builtin-local-pack" | "builtin-remote-pack"
+                );
+                let has_history = item
+                    .get("history")
+                    .and_then(Value::as_array)
+                    .is_some_and(|h| !h.is_empty());
+                !is_builtin || has_history
+            });
+            if has_custom {
+                return true;
+            }
         }
     }
     false
@@ -1693,6 +1744,59 @@ mod tests {
         assert_eq!(
             fs::read(shared.join("snippets.json")).unwrap(),
             fs::read(old_startup_dir.join("data").join("snippets.json")).unwrap()
+        );
+    }
+
+    #[test]
+    fn pack_files_are_migrated_and_seed_is_not_meaningful() {
+        let root = temp_case("pack_migrate");
+        let seed_dir = root.join("seed-only");
+        fs::create_dir_all(&seed_dir).unwrap();
+        fs::write(
+            seed_dir.join("app-pack.json"),
+            br#"{"cli":"","hbuilderRoot":"","project":"","packagename":"","packType":"3","outputDir":"","adb":"","device":"","reversePort":11034,"autoInstall":false,"remoteIgnoreFiles":[]}"#,
+        )
+        .unwrap();
+        fs::write(
+            seed_dir.join("pack-scripts.json"),
+            br#"{"schemaVersion":1,"scripts":[{"id":"builtin-local-pack","history":[]},{"id":"builtin-remote-pack","history":[]}]}"#,
+        )
+        .unwrap();
+        assert!(!has_meaningful_data(&seed_dir));
+
+        let ignore_only_dir = root.join("ignore-only");
+        fs::create_dir_all(&ignore_only_dir).unwrap();
+        fs::write(
+            ignore_only_dir.join("app-pack.json"),
+            br#"{"remoteIgnoreFiles":["src/api/gov-auth.js"]}"#,
+        )
+        .unwrap();
+        assert!(has_meaningful_data(&ignore_only_dir));
+
+        let src = root.join("src-pack");
+        let dst = root.join("dst-pack");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("app-pack.json"),
+            br#"{"project":"D:\\demo\\proj","reversePort":9527}"#,
+        )
+        .unwrap();
+        fs::write(
+            src.join("pack-scripts.json"),
+            br#"{"schemaVersion":1,"scripts":[{"id":"custom-1","history":[12.5]}]}"#,
+        )
+        .unwrap();
+        assert!(has_meaningful_data(&src));
+
+        let report = copy_user_data_to(&src, &dst, false).unwrap();
+        assert_eq!(report.copied_files, 2);
+        assert_eq!(
+            fs::read(dst.join("app-pack.json")).unwrap(),
+            fs::read(src.join("app-pack.json")).unwrap()
+        );
+        assert_eq!(
+            fs::read(dst.join("pack-scripts.json")).unwrap(),
+            fs::read(src.join("pack-scripts.json")).unwrap()
         );
     }
 }

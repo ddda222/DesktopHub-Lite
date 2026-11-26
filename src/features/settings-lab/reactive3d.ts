@@ -778,20 +778,14 @@ export class Reactive3DEngine {
     const e = this.expandProgress
     let wingX = 1.05 * e
     let wingY = 0.65 * e
-    if (this.state.motion === 'sweep') {
-      wingX = 1.45 * Math.min(1, e * 1.6)
-      wingY = 0.72 * Math.max(0, (e - 0.35) / 0.65)
-    } else if (this.state.motion === 'bounce') {
-      const overshoot = e > 0.1 && e < 0.99 ? Math.sin(e * Math.PI) * 0.28 : 0
+    if (this.state.motion === 'bounce') {
+      const overshoot = e > 0.1 && e < 0.99 ? Math.sin(e * Math.PI) * 0.24 : 0
       wingX = (1.1 + overshoot) * e
-      wingY = (0.78 + overshoot * 1.4) * e
-    } else if (this.state.motion === 'step') {
-      const stepped = Math.round(e * 4) / 4
-      wingX = 1.18 * stepped
-      wingY = 0.72 * stepped
-    } else if (this.state.motion === 'unroll') {
-      wingX = 0.75 * Math.max(0, (e - 0.3) / 0.7)
-      wingY = 1.08 * Math.min(1, e * 1.4)
+      wingY = (0.76 + overshoot * 1.3) * e
+    } else if (this.state.motion === 'flicker') {
+      const snap = Math.min(1, e * 1.45)
+      wingX = 1.15 * snap
+      wingY = 0.7 * snap
     }
 
     // 停靠与细线压缩态变换

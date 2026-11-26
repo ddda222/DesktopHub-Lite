@@ -72,12 +72,12 @@ export function defaultIslandAppearance(): IslandAppearance {
 }
 
 /** 宿主当前打开的弹层与设置窗口状态，由 Rust 持有并广播。 */
-export type SettingsSection = 'general' | 'apps' | 'clipboard' | 'translation' | 'audio' | 'mail' | 'approvals'
+export type SettingsSection = 'general' | 'apps' | 'clipboard' | 'translation' | 'audio' | 'mail' | 'approvals' | 'pack'
 
 export interface UiState {
   islandExpanded: boolean
   islandAnchor: string
-  islandPage: 'applications' | 'clipboard' | 'translation' | 'files' | 'audio'
+  islandPage: 'applications' | 'clipboard' | 'translation' | 'files' | 'audio' | 'pack'
   islandHoverMs: number
   islandLeaveMs: number
   islandReducedMotion: boolean
@@ -90,7 +90,7 @@ export interface UiState {
   wechatStatus: string
   wechatAttention: boolean
   wechatEvent: number
-  panel: 'clipboard' | 'translation' | 'files' | 'audio' | 'category' | 'overflow' | null
+  panel: 'clipboard' | 'translation' | 'files' | 'audio' | 'pack' | 'category' | 'overflow' | null
   settingsOpen: boolean
   settingsRequest: [number, SettingsSection] | null
   paused: boolean

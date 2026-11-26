@@ -39,12 +39,13 @@ async function act(id: string, action: 'copy-code' | 'copy-link' | 'open-link' |
       <article v-for="item in notices" :key="item.id" class="mail-item">
         <header>
           <h3>{{ item.subject || '无主题邮件' }}</h3>
-          <button class="dismiss" type="button" :disabled="busy" :aria-label="'移除提醒：' + (item.subject || '无主题邮件')" @click="act(item.id, 'dismiss')">移除提醒</button>
+          <button class="dismiss" type="button" :disabled="busy" :aria-label="'移除提醒：' + (item.subject || '无主题邮件')" @click="act(item.id, 'dismiss')">移除</button>
         </header>
-        <dl>
-          <dt>发件人</dt><dd>{{ item.sender || '未知发件人' }}</dd>
-          <dt>收件账号</dt><dd>{{ item.address || providerName[item.provider] }}</dd>
-        </dl>
+        <p class="mail-meta">
+          <span>{{ item.sender || '未知发件人' }}</span>
+          <span aria-hidden="true">·</span>
+          <span>{{ item.address || providerName[item.provider] }}</span>
+        </p>
         <button v-if="item.code" class="code" :class="{ copied: isCopied(item.id) }" type="button" :disabled="busy" @click="act(item.id, 'copy-code')">
           <strong>{{ item.code }}</strong>
           <Icon :name="isCopied(item.id) ? 'check' : 'copy'" :size="14" />
@@ -69,26 +70,28 @@ async function act(id: string, action: 'copy-code' | 'copy-link' | 'open-link' |
 .mail-panel { min-width: 0; color: var(--text); }
 .mail-heading, header, .mail-link, .link-actions { display: flex; align-items: center; gap: 8px; }
 .mail-heading { justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
-h2, h3, dl, dd { margin: 0; }
-h2 { font-size: 15px; }
-.mail-heading span, dt, small { color: var(--text-2); font-size: 12px; }
+h2, h3, .mail-meta { margin: 0; }
+h2 { font-size: 13.5px; font-weight: 600; }
+.mail-heading span, small { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
 .mail-list { max-height: 340px; }
-.mail-item { display: grid; min-width: 0; gap: 7px; padding: 10px 2px; overflow-wrap: anywhere; }
+.mail-item { display: grid; min-width: 0; gap: 6px; padding: 9px 2px; overflow-wrap: anywhere; }
 .mail-item + .mail-item, .mail-link + .mail-link { border-top: 1px solid var(--line); }
 header { justify-content: space-between; align-items: baseline; }
-h3 { font-size: 14px; line-height: 1.45; }
-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 8px; font-size: 12px; }
-dd, h3, .link-target { user-select: text; }
-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 3px 8px; color: var(--text); font-size: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-chip); }
-button:hover:enabled { background: var(--hover); border-color: var(--line-strong); }
+h3 { font-size: 13px; line-height: 1.4; font-weight: 600; }
+.mail-meta { display: flex; flex-wrap: wrap; gap: 4px; font-size: 11.5px; color: var(--text-3); user-select: text; }
+h3, .link-target { user-select: text; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 3px 9px; color: var(--text-2); font-size: 11.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-chip); transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
+button:hover:enabled { background: var(--hover); border-color: var(--line-strong); color: var(--text); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 button:disabled { cursor: wait; }
-button.dismiss { flex: none; color: var(--text-2); background: transparent; border-color: transparent; }
-.code { justify-self: start; min-height: 34px; gap: 7px; }
-.code strong { font: 650 16px/1.2 var(--font-mono); letter-spacing: .08em; }
-button.copied { color: var(--text); border-color: var(--accent); background: var(--accent-weak); }
-.mail-link { flex-wrap: wrap; padding-top: 6px; }
-.link-target { flex: 1 1 10em; min-width: 0; font-size: 13px; }
+button.dismiss { flex: none; min-height: 22px; padding: 2px 6px; color: var(--text-3); font-size: 11px; background: transparent; border-color: transparent; }
+button.dismiss:hover:enabled { color: var(--text); }
+.code { justify-self: start; min-height: 32px; gap: 7px; color: var(--accent); background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); font-weight: 550; }
+.code:hover:enabled { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.code strong { font: 650 15px/1.2 var(--font-mono); letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+button.copied { color: var(--accent-text); border-color: var(--accent); background: var(--accent); }
+.mail-link { flex-wrap: wrap; padding-top: 5px; }
+.link-target { flex: 1 1 10em; min-width: 0; font-size: 12.5px; }
 .link-target strong { font-weight: 550; }
 small { display: block; }
 .link-actions { gap: 4px; }

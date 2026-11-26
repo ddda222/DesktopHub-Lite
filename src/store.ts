@@ -63,7 +63,7 @@ import type {
   TranslationSettings
 } from '@/lib/desktop/types'
 
-export type PanelName = 'clipboard' | 'translation' | 'files' | 'audio' | 'category' | 'overflow' | null
+export type PanelName = 'clipboard' | 'translation' | 'files' | 'audio' | 'pack' | 'category' | 'overflow' | null
 export type { SettingsSection } from '@/lib/desktop/desktop'
 
 export const state = reactive({
@@ -307,7 +307,7 @@ let lastSettingsRequest = 0
 function applyUiState(ui: UiState): void {
   state.ui.islandExpanded = ui.islandExpanded
   state.ui.islandAnchor = ui.islandAnchor
-  state.ui.islandPage = ['applications', 'clipboard', 'translation', 'files', 'audio'].includes(ui.islandPage) ? ui.islandPage : 'applications'
+  state.ui.islandPage = ['applications', 'clipboard', 'translation', 'files', 'audio', 'pack'].includes(ui.islandPage) ? ui.islandPage : 'applications'
   state.ui.islandHoverMs = ui.islandHoverMs
   state.ui.islandLeaveMs = ui.islandLeaveMs
   state.ui.islandReducedMotion = ui.islandReducedMotion
@@ -323,7 +323,7 @@ function applyUiState(ui: UiState): void {
   state.ui.wechatStatus = ui.wechatStatus
   state.ui.wechatAttention = ui.wechatAttention
   state.ui.wechatEvent = ui.wechatEvent
-  state.ui.panel = ['clipboard', 'translation', 'files', 'audio', 'category', 'overflow'].includes(ui.panel ?? '') ? ui.panel : null
+  state.ui.panel = ['clipboard', 'translation', 'files', 'audio', 'pack', 'category', 'overflow'].includes(ui.panel ?? '') ? ui.panel : null
   state.ui.settingsOpen = ui.settingsOpen
   if (ui.settingsOpen && ui.settingsRequest && ui.settingsRequest[0] > lastSettingsRequest) {
     lastSettingsRequest = ui.settingsRequest[0]

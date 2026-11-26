@@ -44,6 +44,7 @@ function start(cue: IslandCue | null): void {
   observer.observe(surface)
 
   const motes = createMotes(cue.kind, low)
+  const particleColor = getComputedStyle(surface).getPropertyValue('--particle-color').trim()
   const started = performance.now()
   let previous = started
   let pointer: FlowPointer | null = null
@@ -67,7 +68,6 @@ function start(cue: IslandCue | null): void {
         pointer = { x: event.clientX - box.left, y: event.clientY - box.top, pressed: Boolean(event.buttons & 1) }
         event = null
       }
-      const particleColor = getComputedStyle(surface!).getPropertyValue('--particle-color').trim()
       context!.setTransform(bufferWidth / width, 0, 0, density, 0, 0)
       paintFlow(context!, motes, cue!.kind, Math.max(0, progress), width, Math.min(.05, (now - previous) / 1000), pointer, props.dark, particleColor, props.motion)
       previous = now

@@ -171,10 +171,38 @@ watch(() => state.ui.settingsOpen, open => {
           @click="appearance.showAppNames = !appearance.showAppNames; if (!isDesktop) state.ui.islandAppearance.showAppNames = appearance.showAppNames"
         ><span class="switch-knob" aria-hidden="true" /></button>
       </div>
-      <label class="check-row"><span><strong>光轨舱门</strong><small>沿边缘巡光，展开时向两侧分流。正文保持实底。</small></span><input v-model="appearance.webgl" type="checkbox" /></label>
-      <label class="check-row"><span><strong>减少动画</strong><small>停用动态光效，保留清晰边框。</small></span><input v-model="reducedMotion" type="checkbox" /></label>
-      <label class="check-row"><span><strong>最大化或全屏时收为细线</strong><small>鼠标悬停驻留或点击展开，凑巧划过不触发，移开后收回。</small></span><input v-model="appearance.avoidFullscreen" type="checkbox" /></label>
-      <label class="check-row"><span><strong>在截图和屏幕共享中隐藏</strong><small>仅隐藏灵动岛，本机屏幕仍可见。共享前请实测。</small></span><input v-model="appearance.hideFromCapture" type="checkbox" :disabled="saving" aria-describedby="capture-scope" /></label>
+      <label class="set-row switch-row">
+        <span class="set-text">
+          <span class="set-label">光轨舱门</span>
+          <span class="set-desc">沿边缘巡光，展开时向两侧分流，正文保持实底。</span>
+        </span>
+        <input v-model="appearance.webgl" class="sr-only" type="checkbox" />
+        <span class="switch" :class="{ 'is-on': appearance.webgl }" aria-hidden="true"><span class="switch-knob" /></span>
+      </label>
+      <label class="set-row switch-row">
+        <span class="set-text">
+          <span class="set-label">减少动画</span>
+          <span class="set-desc">停用动态光效，保留清晰边框。</span>
+        </span>
+        <input v-model="reducedMotion" class="sr-only" type="checkbox" />
+        <span class="switch" :class="{ 'is-on': reducedMotion }" aria-hidden="true"><span class="switch-knob" /></span>
+      </label>
+      <label class="set-row switch-row">
+        <span class="set-text">
+          <span class="set-label">最大化或全屏时收为细线</span>
+          <span class="set-desc">悬停驻留或点击展开，移开后自动收回。</span>
+        </span>
+        <input v-model="appearance.avoidFullscreen" class="sr-only" type="checkbox" />
+        <span class="switch" :class="{ 'is-on': appearance.avoidFullscreen }" aria-hidden="true"><span class="switch-knob" /></span>
+      </label>
+      <label class="set-row switch-row">
+        <span class="set-text">
+          <span class="set-label">在截图和屏幕共享中隐藏</span>
+          <span class="set-desc">仅隐藏灵动岛，本机屏幕仍可见，共享前请实测。</span>
+        </span>
+        <input v-model="appearance.hideFromCapture" class="sr-only" type="checkbox" :disabled="saving" aria-describedby="capture-scope" />
+        <span class="switch" :class="{ 'is-on': appearance.hideFromCapture }" aria-hidden="true"><span class="switch-knob" /></span>
+      </label>
     </div>
     <p v-if="appearance.hideFromCapture" class="inline-feedback" role="status">远程操作时，你自己也可能看不到灵动岛。可从托盘打开设置，取消勾选并应用以恢复。</p>
     <p v-if="state.ui.islandCaptureError" class="inline-feedback error" role="alert">{{ state.ui.islandCaptureError }}。灵动岛已暂时隐藏，请重试应用设置，或关闭隐藏选项后应用。</p>
@@ -184,7 +212,14 @@ watch(() => state.ui.settingsOpen, open => {
         <label class="field"><span class="field-label">展开延时（毫秒）</span><input v-model.number="hoverMs" class="control" type="number" min="100" max="2000" /></label>
         <label class="field"><span class="field-label">收起延时（毫秒）</span><input v-model.number="leaveMs" class="control" type="number" min="100" max="4000" /></label>
       </div>
-      <label class="check-row"><span><strong>下次启动时检查更新</strong><small>不自动下载或重启，点击「应用设置」后生效。</small></span><input v-model="appearance.autoCheckUpdates" type="checkbox" /></label>
+      <label class="set-row switch-row">
+        <span class="set-text">
+          <span class="set-label">下次启动时检查更新</span>
+          <span class="set-desc">不自动下载或重启，点击「应用设置」后生效。</span>
+        </span>
+        <input v-model="appearance.autoCheckUpdates" class="sr-only" type="checkbox" />
+        <span class="switch" :class="{ 'is-on': appearance.autoCheckUpdates }" aria-hidden="true"><span class="switch-knob" /></span>
+      </label>
       <p id="capture-scope" class="hint">捕获隐藏仅作用于胶囊、细线和展开面板；设置、独立翻译和钉图窗口仍可见。依赖 Windows 10 2004 及以上的支持，不保证所有采集方式生效。</p>
       <p class="hint">边缘光效使用 WebGL；系统减少动画或高对比度时停用光效。浅深色主题均保持正文不透明。</p>
       <p v-if="isDesktop" class="hint">当前已应用：{{ state.ui.islandAppearance.hideFromCapture ? '隐藏灵动岛' : '允许捕获灵动岛' }}</p>
@@ -218,12 +253,7 @@ watch(() => state.ui.settingsOpen, open => {
 .telemetry-config { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .telemetry-hint { margin: 2px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.feature-options { margin-top: 16px; }
-.check-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
-.check-row > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.check-row strong { font-size: 14px; font-weight: 500; }
-.check-row small { font-size: 12px; color: var(--text-2); }
-.check-row input { flex: none; width: 18px; height: 18px; accent-color: var(--text); margin: 0; cursor: pointer; }
+.feature-options { margin-top: 14px; }
 .size-slider {
   appearance: none; -webkit-appearance: none;
   width: 100%; min-width: 0; height: 36px; margin: 0; background: transparent; accent-color: var(--text); cursor: pointer;

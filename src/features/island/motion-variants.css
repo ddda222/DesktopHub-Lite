@@ -1,176 +1,117 @@
-/* 外壳负责裁切。工具栏和正文保持展开时的排版，沿各自的过渡衔接到胶囊。 */
+/* 外壳负责裁切。工具栏和正文保持展开时的排版，以强缓出曲线顺滑衔接到胶囊。 */
 .island-chrome,
 .island-content {
   opacity: 0;
   transform-origin: 50% 0;
-  transition: opacity calc(var(--geometry-time) * .38) var(--ease-out),
-              transform calc(var(--geometry-time) * .68) var(--content-ease, var(--ease-out));
+  transition: opacity calc(var(--geometry-time) * .42) var(--ease-out),
+              transform calc(var(--geometry-time) * .72) var(--content-ease, var(--ease-out));
 }
 .island-chrome { transform: translateY(-4px); }
-.island:not(.expanded) .island-chrome { transition-delay: calc(var(--geometry-time) * .06); }
-.island-content { transform: var(--folded-content, translateY(-6px) scale(.975)); }
+.island-content { transform: var(--folded-content, translateY(-6px) scale(.982)); }
 .island.expanded .island-chrome,
 .island.expanded .island-content {
   opacity: 1;
   transform: none;
 }
-.island.expanded .island-chrome { transition-delay: var(--toolbar-delay, 10ms); }
-.island.expanded .island-content { transition-delay: var(--body-delay, 26ms); }
+.island.expanded .island-chrome { transition-delay: var(--toolbar-delay, 8ms); }
+.island.expanded .island-content { transition-delay: var(--body-delay, 16ms); }
 
-/* 已展开状态下切换功能页（应用 / 剪贴板 / 翻译等）：高度立即响应，不等待开合外壳的分段延时。 */
+/* 收起时内容立即让位（零延迟快退），避免残影与外壳边框相撞。 */
+.island:not(.expanded) .island-chrome,
+.island:not(.expanded) .island-content {
+  transition-delay: 0ms;
+  transition-duration: 85ms, 105ms;
+}
+
+/* 已展开状态下切换功能页：高度立刻随外壳跟进，不叠加开合延时。 */
 .island-hit-area.expanded.page-switching,
 .island.expanded.page-switching {
-  --geometry-time: 190ms;
-  --height-ease: var(--ease-drawer);
+  --geometry-time: 145ms;
+  --height-ease: var(--ease-out);
 }
 .island-hit-area.motion-bounce.expanded.page-switching,
 .island.motion-bounce.expanded.page-switching {
-  --geometry-time: 220ms;
-  --height-ease: cubic-bezier(.22, 1.14, .36, 1);
-}
-.island-hit-area.motion-step.expanded.page-switching,
-.island.motion-step.expanded.page-switching {
-  --geometry-time: 160ms;
-  --height-ease: steps(4, jump-end);
+  --geometry-time: 180ms;
+  --height-ease: cubic-bezier(.22, 1.1, .36, 1);
 }
 .island-hit-area.motion-flicker.expanded.page-switching,
 .island.motion-flicker.expanded.page-switching {
-  --geometry-time: 130ms;
-  --height-ease: var(--ease-out);
+  --geometry-time: 105ms;
+  --height-ease: cubic-bezier(.2, 0, 0, 1);
 }
 .island-hit-area.reduced.expanded.page-switching,
 .island-hit-area.reduced .island.expanded.page-switching {
   --geometry-time: 0ms;
 }
 
-/* 柔和舒展：从胶囊中心舒展，收起干脆果断（非对称节奏）。 */
+/* 1. 流体灵动（glide，默认）：展开强缓出干脆利落，收起临界阻尼果断归位。 */
 .island-hit-area.motion-glide.expanded {
-  --width-ease: var(--ease-drawer);
-  --height-ease: cubic-bezier(.22, 1, .32, 1);
+  --width-ease: var(--ease-out);
+  --height-ease: var(--ease-out);
   --content-ease: var(--ease-out);
 }
 .island-hit-area.motion-glide:not(.expanded) {
   --width-ease: var(--ease-drawer);
   --height-ease: var(--ease-drawer);
 }
-
-/* 先宽后高：横向先到位并随即展开高度，避免早期滞留感；切页带方向模糊融合。 */
-.island-hit-area.motion-sweep.expanded {
-  --width-ease: linear(0, .54 14%, .89 28%, 1 42%, 1);
-  --height-ease: linear(0, .06 16%, .34 32%, .74 52%, .95 74%, 1);
-  --toolbar-delay: 36ms;
-  --body-delay: 64ms;
-}
-.island-hit-area.motion-sweep:not(.expanded) {
-  --width-ease: linear(0, .08 24%, .42 48%, .88 78%, 1);
-  --height-ease: var(--ease-drawer);
-}
-.motion-sweep .mode-selection {
+.motion-glide .mode-selection {
   transition-duration: 150ms;
   transition-timing-function: var(--ease-out);
 }
-.motion-sweep .island-pane-enter-active {
-  transition: opacity 145ms var(--ease-out), transform 165ms var(--ease-out), filter 145ms var(--ease-out);
+.motion-glide .island-pane-enter-active {
+  transition: opacity 115ms var(--ease-out), transform 130ms var(--ease-out);
 }
-.motion-sweep .island-pane-leave-active {
-  transition: opacity 95ms var(--ease-out), transform 110ms var(--ease-out), filter 95ms var(--ease-out);
+.motion-glide .island-pane-leave-active {
+  transition: opacity 75ms var(--ease-out), transform 85ms var(--ease-out);
 }
-.motion-sweep .island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 16px), 0, 0); filter: blur(1.5px); }
-.motion-sweep .island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -12px), 0, 0); filter: blur(1.5px); }
+.motion-glide .island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 6px), 0, 0); }
+.motion-glide .island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -4px), 0, 0); }
 
-/* 轻弹回落：展开含精致 3.2% 欠阻尼微弹，收起保持临界阻尼果断归位。 */
+/* 2. 轻弹物理（bounce）：展开含克制 2.8% 微弹，收起保持临界阻尼不反弹。 */
 .island-hit-area.motion-bounce.expanded {
-  --width-ease: var(--ease-drawer);
-  --height-ease: var(--ease-spring-soft);
-  --content-ease: cubic-bezier(.22, 1.18, .36, 1);
+  --width-ease: var(--ease-out);
+  --height-ease: linear(0, .42 13%, .84 26%, 1.028 45%, .994 67%, 1.003 84%, 1);
+  --content-ease: cubic-bezier(.22, 1.12, .36, 1);
 }
 .island-hit-area.motion-bounce:not(.expanded) {
   --width-ease: var(--ease-drawer);
   --height-ease: var(--ease-drawer);
-  --folded-content: translateY(-8px) scale(.97);
+  --folded-content: translateY(-7px) scale(.975);
 }
 .motion-bounce .mode-selection {
-  transition-duration: 210ms;
-  transition-timing-function: cubic-bezier(.28, 1.3, .48, 1);
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(.28, 1.24, .46, 1);
 }
 .motion-bounce .island-pane-enter-active {
-  transition: opacity 150ms var(--ease-out), transform 210ms cubic-bezier(.26, 1.24, .44, 1), filter 140ms var(--ease-out);
+  transition: opacity 125ms var(--ease-out), transform 155ms cubic-bezier(.24, 1.16, .42, 1);
 }
-.motion-bounce .island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 10px), 8px, 0) scale(.97); filter: blur(1.5px); }
-.motion-bounce .island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -8px), -5px, 0) scale(.985); filter: blur(1.5px); }
+.motion-bounce .island-pane-leave-active {
+  transition: opacity 80ms var(--ease-out), transform 90ms var(--ease-out);
+}
+.motion-bounce .island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 8px), 4px, 0) scale(.985); }
+.motion-bounce .island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -6px), -3px, 0) scale(.992); }
 
-/* 逐级开合：宽与高错开半拍进位，台阶落在真实边界上。 */
-.island-hit-area.motion-step {
-  --half-step: linear(0, 0 12.5%, .25 12.5%, .25 37.5%, .5 37.5%, .5 62.5%, .75 62.5%, .75 87.5%, 1 87.5%, 1);
-  --folded-content: translateY(-4px);
-}
-.island-hit-area.motion-step.expanded {
-  --width-ease: steps(4, jump-start);
-  --height-ease: var(--half-step);
-  --content-ease: steps(4, jump-end);
-}
-.island-hit-area.motion-step:not(.expanded) {
-  --width-ease: steps(4, jump-end);
-  --height-ease: var(--half-step);
-}
-.motion-step .mode-selection {
-  transition-duration: 180ms;
-  transition-timing-function: steps(4, end);
-}
-.motion-step .capsule-text,
-.motion-step .grip {
-  transition-timing-function: steps(3, end);
-}
-.motion-step .island-pane-enter-active {
-  transition: opacity 180ms steps(4, end), transform 180ms steps(4, end);
-}
-.motion-step .island-pane-leave-active {
-  transition: opacity 110ms steps(3, end), transform 110ms steps(3, end);
-}
-.motion-step .island-pane-enter-from { opacity: 0; transform: translateY(12px); }
-.motion-step .island-pane-leave-to { opacity: 0; transform: translateY(-8px); }
-
-/* 快速开合：四边同时到位，功能按钮在第一拍就可辨认。 */
+/* 3. 极速脆响（flicker）：面向高频操作，开合紧致零延迟，切页纯透明瞬切。 */
 .island-hit-area.motion-flicker {
   --toolbar-delay: 0ms;
   --body-delay: 0ms;
-  --folded-content: none;
-  --width-ease: var(--ease-out);
-  --height-ease: var(--ease-out);
+  --folded-content: translateY(-2px);
+  --width-ease: cubic-bezier(.2, 0, 0, 1);
+  --height-ease: cubic-bezier(.2, 0, 0, 1);
+  --content-ease: cubic-bezier(.2, 0, 0, 1);
 }
 .motion-flicker .mode-selection {
-  transition-duration: 145ms;
-  transition-timing-function: var(--ease-out);
+  transition-duration: 105ms;
+  transition-timing-function: cubic-bezier(.2, 0, 0, 1);
 }
 .motion-flicker .island-pane-enter-active {
-  transition: opacity 110ms var(--ease-out), transform 120ms var(--ease-out);
+  transition: opacity 70ms cubic-bezier(.2, 0, 0, 1);
 }
 .motion-flicker .island-pane-leave-active {
-  transition: opacity 80ms var(--ease-out), transform 80ms var(--ease-out);
+  transition: opacity 55ms cubic-bezier(.2, 0, 0, 1);
 }
-.motion-flicker .island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 6px), 2px, 0); }
-.motion-flicker .island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -4px), -2px, 0); }
-
-/* 垂直抽展：底边先向下打开，两侧随后展开；收起全程强缓出零滞后。 */
-.island-hit-area.motion-unroll {
-  --folded-content: translateY(-6px);
-  --toolbar-delay: 28ms;
-  --body-delay: 72ms;
+.motion-flicker .island-pane-enter-from,
+.motion-flicker .island-pane-leave-to {
+  opacity: 0;
+  transform: none;
 }
-.island-hit-area.motion-unroll.expanded {
-  --width-ease: cubic-bezier(.26, .72, .24, 1);
-  --height-ease: var(--ease-drawer);
-}
-.island-hit-area.motion-unroll:not(.expanded) {
-  --width-ease: var(--ease-out);
-  --height-ease: var(--ease-drawer);
-}
-.motion-unroll .mode-selection {
-  transition-duration: 185ms;
-  transition-timing-function: var(--ease-out);
-}
-.motion-unroll .island-pane-enter-active {
-  transition: opacity 160ms var(--ease-out), transform 175ms var(--ease-out), filter 150ms var(--ease-out);
-}
-.motion-unroll .island-pane-enter-from { opacity: 0; transform: translate3d(0, -10px, 0); filter: blur(1.5px); }
-.motion-unroll .island-pane-leave-to { opacity: 0; transform: translate3d(0, 6px, 0); filter: blur(1.5px); }

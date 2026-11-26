@@ -1,28 +1,70 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 
 export type IslandVariant = 'standard' | 'liquid' | 'telemetry' | 'mecha' | 'scroll' | 'pixel' | 'blueprint' | 'neon' | 'clay'
+
+const ROUND_VARIANTS = new Set<IslandVariant>(['standard', 'telemetry', 'liquid', 'neon', 'clay'])
 
 const props = withDefaults(defineProps<{
   width: number
   height: number
   shape: 'line' | 'compact' | 'expanded'
   variant?: IslandVariant
-}>(), { variant: 'standard' })
+  moving?: boolean
+}>(), { variant: 'standard', moving: false })
 
-// 外壳的宽和高可以分两拍到位。按此帧的实际尺寸绘制，圆角和线宽不会被拉扁。
+const suspendDuringMotion = computed(() => props.moving && ROUND_VARIANTS.has(props.variant))
+
+// 外壳的宽和高在动画期间对常规圆角主题交给 CSS GPU 图层，静止后再精确绘制饰线；异形主题按帧节流更新。
 const svg = ref<SVGSVGElement | null>(null)
 const drawnSize = shallowRef({ width: props.width, height: props.height })
 let resize: ResizeObserver | undefined
+let pendingWidth = props.width
+let pendingHeight = props.height
+let syncRaf = 0
+
+function flushSize(): void {
+  syncRaf = 0
+  if (props.moving && ROUND_VARIANTS.has(props.variant)) return
+  const threshold = props.moving ? 2 : 0.5
+  if (
+    Math.abs(pendingWidth - drawnSize.value.width) >= threshold ||
+    Math.abs(pendingHeight - drawnSize.value.height) >= threshold
+  ) {
+    drawnSize.value = { width: pendingWidth, height: pendingHeight }
+  }
+}
+
+watch(
+  () => props.moving,
+  isMoving => {
+    if (!isMoving && svg.value) {
+      const box = svg.value.getBoundingClientRect()
+      if (box.width > 0 && box.height > 0) {
+        pendingWidth = box.width
+        pendingHeight = box.height
+        drawnSize.value = { width: box.width, height: box.height }
+      }
+    }
+  },
+  { flush: 'post' }
+)
+
 onMounted(() => {
   if (!svg.value) return
   resize = new ResizeObserver(([entry]) => {
-    const { width, height } = entry.contentRect
-    drawnSize.value = { width, height }
+    if (!entry) return
+    pendingWidth = entry.contentRect.width
+    pendingHeight = entry.contentRect.height
+    if (props.moving && ROUND_VARIANTS.has(props.variant)) return
+    if (!syncRaf) syncRaf = requestAnimationFrame(flushSize)
   })
   resize.observe(svg.value)
 })
-onBeforeUnmount(() => resize?.disconnect())
+onBeforeUnmount(() => {
+  resize?.disconnect()
+  cancelAnimationFrame(syncRaf)
+})
 
 const uid = useId().replace(/[^a-z0-9-]/gi, '')
 const gradient = 'island-hem-' + uid
@@ -160,7 +202,7 @@ const contours = computed(() => {
 </script>
 
 <template>
-  <svg ref="svg" class="liquid-skin" :class="`variant-${props.variant}`"
+  <svg ref="svg" class="liquid-skin" :class="[`variant-${props.variant}`, { 'is-suspended': suspendDuringMotion }]"
     :viewBox="`0 0 ${drawnSize.width} ${drawnSize.height}`" preserveAspectRatio="none" aria-hidden="true">
     <defs>
       <linearGradient :id="gradient">
@@ -248,6 +290,7 @@ const contours = computed(() => {
 
 <style scoped>
 .liquid-skin { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
+.liquid-skin.is-suspended { visibility: hidden; }
 .skin { fill:var(--surface); stroke:var(--island-rim, var(--island-outline)); stroke-width:1px; }
 .variant-mecha .skin { stroke-width:1.4px; }
 .variant-scroll .skin { stroke-width:1.5px; }

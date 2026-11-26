@@ -114,22 +114,21 @@ onBeforeUnmount(() => {
       @pin="previewImage(shelf.previewItem)" @retry="openShelfPreview(shelf.previewItem)" />
     <template v-else>
     <div class="shelf-tools">
-      <span>{{ dragOver ? '松开，放入中转' : `${shelf.entries.length} 项暂存` }}</span>
+      <span class="shelf-count">{{ dragOver ? '松开，放入中转' : `${shelf.entries.length} 项暂存` }}</span>
       <div>
         <button ref="addButton" type="button" :disabled="shelf.busy" @click="pick">添加文件</button>
         <button v-if="selected.length" type="button" :disabled="shelf.busy" @click="remove(selected)">移出所选</button>
       </div>
     </div>
-    <p class="shelf-help">点击或空格预览 · 按住拖出 · 移出可撤销</p>
     <div v-if="shelf.undoCount" class="shelf-undo">
       <span role="status">上次移出 {{ shelf.undoCount }} 项，原文件保留</span>
       <button class="undo-button" type="button" :disabled="shelf.busy" title="撤销上次移出（Ctrl+Z）" @click="undo">撤销</button>
     </div>
     <p v-else-if="shelf.message" class="shelf-message" role="status">{{ shelf.message }}</p>
     <div v-if="!shelf.entries.length" class="shelf-empty">
-      <Icon name="folder" :size="28" />
+      <Icon name="folder" :size="26" />
       <span>{{ dragOver ? '松开即可暂存' : '把文件或文件夹拖到这里' }}</span>
-      <small>重启后仍保留，移出不会删除原文件</small>
+      <small>单击预览 · 按住拖出 · 重启保留且移出不删原文件</small>
     </div>
     <ul v-else class="shelf-list">
       <li v-for="item in shelf.entries" :key="item.id" :class="{ missing: !item.available }">
@@ -151,29 +150,32 @@ onBeforeUnmount(() => {
 <style scoped>
 .file-shelf { min-height: 148px; color: var(--text); border-radius: 18px; padding: 4px 0; }
 .file-shelf.receiving { background: var(--accent-weak); outline: 1px dashed var(--accent); outline-offset: -1px; }
-.shelf-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.shelf-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.shelf-count { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .shelf-tools > div { display: flex; gap: 6px; }
-.shelf-tools button { padding: 6px 10px; min-height: 30px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface-2); transition: background 120ms ease, border-color 120ms ease; }
+.shelf-tools button { padding: 4px 10px; min-height: 26px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); font-size: 11.5px; transition: background 120ms ease, border-color 120ms ease; }
 .shelf-tools button:hover:not(:disabled) { border-color: var(--line-strong); }
-.shelf-help, .shelf-message, .shelf-error { font-size: 12px; line-height: 1.6; margin: 8px 0; color: var(--text-2); }
+.shelf-message, .shelf-error { font-size: 11.5px; line-height: 1.5; margin: 6px 0; color: var(--text-2); }
 .shelf-error { color: var(--danger, #fa8e8e); }
-.shelf-undo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; padding: 6px 8px 6px 12px; border-radius: 12px; border: 1px solid var(--accent-weak); background: var(--accent-weak); font-size: 12px; }
+.shelf-undo { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; padding: 5px 8px 5px 10px; border-radius: 9px; border: 1px solid var(--accent-weak); background: var(--accent-weak); font-size: 11.5px; }
 .shelf-undo span { color: var(--text); }
-.undo-button { flex: none; font-weight: 600; color: var(--accent); min-height: 30px; padding: 5px 10px; border-radius: 8px; }
-.shelf-empty { min-height: 120px; display: flex; flex-direction: column; gap: 9px; align-items: center; justify-content: center; padding: 16px 8px; color: var(--text-2); font-size: 13px; text-align: center; }
-.shelf-empty small { font-size: 12px; color: var(--text-3); }
-.shelf-list { margin: 10px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; max-height: 250px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
-.shelf-list li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; min-width: 0; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); transition: background 120ms ease, border-color 120ms ease; }
-.shelf-list li:hover { background: var(--surface-3); border-color: var(--line-strong); }
+.undo-button { flex: none; font-weight: 600; color: var(--accent); min-height: 26px; padding: 3px 8px; border-radius: 7px; }
+.shelf-empty { min-height: 112px; display: flex; flex-direction: column; gap: 7px; align-items: center; justify-content: center; padding: 14px 8px; color: var(--text-2); font-size: 12.5px; text-align: center; }
+.shelf-empty small { font-size: 11px; color: var(--text-3); }
+.shelf-list { margin: 4px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0; max-height: 268px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+.shelf-list li { display: flex; align-items: center; gap: 6px; padding: 5px 6px; min-width: 0; border-radius: 7px; border-top: 1px solid var(--line); transition: background 120ms ease; }
+.shelf-list li:first-child { border-top-color: transparent; }
+.shelf-list li:hover { background: var(--hover); }
 .shelf-list input { accent-color: var(--accent); flex: none; }
-.file-main { display: flex; align-items: center; flex: 1; min-width: 0; gap: 9px; text-align: left; cursor: grab; padding: 5px 0; }
+.file-main { display: flex; align-items: center; flex: 1; min-width: 0; gap: 8px; text-align: left; cursor: grab; padding: 3px 0; }
 .file-main:active { cursor: grabbing; }
 .file-main svg { flex: none; color: var(--accent); }
 .file-main > span { display: block; min-width: 0; }
 .file-main strong, .file-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-main strong { font-size: 13px; font-weight: 500; }
-.file-main small { font-size: 11px; color: var(--text-3); margin-top: 3px; }
-.row-action { display: grid; place-items: center; width: 28px; height: 30px; border-radius: 10px; flex: none; }
+.file-main strong { font-size: 12.5px; font-weight: 550; color: var(--text); }
+.file-main small { font-size: 10.5px; color: var(--text-3); margin-top: 2px; }
+.row-action { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; flex: none; color: var(--text-2); opacity: 0.42; transition: opacity 120ms ease, background 120ms ease, color 120ms ease; }
+.shelf-list li:hover .row-action, .shelf-list li:focus-within .row-action { opacity: 1; }
 button:hover { background: var(--hover); }
 button:disabled { color: var(--text-3); cursor: default; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

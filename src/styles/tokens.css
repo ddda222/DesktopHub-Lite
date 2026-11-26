@@ -22,12 +22,12 @@
   --r-tile: 10px;
   --r-chip: 8px;
 
-  --dur-fast: 120ms;
-  --dur: 170ms;
+  --dur-fast: 95ms;
+  --dur: 145ms;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-spring-soft: linear(0, 0.38 12%, 0.78 24%, 1.032 42%, 0.992 64%, 1.004 82%, 1);
+  --ease-spring-soft: linear(0, 0.42 13%, 0.84 26%, 1.028 45%, 0.994 67%, 1.003 84%, 1);
   --ease: var(--ease-out);
 
   --z-bar: 30;

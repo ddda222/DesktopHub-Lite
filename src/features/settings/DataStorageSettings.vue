@@ -482,7 +482,7 @@ watch(() => state.ui.settingsOpen, open => {
       <span class="save-mode">{{ modeLabel }}</span>
     </h4>
     <p class="hint">
-      新版默认把数据统一保存在跨版本共享目录中，以后更新替换或解压新包都自动继承同一份配置、剪贴板、短语和邮箱绑定；API 密钥与邮箱授权码保存在系统凭据管理器中，也会自动延续。
+      新版默认把数据统一保存在跨版本共享目录，更新替换或解压新包自动继承配置与记录（凭据管理器密钥一并延续）。
     </p>
     <p v-if="!isDesktop" class="hint">网页演示仅展示模拟目录与迁移预览，不会读写本机文件。</p>
 
@@ -502,14 +502,9 @@ watch(() => state.ui.settingsOpen, open => {
         </button>
       </div>
 
-      <div class="summary-pills" aria-label="当前数据统计">
-        <span class="tag">应用 {{ status.currentSummary.appCount }}</span>
-        <span class="tag">剪贴板 {{ status.currentSummary.clipCount }}（图 {{ status.currentSummary.clipImageCount }}）</span>
-        <span class="tag">常用短语 {{ status.currentSummary.snippetCount }}</span>
-        <span class="tag">邮箱账号 {{ status.currentSummary.mailAccountCount }}</span>
-        <span class="tag">文件中转 {{ status.currentSummary.shelfCount }}</span>
-        <span class="tag">文件共 {{ status.currentSummary.totalFiles }} 个 · {{ formatBytes(status.currentSummary.totalBytes) }}</span>
-      </div>
+      <p class="summary-line" aria-label="当前数据统计">
+        应用 <b>{{ status.currentSummary.appCount }}</b> · 剪贴板 <b>{{ status.currentSummary.clipCount }}</b>（图 {{ status.currentSummary.clipImageCount }}）· 短语 <b>{{ status.currentSummary.snippetCount }}</b> · 邮箱 <b>{{ status.currentSummary.mailAccountCount }}</b> · 中转 <b>{{ status.currentSummary.shelfCount }}</b> · 共 {{ status.currentSummary.totalFiles }} 个文件（{{ formatBytes(status.currentSummary.totalBytes) }}）
+      </p>
 
       <div v-if="status.autoMigratedFrom" class="auto-migrated-banner" role="status">
         <strong>本次启动已自动迁入旧版数据（共 {{ status.autoMigratedFiles ?? 0 }} 个文件）</strong>
@@ -582,14 +577,13 @@ watch(() => state.ui.settingsOpen, open => {
     <div v-if="switchPreview" ref="previewBox" class="migration-preview" role="region" aria-label="切换数据目录预览">
       <h5 ref="previewHeading" tabindex="-1">确认切换共享数据目录</h5>
       <p class="hint">目标目录：<code>{{ switchPreview.targetDir }}</code></p>
-      <div class="summary-pills">
-        <span class="tag">当前目录：应用 {{ switchPreview.currentSummary.appCount }} · 剪贴板 {{ switchPreview.currentSummary.clipCount }} · 短语 {{ switchPreview.currentSummary.snippetCount }}</span>
-        <span class="tag">
-          {{ switchPreview.targetHasData
-            ? `目标已有数据：应用 ${switchPreview.targetSummary.appCount} · 剪贴板 ${switchPreview.targetSummary.clipCount} · 短语 ${switchPreview.targetSummary.snippetCount}`
-            : '目标目录目前为空' }}
-        </span>
-      </div>
+      <p class="summary-line">
+        当前目录：应用 <b>{{ switchPreview.currentSummary.appCount }}</b> · 剪贴板 <b>{{ switchPreview.currentSummary.clipCount }}</b> · 短语 <b>{{ switchPreview.currentSummary.snippetCount }}</b>
+        <br />
+        {{ switchPreview.targetHasData
+          ? `目标已有数据：应用 ${switchPreview.targetSummary.appCount} · 剪贴板 ${switchPreview.targetSummary.clipCount} · 短语 ${switchPreview.targetSummary.snippetCount}`
+          : '目标目录目前为空' }}
+      </p>
       <p v-if="switchHasCorruption" class="hint error" role="alert">
         检测到损坏的配置文件（{{ [...switchPreview.currentSummary.corruptedFiles, ...switchPreview.targetSummary.corruptedFiles].join('、') }}），已禁止盲目覆盖或切换。
       </p>
@@ -627,16 +621,9 @@ watch(() => state.ui.settingsOpen, open => {
     <div v-if="importPreview" ref="previewBox" class="migration-preview" role="region" aria-label="旧版数据导入预览">
       <h5 ref="previewHeading" tabindex="-1">确认从旧版目录完整导入</h5>
       <p class="hint">来源目录：<code>{{ importPreview.sourceDir }}</code></p>
-      <div class="summary-pills">
-        <span class="tag">应用 {{ importPreview.sourceSummary.appCount }}（分类 {{ importPreview.sourceSummary.categoryCount }}）</span>
-        <span class="tag">剪贴板 {{ importPreview.sourceSummary.clipCount }}（图片 {{ importPreview.sourceSummary.clipImageCount }}）</span>
-        <span class="tag">常用短语 {{ importPreview.sourceSummary.snippetCount }}</span>
-        <span class="tag">邮箱账号 {{ importPreview.sourceSummary.mailAccountCount }}</span>
-        <span class="tag">文件中转 {{ importPreview.sourceSummary.shelfCount }}</span>
-        <span class="tag">调音台配置 {{ importPreview.sourceSummary.audioProfileCount }}</span>
-        <span class="tag">翻译模型：{{ importPreview.sourceSummary.hasTranslationConfig ? '有' : '无' }}</span>
-        <span class="tag">外观与快捷键：{{ importPreview.sourceSummary.hasUiPreferences || importPreview.sourceSummary.hasShortcuts ? '有' : '无' }}</span>
-      </div>
+      <p class="summary-line">
+        应用 <b>{{ importPreview.sourceSummary.appCount }}</b>（分类 {{ importPreview.sourceSummary.categoryCount }}）· 剪贴板 <b>{{ importPreview.sourceSummary.clipCount }}</b>（图 {{ importPreview.sourceSummary.clipImageCount }}）· 短语 <b>{{ importPreview.sourceSummary.snippetCount }}</b> · 邮箱 <b>{{ importPreview.sourceSummary.mailAccountCount }}</b> · 中转 <b>{{ importPreview.sourceSummary.shelfCount }}</b> · 调音台 {{ importPreview.sourceSummary.audioProfileCount }} · 翻译模型：{{ importPreview.sourceSummary.hasTranslationConfig ? '有' : '无' }} · 外观与快捷键：{{ importPreview.sourceSummary.hasUiPreferences || importPreview.sourceSummary.hasShortcuts ? '有' : '无' }}
+      </p>
       <p v-if="importHasCorruption" class="hint error" role="alert">
         来源目录存在损坏的配置文件（{{ importPreview.sourceSummary.corruptedFiles.join('、') }}），已停止导入以避免污染当前数据。
       </p>
@@ -748,11 +735,20 @@ watch(() => state.ui.settingsOpen, open => {
   color: var(--text);
   overflow-wrap: anywhere;
 }
-.summary-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
+.summary-line {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.summary-line b {
+  color: var(--text);
+  font-weight: 600;
 }
 .upgrade-banner,
 .auto-migrated-banner {
