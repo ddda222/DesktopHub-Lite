@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { version as appVersion } from '../../../package.json'
 import Icon from '@/components/Icon.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
 import DesktopFeatures from './DesktopFeatures.vue'
 import AppManagement from './AppManagement.vue'
 import MixerSettings from './MixerSettings.vue'
@@ -89,7 +90,81 @@ const currentSectionLabel = computed(
 function pickSection(id: SettingsSection): void {
   state.ui.settingsSection = id
 }
-watch(() => state.ui.settingsSection, () => { void nextTick(() => contentEl.value?.scrollTo({ top: 0 })) })
+const navEl = ref<HTMLElement | null>(null)
+const navHorizontal = ref(false)
+const navWormStyle = ref<Record<string, string>>({ opacity: '0' })
+const panelSwitching = ref(false)
+let panelSwitchTimer: number | null = null
+let navWormObserver: ResizeObserver | null = null
+let navWormRaf = 0
+let lastWormStart = -1
+
+function syncNavWorm(animate = true): void {
+  const nav = navEl.value
+  const active = nav?.querySelector<HTMLElement>('.nav-item.is-active')
+  if (!nav || !active) {
+    navWormStyle.value = { opacity: '0' }
+    return
+  }
+  const horizontal = nav.clientWidth > 0 && window.getComputedStyle(nav).flexDirection === 'row'
+  navHorizontal.value = horizontal
+  if (horizontal) {
+    const start = active.offsetLeft
+    const end = Math.max(0, nav.clientWidth - (active.offsetLeft + active.offsetWidth))
+    const forward = lastWormStart >= 0 && start >= lastWormStart
+    lastWormStart = start
+    navWormStyle.value = {
+      opacity: '1',
+      '--worm-left': `${start + 6}px`,
+      '--worm-right': `${end + 6}px`,
+      '--worm-start-delay': animate && forward ? 'var(--worm-lag, 45ms)' : '0ms',
+      '--worm-end-delay': animate && !forward ? 'var(--worm-lag, 45ms)' : '0ms'
+    }
+    return
+  }
+  const top = active.offsetTop
+  const bottom = Math.max(0, nav.clientHeight - (active.offsetTop + active.offsetHeight))
+  const movingDown = lastWormStart >= 0 && top >= lastWormStart
+  lastWormStart = top
+  navWormStyle.value = {
+    opacity: '1',
+    '--worm-top': `${top + 7}px`,
+    '--worm-bottom': `${bottom + 7}px`,
+    '--worm-top-delay': animate && movingDown ? 'var(--worm-lag, 45ms)' : '0ms',
+    '--worm-bottom-delay': animate && !movingDown ? 'var(--worm-lag, 45ms)' : '0ms'
+  }
+}
+
+watch(() => state.ui.settingsSection, (next, prev) => {
+  if (prev && next !== prev) {
+    panelSwitching.value = true
+    if (panelSwitchTimer !== null) window.clearTimeout(panelSwitchTimer)
+    panelSwitchTimer = window.setTimeout(() => { panelSwitching.value = false; panelSwitchTimer = null }, 220)
+  }
+  void nextTick(() => {
+    contentEl.value?.scrollTo({ top: 0 })
+    syncNavWorm(true)
+  })
+})
+watch(() => [state.settings.theme, state.ui.settingsOpen], () => {
+  void nextTick(() => {
+    cancelAnimationFrame(navWormRaf)
+    navWormRaf = requestAnimationFrame(() => syncNavWorm(false))
+  })
+})
+
+/** 给手动点击或键盘触发的开关打标记，避免初始渲染或切换标签时误播拉伸关键帧。 */
+function markSwitchTouched(event: Event): void {
+  const target = event.target as HTMLElement | null
+  const row = target?.closest('.switch, .switch-row')
+  if (!row) return
+  const switchEl = row.matches('.switch') ? (row as HTMLElement) : row.querySelector<HTMLElement>('.switch')
+  if (switchEl) switchEl.dataset.touched = '1'
+}
+function markSwitchKeyTouched(event: KeyboardEvent): void {
+  if (event.key !== ' ' && event.key !== 'Enter') return
+  markSwitchTouched(event)
+}
 
 /* ---------- 剪贴板 ---------- */
 
@@ -194,6 +269,8 @@ const translationSignature = () => JSON.stringify([translationDraft.value.provid
 const savedTranslation = ref(translationSignature())
 const translationDirty = computed(() => translationSignature() !== savedTranslation.value)
 const translationBusy = ref(false)
+const translationSaved = ref(false)
+let translationSavedTimer: number | null = null
 const translationFeedback = ref('')
 const translationError = ref(false)
 const secretSaved = computed(() => translationDraft.value.providerId === state.translationSettings.providerId && state.translationSettings.hasSecret)
@@ -203,12 +280,18 @@ watch(() => state.translationSettings, value => {
 async function saveTranslation(): Promise<void> {
   if (translationBusy.value || !isDesktop) return
   translationBusy.value = true
+  translationSaved.value = false
   const submitted = translationSignature()
   try {
     const ok = await saveTranslationSettings(translationDraft.value)
     translationError.value = !ok
     translationFeedback.value = ok ? '模型设置已保存' : '保存失败，请检查接口地址和模型后重试。'
-    if (ok) savedTranslation.value = submitted
+    if (ok) {
+      savedTranslation.value = submitted
+      translationSaved.value = true
+      if (translationSavedTimer !== null) window.clearTimeout(translationSavedTimer)
+      translationSavedTimer = window.setTimeout(() => { translationSaved.value = false; translationSavedTimer = null }, 1200)
+    }
   } finally { translationBusy.value = false }
 }
 
@@ -268,6 +351,8 @@ const shortcutSignature = () => JSON.stringify([shortcutDraft.value.bar, shortcu
 const savedShortcuts = ref(shortcutSignature())
 const shortcutsDirty = computed(() => shortcutSignature() !== savedShortcuts.value)
 const shortcutsBusy = ref(false)
+const shortcutsSaved = ref(false)
+let shortcutsSavedTimer: number | null = null
 const shortcutsFeedback = ref('')
 const shortcutsError = ref(false)
 watch(() => state.shortcuts, value => {
@@ -276,12 +361,18 @@ watch(() => state.shortcuts, value => {
 async function applyShortcuts(): Promise<void> {
   if (shortcutsBusy.value || !isDesktop) return
   shortcutsBusy.value = true
+  shortcutsSaved.value = false
   const submitted = shortcutSignature()
   try {
     const ok = await saveShortcuts(shortcutDraft.value)
     shortcutsError.value = !ok
     shortcutsFeedback.value = ok ? '快捷键已保存' : '保存或注册失败，请查看下方提示后重试。'
-    if (ok) savedShortcuts.value = submitted
+    if (ok) {
+      savedShortcuts.value = submitted
+      shortcutsSaved.value = true
+      if (shortcutsSavedTimer !== null) window.clearTimeout(shortcutsSavedTimer)
+      shortcutsSavedTimer = window.setTimeout(() => { shortcutsSaved.value = false; shortcutsSavedTimer = null }, 1200)
+    }
   } finally { shortcutsBusy.value = false }
 }
 
@@ -304,8 +395,21 @@ function handleKeys(event: KeyboardEvent): void {
 onMounted(() => {
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   windowEl.value?.querySelector<HTMLButtonElement>('.nav-item.is-active')?.focus()
+  void nextTick(() => syncNavWorm(false))
+  if (navEl.value && typeof ResizeObserver !== 'undefined') {
+    navWormObserver = new ResizeObserver(() => syncNavWorm(false))
+    navWormObserver.observe(navEl.value)
+  }
 })
-onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: true }) })
+onBeforeUnmount(() => {
+  stopClearTimer()
+  if (panelSwitchTimer !== null) window.clearTimeout(panelSwitchTimer)
+  if (translationSavedTimer !== null) window.clearTimeout(translationSavedTimer)
+  if (shortcutsSavedTimer !== null) window.clearTimeout(shortcutsSavedTimer)
+  cancelAnimationFrame(navWormRaf)
+  navWormObserver?.disconnect()
+  returnFocus?.focus({ preventScroll: true })
+})
 </script>
 
 <template>
@@ -315,6 +419,8 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
     :class="{ 'is-standalone': props.standalone }"
     tabindex="-1"
     @click.self="closeSettings()"
+    @pointerdown.capture="markSwitchTouched"
+    @keydown.capture="markSwitchKeyTouched"
     @keydown="handleKeys"
   >
     <div ref="windowEl" class="win" role="dialog" :aria-modal="!props.standalone" aria-labelledby="settings-title">
@@ -332,7 +438,13 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
       </header>
 
       <div class="win-body">
-        <nav class="nav" aria-label="设置分区">
+        <nav ref="navEl" class="nav" aria-label="设置分区">
+          <span
+            class="nav-worm"
+            :class="{ 'is-horizontal': navHorizontal }"
+            aria-hidden="true"
+            :style="navWormStyle"
+          />
           <button
             v-for="item in sections"
             :key="item.id"
@@ -346,7 +458,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
           </button>
         </nav>
 
-        <section ref="contentEl" class="content scroll-y" :aria-label="currentSectionLabel">
+        <section ref="contentEl" class="content scroll-y" :class="{ 'is-switching': panelSwitching }" :aria-label="currentSectionLabel">
           <AppManagement v-show="state.ui.settingsSection === 'apps'" @dirty-change="appsDraftPending = $event" />
           <MixerSettings v-if="state.ui.settingsSection === 'audio' && state.ui.settingsOpen" />
           <MailSettings v-if="state.ui.settingsSection === 'mail' && state.ui.settingsOpen" />
@@ -538,7 +650,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               </label>
             </div>
 
-            <div class="save-row"><p role="status" :class="{ error: translationError }">{{ translationDirty ? '有未保存的修改' : translationFeedback || '更改后点击保存' }}<span v-if="translationDirty && translationError"> · {{ translationFeedback }}</span></p><button class="btn btn-primary" type="button" :disabled="translationBusy || !isDesktop || !translationDraft.baseUrl.trim() || !translationDraft.model.trim()" @click="saveTranslation">{{ translationBusy ? '保存中…' : '保存模型设置' }}</button></div>
+            <div class="save-row"><p role="status" :class="{ error: translationError }">{{ translationDirty ? '有未保存的修改' : translationFeedback || '更改后点击保存' }}<span v-if="translationDirty && translationError"> · {{ translationFeedback }}</span></p><button class="btn btn-primary btn-stateful" :data-state="translationBusy ? 'busy' : translationSaved ? 'done' : 'idle'" type="button" :disabled="translationBusy || !isDesktop || !translationDraft.baseUrl.trim() || !translationDraft.model.trim()" @click="saveTranslation"><span class="btn-label">保存模型设置</span><span class="btn-spinner" aria-hidden="true" /><span class="btn-check" aria-hidden="true">✓</span></button></div>
             <div class="card">
               <div class="set-row">
                 <span class="set-text">
@@ -580,12 +692,15 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
                   @keydown.enter.prevent="saveSecret"
                 /></label>
                 <button
-                  class="btn btn-accent"
+                  class="btn btn-accent btn-stateful"
+                  :data-state="secretBusy ? 'busy' : 'idle'"
                   type="button"
                   :disabled="secretDraft.length === 0 || !isDesktop || secretBusy"
                   @click="saveSecret"
                 >
-                  {{ secretBusy ? '保存中…' : '保存' }}
+                  <span class="btn-label">保存</span>
+                  <span class="btn-spinner" aria-hidden="true" />
+                  <span class="btn-check" aria-hidden="true">✓</span>
                 </button>
                 <button class="btn" type="button" :disabled="secretBusy" @click="cancelSecret">取消</button>
               </div>
@@ -612,48 +727,26 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
                     <span class="set-label">主题</span>
                     <span class="set-desc">立即应用到设置、小胶囊和展开面板；不同器物主题拥有独立的轮廓结构与控件形态。</span>
                   </span>
-                  <span class="seg" role="radiogroup" aria-label="主题">
-                    <label
-                      v-for="opt in themeOptions"
-                      :key="opt.value"
-                      class="seg-item"
-                      :class="{ 'is-on': state.settings.theme === opt.value }"
-                    >
-                      <input
-                        class="sr-only"
-                        type="radio"
-                        name="settings-theme"
-                        :value="opt.value"
-                        :checked="state.settings.theme === opt.value"
-                        @change="onThemeChange(opt.value)"
-                      />
-                      <span>{{ opt.label }}</span>
-                    </label>
-                  </span>
+                  <SegmentedControl
+                    :model-value="state.settings.theme"
+                    :options="themeOptions"
+                    name="settings-theme"
+                    label="主题"
+                    @update:model-value="onThemeChange"
+                  />
                 </div>
                 <div class="set-row set-row-stack">
                   <span class="set-text">
                     <span class="set-label">动态效果</span>
                     <span class="set-desc">独立于显示主题自由搭配：{{ MOTION_DESCRIPTIONS[currentMotion] }}</span>
                   </span>
-                  <span class="seg" role="radiogroup" aria-label="动态效果">
-                    <label
-                      v-for="opt in motionOptions"
-                      :key="opt.value"
-                      class="seg-item"
-                      :class="{ 'is-on': currentMotion === opt.value }"
-                    >
-                      <input
-                        class="sr-only"
-                        type="radio"
-                        name="settings-motion"
-                        :value="opt.value"
-                        :checked="currentMotion === opt.value"
-                        @change="setMotion(opt.value)"
-                      />
-                      <span>{{ opt.label }}</span>
-                    </label>
-                  </span>
+                  <SegmentedControl
+                    :model-value="currentMotion"
+                    :options="motionOptions"
+                    name="settings-motion"
+                    label="动态效果"
+                    @update:model-value="setMotion"
+                  />
                 </div>
               </div>
             </DesktopFeatures>
@@ -668,7 +761,7 @@ onBeforeUnmount(() => { stopClearTimer(); returnFocus?.focus({ preventScroll: tr
               <label class="field"><span class="field-label">剪贴板</span><input v-model="shortcutDraft.clipboard" class="control" /></label>
               <label class="field"><span class="field-label">翻译</span><input v-model="shortcutDraft.translation" class="control" /></label>
               <label class="field"><span class="field-label">截图识字</span><input v-model="shortcutDraft.ocr" class="control" /></label>
-              <div class="save-row"><p role="status" :class="{ error: shortcutsError }">{{ shortcutsDirty ? '有未保存的修改' : shortcutsFeedback || '更改后点击保存' }}<span v-if="shortcutsDirty && shortcutsError"> · {{ shortcutsFeedback }}</span></p><button class="btn btn-primary" :disabled="shortcutsBusy || !isDesktop" @click="applyShortcuts">{{ shortcutsBusy ? '保存中…' : '保存快捷键' }}</button></div>
+              <div class="save-row"><p role="status" :class="{ error: shortcutsError }">{{ shortcutsDirty ? '有未保存的修改' : shortcutsFeedback || '更改后点击保存' }}<span v-if="shortcutsDirty && shortcutsError"> · {{ shortcutsFeedback }}</span></p><button class="btn btn-primary btn-stateful" :data-state="shortcutsBusy ? 'busy' : shortcutsSaved ? 'done' : 'idle'" :disabled="shortcutsBusy || !isDesktop" @click="applyShortcuts"><span class="btn-label">保存快捷键</span><span class="btn-spinner" aria-hidden="true" /><span class="btn-check" aria-hidden="true">✓</span></button></div>
               <p class="hint">联动提示：除全局快捷键外，使用系统 Win+Shift+S 截完图后，灵动岛胶囊也会自动浮现「识字」一键按钮。</p>
               <p v-for="error in state.shortcuts.errors" :key="error" class="hint">{{ error }}</p>
             </div>

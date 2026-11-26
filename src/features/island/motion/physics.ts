@@ -12,11 +12,13 @@ const spring = (): Spring => ({ value: 0, velocity: 0, target: 0 })
 const bound = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value))
 
 type MotionPhysicsProfile = { damping: number; omega: number; pressScale: number }
-// 全系采用准临界高阻尼比，按压紧致跟手、松手迅速归位且无多余晃动。
+// 5 套手感的按压物理参数：丝滑、果冻、粘液、刻度、极速各有区分
 const MOTION_PROFILES: Record<string, MotionPhysicsProfile> = {
   glide: { damping: 30, omega: 6, pressScale: 0.045 },
-  bounce: { damping: 24, omega: 6, pressScale: 0.055 },
-  flicker: { damping: 34, omega: 7, pressScale: 0.04 }
+  bounce: { damping: 20, omega: 6.5, pressScale: 0.065 },
+  sweep: { damping: 27, omega: 6, pressScale: 0.05 },
+  step: { damping: 36, omega: 5, pressScale: 0.035 },
+  flicker: { damping: 38, omega: 7.5, pressScale: 0.03 }
 }
 
 export function advanceSpring(axis: Spring, seconds: number, damping = 28, omega = 6): boolean {

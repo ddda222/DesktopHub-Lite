@@ -81,6 +81,8 @@ const themeMaterials: Record<ThemeMode, { orb: string; desc: string }> = {
 const motionCurves: Record<MotionMode, string> = {
   glide: 'M 2 18 C 18 18, 26 3, 78 3',
   bounce: 'M 2 18 C 16 18, 26 1, 44 2 C 56 3, 64 7, 78 3',
+  sweep: 'M 2 18 L 24 18 C 36 18, 42 3, 78 3',
+  step: 'M 2 18 C 10 18, 12 3, 28 3 L 78 3',
   flicker: 'M 2 18 L 14 3 L 78 3'
 }
 

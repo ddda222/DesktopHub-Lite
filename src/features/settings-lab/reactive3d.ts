@@ -778,10 +778,17 @@ export class Reactive3DEngine {
     const e = this.expandProgress
     let wingX = 1.05 * e
     let wingY = 0.65 * e
-    if (this.state.motion === 'bounce') {
-      const overshoot = e > 0.1 && e < 0.99 ? Math.sin(e * Math.PI) * 0.24 : 0
+    if (this.state.motion === 'sweep') {
+      wingX = 1.42 * Math.min(1, e * 1.55)
+      wingY = 0.72 * Math.max(0, (e - 0.25) / 0.75)
+    } else if (this.state.motion === 'bounce') {
+      const overshoot = e > 0.1 && e < 0.99 ? Math.sin(e * Math.PI) * 0.28 : 0
       wingX = (1.1 + overshoot) * e
-      wingY = (0.76 + overshoot * 1.3) * e
+      wingY = (0.76 + overshoot * 1.35) * e
+    } else if (this.state.motion === 'step') {
+      const crisp = Math.min(1, e * 1.35)
+      wingX = 1.16 * crisp
+      wingY = 0.72 * crisp
     } else if (this.state.motion === 'flicker') {
       const snap = Math.min(1, e * 1.45)
       wingX = 1.15 * snap

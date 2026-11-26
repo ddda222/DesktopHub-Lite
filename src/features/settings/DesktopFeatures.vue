@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { defaultIslandAppearance, invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { pushToast, state } from '@/store'
 
@@ -9,8 +9,24 @@ const hoverMs = ref(state.ui.islandHoverMs)
 const leaveMs = ref(state.ui.islandLeaveMs)
 const reducedMotion = ref(state.ui.islandReducedMotion)
 const saving = ref(false)
+const justSaved = ref(false)
+let savedResetTimer: number | null = null
 const feedback = ref('')
 const failed = ref(false)
+watch(saving, (busy, wasBusy) => {
+  if (busy) {
+    justSaved.value = false
+    return
+  }
+  if (wasBusy && !failed.value) {
+    justSaved.value = true
+    if (savedResetTimer !== null) window.clearTimeout(savedResetTimer)
+    savedResetTimer = window.setTimeout(() => { justSaved.value = false; savedResetTimer = null }, 1200)
+  }
+})
+onBeforeUnmount(() => {
+  if (savedResetTimer !== null) window.clearTimeout(savedResetTimer)
+})
 const signature = () => JSON.stringify([appearance.value, anchor.value, hoverMs.value, leaveMs.value, reducedMotion.value])
 const applied = ref(signature())
 const dirty = computed(() => signature() !== applied.value)
@@ -127,7 +143,7 @@ watch(() => state.ui.settingsOpen, open => {
     <div class="actions">
       <button v-if="dirty" type="button" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button>
       <button type="button" class="btn" :disabled="saving" @click="restore">恢复默认值</button>
-      <button type="button" class="btn btn-primary" :disabled="saving || !validSettings || !isDesktop" @click="save">{{ saving ? '应用中…' : '应用设置' }}</button>
+      <button type="button" class="btn btn-primary btn-stateful" :data-state="saving ? 'busy' : justSaved ? 'done' : 'idle'" :disabled="saving || !validSettings || !isDesktop" @click="save"><span class="btn-label">应用设置</span><span class="btn-spinner" aria-hidden="true" /><span class="btn-check" aria-hidden="true">✓</span></button>
     </div>
   </div>
   <slot />

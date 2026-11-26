@@ -114,18 +114,14 @@ export function paintFlow(
     }
 
     if (motion === 'step') {
-      const size = Math.max(4, Math.round(radius * 2.2))
-      ctx.fillStyle = mote.index % 3 === 0 ? '#facc15' : baseColor
-      ctx.globalAlpha = alpha * .92
+      // 精密刻度：跟随主题色绘制短促锐利刻度块与细标线，保持深/浅色中性干净
+      const size = Math.max(3, Math.round(radius * 1.8))
+      ctx.fillStyle = baseColor
+      ctx.globalAlpha = alpha * .86
       ctx.fillRect(x - size / 2, y - size / 2, size, size)
       if (mote.index % 2 === 0) {
-        ctx.fillRect(x - size * 1.35, y - 1, size * 2.7, 2)
-        ctx.fillRect(x - 1, y - size * 1.35, 2, size * 2.7)
+        ctx.fillRect(x - size * 1.35, y - 0.75, size * 2.7, 1.5)
       }
-      ctx.globalAlpha = alpha * (.14 + influence * .22)
-      ctx.beginPath()
-      ctx.arc(x, y, size * 1.2, 0, Math.PI * 2)
-      ctx.fill()
       continue
     }
 

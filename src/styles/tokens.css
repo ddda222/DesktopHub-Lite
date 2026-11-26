@@ -28,12 +28,82 @@
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-spring-soft: linear(0, 0.42 13%, 0.84 26%, 1.028 45%, 0.994 67%, 1.003 84%, 1);
+  --ease-spring: linear(0, 0.35 8%, 0.95 20%, 1.12 30%, 1.03 42%, 0.98 55%, 1.005 70%, 1);
+  --stretch: 0.45;
+  --worm-lag: 45ms;
+  --seg-dur: 260ms;
+  --seg-ease: var(--ease-spring-soft);
+  --btn-press-transform: scale(0.97);
+  --btn-release-dur: 220ms;
+  --panel-enter-y: 5px;
+  --panel-enter-dur: 150ms;
   --ease: var(--ease-out);
 
   --z-bar: 30;
   --z-pop: 40;
   --z-modal: 50;
   --z-toast: 60;
+}
+
+/* 5 套全局动效参数联动：自动调节开关拉伸、蠕虫延迟、分段滑块、按压回弹与切页浮入 */
+:root[data-motion='glide'] {
+  --stretch: 0.45;
+  --worm-lag: 45ms;
+  --seg-dur: 260ms;
+  --seg-ease: var(--ease-spring-soft);
+  --btn-press-transform: scale(0.97);
+  --btn-release-dur: 220ms;
+  --panel-enter-y: 5px;
+  --panel-enter-dur: 150ms;
+}
+:root[data-motion='bounce'] {
+  --stretch: 1;
+  --worm-lag: 65ms;
+  --seg-dur: 330ms;
+  --seg-ease: var(--ease-spring);
+  --btn-press-transform: scale(1.06, 0.91);
+  --btn-release-dur: 300ms;
+  --panel-enter-y: 8px;
+  --panel-enter-dur: 190ms;
+}
+:root[data-motion='sweep'] {
+  --stretch: 0.85;
+  --worm-lag: 90ms;
+  --seg-dur: 310ms;
+  --seg-ease: var(--ease-spring-soft);
+  --btn-press-transform: scale(0.96);
+  --btn-release-dur: 260ms;
+  --panel-enter-y: 6px;
+  --panel-enter-dur: 170ms;
+}
+:root[data-motion='step'] {
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.25, 1.03);
+  --stretch: 0;
+  --worm-lag: 0ms;
+  --seg-dur: 185ms;
+  --seg-ease: cubic-bezier(0.2, 0.9, 0.25, 1.03);
+  --btn-press-transform: translateY(1.5px) scale(0.98);
+  --btn-release-dur: 140ms;
+  --panel-enter-y: 5px;
+  --panel-enter-dur: 120ms;
+}
+:root[data-motion='flicker'] {
+  --ease-spring: var(--ease-out);
+  --stretch: 0;
+  --worm-lag: 0ms;
+  --seg-dur: 115ms;
+  --seg-ease: var(--ease-out);
+  --btn-press-transform: scale(0.98);
+  --btn-release-dur: 95ms;
+  --panel-enter-y: 0px;
+  --panel-enter-dur: 75ms;
+}
+:root[data-reduced-motion='1'] *,
+:root[data-reduced-motion='1'] *::before,
+:root[data-reduced-motion='1'] *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-delay: 0ms !important;
 }
 
 /* 深色（默认） */
@@ -80,6 +150,8 @@
   --island-top-sheen: rgba(255, 255, 255, 0.2);
   --island-hem-a: rgba(210, 224, 245, 0.22);
   --island-hem-b: rgba(139, 184, 255, 0.58);
+  --seg-thumb-shadow: 0 2px 6px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --switch-knob-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
 
 /* 浅色 */
@@ -126,6 +198,8 @@
   --island-top-sheen: rgba(255, 255, 255, 0.96);
   --island-hem-a: rgba(37, 99, 235, 0.14);
   --island-hem-b: rgba(37, 99, 235, 0.44);
+  --seg-thumb-shadow: 0 2px 5px rgba(15, 23, 42, 0.16), 0 1px 2px rgba(15, 23, 42, 0.08);
+  --switch-knob-shadow: 0 1px 3px rgba(15, 23, 42, 0.22);
 }
 
 /* 星舰仪表（深海靛黑高对比 + 精密微圆角与冰蓝光轨） */

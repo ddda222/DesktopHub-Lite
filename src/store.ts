@@ -9,7 +9,7 @@
 import { computed, reactive, watch } from 'vue'
 import { host, newRequestId } from '@/lib/desktop/host'
 import { isDarkThemeMode } from '@/lib/themes'
-import { isMotionMode, type MotionMode } from '@/lib/motions'
+import { isMotionMode, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import {
   defaultIslandAppearance,
   dismissPanel,
@@ -995,7 +995,17 @@ function applyTheme(): void {
   document.documentElement.dataset.theme = resolved
 }
 
+function applyMotion(): void {
+  document.documentElement.dataset.motion = normalizeMotionMode(state.ui.islandAppearance.motion)
+}
+
+function applyReducedMotion(): void {
+  document.documentElement.dataset.reducedMotion = state.ui.islandReducedMotion ? '1' : '0'
+}
+
 watch(() => state.settings.theme, applyTheme, { immediate: true })
+watch(() => state.ui.islandAppearance.motion, applyMotion, { immediate: true })
+watch(() => state.ui.islandReducedMotion, applyReducedMotion, { immediate: true })
 prefersDark.addEventListener('change', () => {
   if (state.settings.theme === 'system') applyTheme()
 })

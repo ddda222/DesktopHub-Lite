@@ -16,6 +16,8 @@ const ignoreFilesText = ref('')
 const savedSignature = ref(JSON.stringify(DEFAULT_PACK_SETTINGS))
 const loading = ref(false)
 const saving = ref(false)
+const justSaved = ref(false)
+let savedResetTimer: number | null = null
 const feedback = ref('')
 const isError = ref(false)
 
@@ -179,6 +181,9 @@ async function save(): Promise<void> {
     const saved = await invokeHost<PackSettings>('save_pack_settings', { settings: payload })
     applyLoaded(saved)
     feedback.value = '打包与联调设置已保存'
+    justSaved.value = true
+    if (savedResetTimer !== null) window.clearTimeout(savedResetTimer)
+    savedResetTimer = window.setTimeout(() => { justSaved.value = false; savedResetTimer = null }, 1200)
   } catch (error) {
     isError.value = true
     feedback.value = String(error)
@@ -210,6 +215,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unlisten?.()
   unlisten = null
+  if (savedResetTimer !== null) window.clearTimeout(savedResetTimer)
 })
 </script>
 
@@ -217,7 +223,10 @@ onBeforeUnmount(() => {
   <div class="panel">
     <h3 class="panel-title">打包与联调</h3>
     <p class="hint">设置云打包路径与默认 ADB 转发端口；仅做真机联调时可不填打包路径。</p>
-    <p v-if="loading" class="hint" role="status">正在读取当前配置…</p>
+    <p v-if="loading" class="hint loading-inline" role="status">
+      <span class="bars-loader" aria-hidden="true"><i /><i /><i /></span>
+      正在读取当前配置…
+    </p>
 
     <h4 class="sub-title">云打包配置</h4>
     <div class="field-grid">
@@ -405,8 +414,10 @@ onBeforeUnmount(() => {
         >
           打开输出目录
         </button>
-        <button class="btn btn-primary" type="button" :disabled="saving || !isDesktop" @click="save">
-          {{ saving ? '保存中…' : '保存打包设置' }}
+        <button class="btn btn-primary btn-stateful" :data-state="saving ? 'busy' : justSaved ? 'done' : 'idle'" type="button" :disabled="saving || !isDesktop" @click="save">
+          <span class="btn-label">保存打包设置</span>
+          <span class="btn-spinner" aria-hidden="true" />
+          <span class="btn-check" aria-hidden="true">✓</span>
         </button>
       </div>
     </div>

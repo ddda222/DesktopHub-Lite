@@ -2358,6 +2358,18 @@ function openDetectedUrl(url: string): void {
 .icon-btn.is-pinned-btn {
   color: var(--accent);
 }
+.icon-btn.is-pinned-btn svg {
+  animation: bookmark-pop 340ms var(--ease-spring);
+}
+:root[data-motion='flicker'] .icon-btn.is-pinned-btn svg,
+:root[data-motion='step'] .icon-btn.is-pinned-btn svg {
+  animation: none;
+}
+@keyframes bookmark-pop {
+  0% { transform: scale(1); }
+  42% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
 
 .icon-btn.is-danger:hover {
   background: var(--danger-weak);

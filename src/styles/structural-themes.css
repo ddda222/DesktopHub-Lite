@@ -79,6 +79,7 @@
   border-radius: 0;
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
+:root[data-theme='mecha'] .settings-ui .nav-worm { display: none; }
 :root[data-theme='mecha'] .settings-ui .nav-item.is-active {
   background: var(--accent); color: #111318; box-shadow: none;
 }
@@ -88,10 +89,17 @@
   border-radius: 0;
   clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
 }
+:root[data-theme='mecha'] .settings-ui .seg-thumb {
+  border-radius: 0; background: var(--accent); box-shadow: none;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
 :root[data-theme='mecha'] .settings-ui .btn-primary,
 :root[data-theme='mecha'] .settings-ui .seg-item.is-on,
 :root[data-theme='mecha'] .settings-ui .app-management .category-filter.selected {
   background: var(--accent); color: #111318; border-color: var(--accent);
+}
+:root[data-theme='mecha'] .settings-ui .seg.has-thumb .seg-item.is-on {
+  background: transparent; color: #111318;
 }
 :root[data-theme='mecha'] .settings-ui .control,
 :root[data-theme='mecha'] .settings-ui .seg { border-radius: 3px; }
@@ -196,6 +204,7 @@
 :root[data-theme='scroll'] .settings-ui .nav {
   background: #efe9d9; border-right: 1px solid rgba(31, 36, 33, 0.24);
 }
+:root[data-theme='scroll'] .settings-ui .nav-worm { display: none; }
 :root[data-theme='scroll'] .settings-ui .nav-item { border-radius: 2px; }
 :root[data-theme='scroll'] .settings-ui .nav-item.is-active {
   background: var(--accent); color: #fff;
@@ -206,14 +215,24 @@
 :root[data-theme='scroll'] .settings-ui .control,
 :root[data-theme='scroll'] .settings-ui .seg,
 :root[data-theme='scroll'] .settings-ui .seg-item { border-radius: 2px; }
+:root[data-theme='scroll'] .settings-ui .seg-thumb {
+  border-radius: 2px; background: var(--accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
 :root[data-theme='scroll'] .settings-ui .btn-primary,
 :root[data-theme='scroll'] .settings-ui .seg-item.is-on,
 :root[data-theme='scroll'] .settings-ui .app-management .category-filter.selected {
   background: var(--accent); color: #fff; border-color: var(--accent);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
 }
+:root[data-theme='scroll'] .settings-ui .seg.has-thumb .seg-item.is-on {
+  background: transparent; box-shadow: none; color: #fff;
+}
 :root[data-theme='scroll'] .settings-ui .switch { border-radius: 2px; }
 :root[data-theme='scroll'] .settings-ui .switch-knob { border-radius: 1px; transform: rotate(45deg) scale(0.78); }
+:root[data-theme='scroll'] .settings-ui .switch[data-touched='1'] .switch-knob { animation: none; }
+:root[data-theme='scroll'] .settings-ui .switch:active:not(:disabled) .switch-knob,
+:root[data-theme='scroll'] .settings-ui .switch-row:active:not(:has(input:disabled)) .switch-knob { scale: 1; }
 :root[data-theme='scroll'] .settings-ui .switch.is-on { background: var(--accent); border-color: var(--accent); }
 :root[data-theme='scroll'] .settings-ui .switch.is-on .switch-knob { transform: translateX(18px) rotate(45deg) scale(0.78); background: #fff; }
 :root[data-theme='scroll'] .toast {
@@ -315,6 +334,7 @@
 :root[data-theme='pixel'] .settings-ui .content {
   background: #1c221e; box-shadow: inset 0 4px 0 rgba(0, 0, 0, 0.42);
 }
+:root[data-theme='pixel'] .settings-ui .nav-worm { display: none; }
 :root[data-theme='pixel'] .settings-ui .nav-item,
 :root[data-theme='pixel'] .settings-ui .btn,
 :root[data-theme='pixel'] .settings-ui .seg-item,
@@ -322,6 +342,7 @@
   border-radius: 0; background: #4a436b; color: #f1f5f9;
   border: 2px solid #0f0d1a; box-shadow: 0 3px 0 #0f0d1a;
 }
+:root[data-theme='pixel'] .settings-ui .seg.has-thumb .seg-thumb { display: none; }
 :root[data-theme='pixel'] .settings-ui .nav-item:hover,
 :root[data-theme='pixel'] .settings-ui .btn:hover:not(:disabled),
 :root[data-theme='pixel'] .settings-ui .seg-item:hover:not(.is-on) {
@@ -350,8 +371,14 @@
 :root[data-theme='pixel'] .settings-ui .switch-knob {
   border-radius: 0; top: 2px; left: 2px; width: 16px; height: 16px; background: #94a3b8; border: 2px solid #0f0d1a;
 }
+:root[data-theme='pixel'] .settings-ui .switch[data-touched='1'] .switch-knob { animation: none; }
+:root[data-theme='pixel'] .settings-ui .switch:active:not(:disabled) .switch-knob,
+:root[data-theme='pixel'] .settings-ui .switch-row:active:not(:has(input:disabled)) .switch-knob { scale: 1; }
 :root[data-theme='pixel'] .settings-ui .switch.is-on { background: var(--accent); }
 :root[data-theme='pixel'] .settings-ui .switch.is-on .switch-knob { background: #facc15; transform: translateX(18px); }
+:root[data-theme='pixel'] .settings-ui .seg.has-thumb .seg-item.is-on {
+  background: var(--accent); color: #0f0d1a;
+}
 :root[data-theme='pixel'] .toast,
 :root[data-theme='pixel'] .image-preview-window button {
   border-radius: 0; border: 2px solid #0f0d1a; box-shadow: 3px 3px 0 #0f0d1a; font-family: var(--font-mono);

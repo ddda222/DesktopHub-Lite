@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
 import { THEME_LABELS } from '@/lib/themes'
-import { MOTION_LABELS, MOTION_TIMINGS, isMotionMode, type MotionMode } from '@/lib/motions'
+import { MOTION_LABELS, MOTION_TIMINGS, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import { isDarkTheme, state, setPaused, pushToast } from '@/store'
 import { loadBrowserShelfSamples, shelf } from '@/features/files/shelf'
 import { makeShelfSamples } from '@/mock/shelf-samples'
@@ -37,10 +37,7 @@ const translatingDemo = ref(false)
 
 let translateDemoTimer: number | null = null
 
-const currentMotion = computed<MotionMode>(() => {
-  const raw = state.ui.islandAppearance.motion
-  return isMotionMode(raw) ? raw : 'glide'
-})
+const currentMotion = computed<MotionMode>(() => normalizeMotionMode(state.ui.islandAppearance.motion))
 
 const anchorOptions: { id: 'left' | 'center' | 'right'; label: string; code: string }[] = [
   { id: 'left', label: '左上', code: 'L' },

@@ -391,9 +391,21 @@ const sections = [
   { value: 'pack', label: '打包', icon: 'terminal' }
 ] as const
 let navMeasureRaf = 0
+let lastNavLeft = -1
+let indicatorStretchAnim: Animation | null = null
 const pageSwitching = ref(false)
 let pageSwitchTimer: ReturnType<typeof setTimeout> | undefined
-const pageSwitchDuration = () => (motionMode.value === 'flicker' ? 110 : motionMode.value === 'bounce' ? 185 : 150)
+const pageSwitchDuration = () => (
+  motionMode.value === 'flicker'
+    ? 100
+    : motionMode.value === 'step'
+      ? 135
+      : motionMode.value === 'sweep'
+        ? 170
+        : motionMode.value === 'bounce'
+          ? 185
+          : 150
+)
 function revealSelectedPage(): void {
   navMeasureRaf = 0
   const nav = modeNav.value
@@ -401,8 +413,26 @@ function revealSelectedPage(): void {
   if (!nav || !selected) return
   const indicator = modeSelection.value
   if (indicator) {
-    indicator.style.transform = `translate3d(${selected.offsetLeft}px, 0, 0)`
-    indicator.style.width = `${selected.offsetWidth}px`
+    const nextLeft = selected.offsetLeft
+    const nextWidth = selected.offsetWidth
+    const delta = lastNavLeft >= 0 ? nextLeft - lastNavLeft : 0
+    indicator.style.transform = `translate3d(${nextLeft}px, 0, 0)`
+    indicator.style.width = `${nextWidth}px`
+    // 粘液蠕虫模式：导航指示块横向切换时短暂沿移动方向拉伸再回弹（可被随时打断）
+    if (motionMode.value === 'sweep' && !motionReduced.value && Math.abs(delta) > 4 && typeof indicator.animate === 'function') {
+      indicatorStretchAnim?.cancel()
+      const sx = Math.min(1.32, 1 + Math.abs(delta) / 140)
+      indicatorStretchAnim = indicator.animate(
+        [
+          { scale: '1 1', offset: 0 },
+          { scale: `${sx} 0.92`, offset: 0.42 },
+          { scale: '0.96 1.03', offset: 0.78 },
+          { scale: '1 1', offset: 1 }
+        ],
+        { duration: 220, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }
+      )
+    }
+    lastNavLeft = nextLeft
   }
   if (selected.offsetLeft < nav.scrollLeft) nav.scrollLeft = selected.offsetLeft
   else if (selected.offsetLeft + selected.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = selected.offsetLeft + selected.offsetWidth - nav.clientWidth
