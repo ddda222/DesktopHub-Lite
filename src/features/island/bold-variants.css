@@ -180,6 +180,14 @@
   border-radius: 3px;
   box-shadow: 0 0 10px rgba(0, 240, 255, .45);
 }
+.desktop .island.variant-neon {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 43, 214, .75),
+    inset 0 0 14px rgba(255, 43, 214, .18);
+}
+.desktop .island.variant-neon.tucked {
+  box-shadow: none;
+}
 .variant-neon:not(.expanded) .capsule-text {
   width: 100%;
   justify-content: space-between;
@@ -326,6 +334,15 @@
 }
 .island.variant-clay.tucked {
   border-radius: 8px;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, .9), inset 0 -2px 3px rgba(188, 152, 120, .4);
+}
+.desktop .island.variant-clay {
+  box-shadow:
+    inset 0 0 0 1.2px #d4bea6,
+    inset 0 3px 5px rgba(255, 255, 255, .92),
+    inset 0 -4px 7px rgba(188, 152, 120, .38);
+}
+.desktop .island.variant-clay.tucked {
   box-shadow: inset 0 1px 2px rgba(255, 255, 255, .9), inset 0 -2px 3px rgba(188, 152, 120, .4);
 }
 .variant-clay:not(.expanded) .capsule-text {
@@ -487,6 +504,14 @@
 }
 .island.variant-liquid.expanded {
   border-radius: 22px;
+}
+.desktop .island.variant-liquid {
+  box-shadow:
+    inset 0 0 0 1px rgba(186, 230, 253, .44),
+    inset 0 1px 0 rgba(255, 255, 255, .42);
+}
+.desktop .island.variant-liquid.tucked {
+  box-shadow: none;
 }
 .variant-liquid .grip {
   width: 36px;

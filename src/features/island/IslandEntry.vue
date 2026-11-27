@@ -2052,6 +2052,12 @@ onBeforeUnmount(() => {
   transition: opacity 110ms ease;
 }
 .island-hit-area.dark { --island-shadow: rgb(0 0 0 / .5); --island-outline: rgb(255 255 255 / .14); }
+/* 桌面原生窗口稳态由 SetWindowRgn 紧贴面板圆角裁切，外投影稳态不可见，
+   只会在切页/开合临时放开矩形窗口区域时露出黑影；因此桌面态仅保留内高光与内描边。 */
+.island-hit-area.desktop {
+  --glass-backdrop: none;
+  --island-drop-shadow: inset 0 1px 0 var(--island-top-sheen), inset 0 0 0 1px var(--island-rim, var(--island-outline));
+}
 .island-hit-area.expanded { --surface-inset: 12px; }
 /* 从细线展开时顶边不下移，避免窗口裁切热区后把原位置的鼠标判为移出。 */
 .island-hit-area.desktop.avoiding { --surface-inset: 0px; }
