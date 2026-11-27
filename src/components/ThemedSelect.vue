@@ -489,69 +489,69 @@ onBeforeUnmount(() => {
 }
 
 /* 器物主题特征细化 */
-:global(:root[data-theme='midnight']) .themed-select-trigger {
+:root[data-theme='midnight'] .themed-select-trigger {
   border-radius: 6px;
   border-color: rgba(109, 182, 255, 0.28);
 }
-:global(:root[data-theme='midnight']) .themed-select-menu {
+:root[data-theme='midnight'] .themed-select-menu {
   border-radius: 8px;
   border-color: rgba(109, 182, 255, 0.42);
   box-shadow: 0 16px 40px rgba(2, 8, 22, 0.72), 0 0 16px rgba(109, 182, 255, 0.16);
 }
-:global(:root[data-theme='mecha']) .themed-select-trigger,
-:global(:root[data-theme='mecha']) .themed-select-menu {
+:root[data-theme='mecha'] .themed-select-trigger,
+:root[data-theme='mecha'] .themed-select-menu {
   border-radius: 3px;
   border-color: rgba(245, 158, 11, 0.36);
 }
-:global(:root[data-theme='mecha']) .themed-option.is-selected {
+:root[data-theme='mecha'] .themed-option.is-selected {
   background: var(--accent);
   color: #111318;
   clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
 }
-:global(:root[data-theme='mecha']) .themed-option.is-selected .themed-option-check {
+:root[data-theme='mecha'] .themed-option.is-selected .themed-option-check {
   color: #111318;
 }
-:global(:root[data-theme='pixel']) .themed-select-trigger,
-:global(:root[data-theme='pixel']) .themed-select-menu,
-:global(:root[data-theme='pixel']) .themed-option {
+:root[data-theme='pixel'] .themed-select-trigger,
+:root[data-theme='pixel'] .themed-select-menu,
+:root[data-theme='pixel'] .themed-option {
   border-radius: 0;
   font-family: var(--font-mono);
 }
-:global(:root[data-theme='pixel']) .themed-select-menu {
+:root[data-theme='pixel'] .themed-select-menu {
   border: 2px solid #0f0d1a;
   box-shadow: 4px 4px 0 #0f0d1a;
 }
-:global(:root[data-theme='pixel']) .themed-option.is-selected {
+:root[data-theme='pixel'] .themed-option.is-selected {
   background: var(--accent);
   color: #0f0d1a;
 }
-:global(:root[data-theme='pixel']) .themed-option.is-selected .themed-option-check {
+:root[data-theme='pixel'] .themed-option.is-selected .themed-option-check {
   color: #0f0d1a;
 }
-:global(:root[data-theme='blueprint']) .themed-select-trigger,
-:global(:root[data-theme='blueprint']) .themed-select-menu,
-:global(:root[data-theme='blueprint']) .themed-option {
+:root[data-theme='blueprint'] .themed-select-trigger,
+:root[data-theme='blueprint'] .themed-select-menu,
+:root[data-theme='blueprint'] .themed-option {
   border-radius: 2px;
   font-family: var(--font-mono);
 }
-:global(:root[data-theme='blueprint']) .themed-select-menu {
+:root[data-theme='blueprint'] .themed-select-menu {
   border: 1px dashed rgba(224, 242, 254, 0.65);
 }
-:global(:root[data-theme='blueprint']) .themed-option.is-selected {
+:root[data-theme='blueprint'] .themed-option.is-selected {
   background: #fde047;
   color: #092241;
 }
-:global(:root[data-theme='blueprint']) .themed-option.is-selected .themed-option-check {
+:root[data-theme='blueprint'] .themed-option.is-selected .themed-option-check {
   color: #092241;
 }
-:global(:root[data-theme='neon']) .themed-select-trigger {
+:root[data-theme='neon'] .themed-select-trigger {
   border-color: rgba(255, 43, 214, 0.36);
 }
-:global(:root[data-theme='neon']) .themed-select-menu {
+:root[data-theme='neon'] .themed-select-menu {
   border-color: #00f0ff;
   box-shadow: 0 0 22px rgba(255, 43, 214, 0.25), 0 16px 38px rgba(4, 1, 12, 0.85);
 }
-:global(:root[data-theme='neon']) .themed-option.is-selected {
+:root[data-theme='neon'] .themed-option.is-selected {
   background: linear-gradient(90deg, rgba(255, 43, 214, 0.28), rgba(0, 240, 255, 0.22));
   color: #ffffff;
   border-color: rgba(0, 240, 255, 0.52);

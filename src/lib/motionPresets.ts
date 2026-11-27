@@ -76,7 +76,7 @@ export const MOTION_PRESETS: Record<MotionMode, MotionPreset> = {
   glide: {
     mode: 'glide',
     shellExpand: { duration: MOTION_TIMINGS.glide.expandMs / 1000, ease: EASE_GLIDE },
-    shellCollapse: { duration: MOTION_TIMINGS.glide.collapseMs / 1000, ease: 'power2.out' },
+    shellCollapse: { duration: MOTION_TIMINGS.glide.collapseMs / 1000, ease: 'power3.out' },
     shellResize: { duration: 0.22, ease: EASE_GLIDE },
     pill: { duration: 0.28, ease: EASE_GLIDE },
     switchKnob: { duration: 0.22, ease: EASE_GLIDE },
@@ -105,7 +105,7 @@ export const MOTION_PRESETS: Record<MotionMode, MotionPreset> = {
   bounce: {
     mode: 'bounce',
     shellExpand: { duration: MOTION_TIMINGS.bounce.expandMs / 1000, ease: 'elastic.out(1.02, 0.56)' },
-    shellCollapse: { duration: MOTION_TIMINGS.bounce.collapseMs / 1000, ease: 'back.inOut(1.15)' },
+    shellCollapse: { duration: MOTION_TIMINGS.bounce.collapseMs / 1000, ease: 'power3.out' },
     shellResize: { duration: 0.24, ease: 'back.out(1.22)' },
     pill: { duration: 0.34, ease: EASE_BOUNCE },
     switchKnob: { duration: 0.3, ease: EASE_BOUNCE },

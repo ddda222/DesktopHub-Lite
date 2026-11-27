@@ -33,11 +33,18 @@ body {
  * 整个窗口就变成一块实心矩形，把桌面挡住、也挡住桌面点击。
  * 所以桌面外壳下把所有背景层清空，只让组件自己画的圆角面板可见。
  */
+:root[data-shell='bar'],
+:root[data-shell='pop'],
+:root[data-shell='settings'],
+:root[data-shell='toast'],
 :root[data-shell='bar'] body,
 :root[data-shell='pop'] body,
 :root[data-shell='settings'] body,
 :root[data-shell='toast'] body {
-  background: transparent;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  clip-path: none !important;
 }
 
 :root[data-shell='bar'] #app,

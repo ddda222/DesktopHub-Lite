@@ -403,9 +403,9 @@ const contentRevealTransition = computed(() => {
   if (expanded.value) return motionPreset.value.contentRevealTransition
   if (motionMode.value === 'flicker') return { duration: 0.035, delay: 0, ease: 'none' }
   return {
-    duration: Math.min(0.18, Math.max(0.12, (collapseMs.value / 1000) * 0.52)),
+    duration: Math.min(0.2, Math.max(0.14, (collapseMs.value / 1000) * 0.68)),
     delay: 0,
-    ease: 'power2.out'
+    ease: 'power1.inOut'
   }
 })
 const contentHiddenPose = computed(() => {
@@ -433,7 +433,7 @@ const capsuleTextTransition = computed(() => {
   if (motionReduced.value) return INSTANT_TRANSITION
   return expanded.value
     ? { duration: 0.09, ease: 'power3.out' }
-    : { duration: 0.14, delay: 0.05, ease: 'power3.out' }
+    : { duration: 0.14, delay: 0.08, ease: 'power3.out' }
 })
 const actionHoverPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.tileHover))
 const actionTapPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.buttonTap))
