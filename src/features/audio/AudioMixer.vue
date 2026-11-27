@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { vGsapPress, vGsapPulse } from '@/lib/gsapMotion'
+import { activeMotionPreset } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import type { AudioSession as Session, AudioSnapshot as Snapshot } from '@/lib/desktop/types'
 import { state } from '@/store'
@@ -130,18 +132,23 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
       </div>
       <button v-if="isDesktop" class="refresh-btn" :disabled="busy" @click="refresh">刷新会话</button>
     </div>
-    <div v-if="profiles.length" class="sound-profiles" aria-label="声音配置"><button v-for="(profile, i) in profiles" :key="profile.name" :disabled="busy" :aria-pressed="activeProfile === profile.name" @click="apply(i)">{{ profile.name }}</button></div>
+    <div v-if="profiles.length" class="sound-profiles" aria-label="声音配置"><button v-for="(profile, i) in profiles" :key="profile.name" v-gsap-press="busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" :disabled="busy" :aria-pressed="activeProfile === profile.name" @click="apply(i)">{{ profile.name }}</button></div>
     <p v-if="!sessions.length" class="mixer-notice">{{ readError ? '暂时无法取得会话，请重试。' : '暂时没有音频会话。先让应用播放声音，再刷新。' }}</p>
     <p v-else-if="!visibleSessions.length" class="mixer-notice">当前声音条目均已隐藏，可在「设置 → 调音台」中重新显示。</p>
     <div v-for="session in visibleSessions" :key="session.id" class="sound-channel" :class="{ muted: session.muted }">
       <div class="channel-top">
         <div class="channel-info">
-          <span class="state-dot" :class="{ active: session.active && !session.muted }" aria-hidden="true" />
+          <span
+            v-gsap-pulse="session.active && !session.muted && !state.ui.islandReducedMotion ? { scale: [1, 1.35], opacity: [0.8, 1], duration: 1.6 } : null"
+            class="state-dot"
+            :class="{ active: session.active && !session.muted }"
+            aria-hidden="true"
+          />
           <strong :title="session.name">{{ session.name }}</strong>
           <small class="device-name" :title="session.deviceName">{{ session.deviceName }}</small>
           <span v-if="session.muted" class="mute-status">静音</span>
         </div>
-        <button class="mute" :disabled="busy" :aria-pressed="session.muted" :aria-label="`${session.muted ? '取消' : ''}静音${session.name}`" @click="update(session, undefined, !session.muted)">{{ session.muted ? '恢复' : '静音' }}</button>
+        <button v-gsap-press="busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" class="mute" :disabled="busy" :aria-pressed="session.muted" :aria-label="`${session.muted ? '取消' : ''}静音${session.name}`" @click="update(session, undefined, !session.muted)">{{ session.muted ? '恢复' : '静音' }}</button>
       </div>
       <div class="volume-control" :style="{ '--volume-progress': `${displayedVolume(session)}%` }">
         <input class="volume-slider" :value="displayedVolume(session)" :disabled="exclusive" type="range" min="0" max="100" step="1" :aria-label="`${session.name}音量`" :aria-valuetext="`${displayedVolume(session)}%${session.muted ? '，已静音' : ''}`" @input="draftVolume(session.id, $event)" @change="update(session, Number(($event.target as HTMLInputElement).value))" />

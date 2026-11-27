@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
+import { gsap, vGsapPress } from '@/lib/gsapMotion'
+import { activeMotionPreset } from '@/lib/motionPresets'
+import { state } from '@/store'
 import QuestionForm from './QuestionForm.vue'
 import type { ApprovalAnswer, ApprovalCard } from './useApprovals'
 
 const props = defineProps<{ card: ApprovalCard; count: number; busy: boolean }>()
 const emit = defineEmits<{ answer: [id: string, decision: ApprovalAnswer] }>()
+const rootEl = ref<HTMLElement | null>(null)
 const details = computed(() => {
   try {
     const args = JSON.parse(props.card.details)
@@ -23,7 +27,17 @@ const details = computed(() => {
 // Vue 以请求编号重新挂载卡片，隔开连点的第二次点击和下一项授权。
 const accepting = ref(false)
 let guard: ReturnType<typeof setTimeout> | undefined
-onMounted(() => { guard = setTimeout(() => { accepting.value = true }, 500) })
+onMounted(() => {
+  guard = setTimeout(() => { accepting.value = true }, 500)
+  if (rootEl.value && !state.ui.islandReducedMotion) {
+    const spec = activeMotionPreset.value.popTransition
+    gsap.fromTo(
+      rootEl.value,
+      { opacity: 0, y: 6, scale: 0.985 },
+      { opacity: 1, y: 0, scale: 1, duration: spec.duration, ease: spec.ease, clearProps: 'transform' }
+    )
+  }
+})
 onBeforeUnmount(() => clearTimeout(guard))
 function submit(decision: ApprovalAnswer) {
   if (accepting.value && !props.busy) emit('answer', props.card.id, decision)
@@ -31,7 +45,13 @@ function submit(decision: ApprovalAnswer) {
 </script>
 
 <template>
-  <section class="approval" :aria-label="card.title" :aria-busy="busy" @keydown.enter="event => { if (event.repeat) event.preventDefault() }">
+  <section
+    ref="rootEl"
+    class="approval"
+    :aria-label="card.title"
+    :aria-busy="busy"
+    @keydown.enter="event => { if (event.repeat) event.preventDefault() }"
+  >
     <header><strong>{{ card.source }}</strong><span>{{ card.tool }}</span><small v-if="count > 1">共 {{ count }} 项待处理</small></header>
     <div v-if="card.kind !== 'questions' || card.questions?.length !== 1 || card.context" class="request-summary scroll-y">
       <h2 v-if="card.kind !== 'questions' || card.questions?.length !== 1">{{ card.title }}</h2>
@@ -43,12 +63,12 @@ function submit(decision: ApprovalAnswer) {
     <pre v-else class="approval-body scroll-y" tabindex="0" aria-label="本次操作内容">{{ details }}</pre>
     <footer v-if="card.kind === 'notice'">
       <span class="context">可在 {{ card.source }} 对话中回答</span>
-      <button type="button" :disabled="busy || !accepting" @click="submit('delegate')">知道了</button>
+      <button v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" :disabled="busy || !accepting" @click="submit('delegate')">知道了</button>
     </footer>
     <footer v-else-if="card.kind === 'approval'">
-      <button type="button" class="delegate" :disabled="busy || !accepting" @click="submit('delegate')">回原应用审批</button>
-      <button type="button" class="deny" :disabled="busy || !accepting" @click="submit('deny')"><Icon name="close" :size="15" />拒绝本次</button>
-      <button type="button" class="allow" :disabled="busy || !accepting" @click="submit('allow')"><Icon name="check" :size="15" />允许本次</button>
+      <button v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" class="delegate" :disabled="busy || !accepting" @click="submit('delegate')">回原应用审批</button>
+      <button v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" class="deny" :disabled="busy || !accepting" @click="submit('deny')"><Icon name="close" :size="15" />拒绝本次</button>
+      <button v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" class="allow" :disabled="busy || !accepting" @click="submit('allow')"><Icon name="check" :size="15" />允许本次</button>
     </footer>
   </section>
 </template>

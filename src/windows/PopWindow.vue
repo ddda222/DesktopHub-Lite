@@ -10,10 +10,13 @@
  * 曾导致弹层显示后立刻消失，所以这里不再自行关闭。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import CategoryMenu from '@/features/applications/CategoryMenu.vue'
 import OverflowGrid from '@/features/applications/OverflowGrid.vue'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { resizePop } from '@/lib/desktop/desktop'
 import { state, subscribeHostEvents } from '@/store'
 
@@ -21,6 +24,9 @@ const rootEl = ref<HTMLElement | null>(null)
 let unsubscribe: (() => void) | null = null
 
 const panel = computed(() => state.ui.panel)
+const popTransition = computed(() =>
+  state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.popTransition
+)
 
 /** 把内容真实尺寸报给 Rust，窗口与位置随之修正。 */
 async function syncSize(): Promise<void> {
@@ -48,16 +54,33 @@ watch(panel, async () => {
 </script>
 
 <template>
-  <div ref="rootEl" class="pop-root">
-    <ClipboardPopover v-if="panel === 'clipboard'" />
-    <TranslationPanel v-else-if="panel === 'translation'" />
-    <div v-else-if="panel === 'category'" class="pop-shell">
-      <CategoryMenu />
+  <HubMotionConfig>
+    <div ref="rootEl" class="pop-root">
+      <GsapPresence
+        mode="out-in"
+        :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: 6, scale: 0.98 }"
+        :animate="{ opacity: 1, y: 0, scale: 1 }"
+        :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.985 }"
+        :transition="popTransition"
+        @animation-complete="syncSize"
+      >
+        <div
+          v-if="panel"
+          :key="panel"
+          class="pop-motion-frame"
+        >
+          <ClipboardPopover v-if="panel === 'clipboard'" />
+          <TranslationPanel v-else-if="panel === 'translation'" />
+          <div v-else-if="panel === 'category'" class="pop-shell">
+            <CategoryMenu />
+          </div>
+          <div v-else-if="panel === 'overflow'" class="pop-shell">
+            <OverflowGrid />
+          </div>
+        </div>
+      </GsapPresence>
     </div>
-    <div v-else-if="panel === 'overflow'" class="pop-shell">
-      <OverflowGrid />
-    </div>
-  </div>
+  </HubMotionConfig>
 </template>
 
 <style scoped>

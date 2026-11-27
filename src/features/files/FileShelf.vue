@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
+import { vGsapPress } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
-import { pushToast } from '@/store'
+import { pushToast, state } from '@/store'
 import FileShelfPreview from './FileShelfPreview.vue'
 import { addShelfFiles, refreshShelf, removeShelfFiles, undoShelfRemove, openShelfPreview, closeShelfPreview, shelf, type ShelfItem } from './shelf'
 
@@ -120,11 +123,31 @@ onBeforeUnmount(() => {
         <button v-if="selected.length" type="button" :disabled="shelf.busy" @click="remove(selected)">移出所选</button>
       </div>
     </div>
-    <div v-if="shelf.undoCount" class="shelf-undo">
-      <span role="status">上次移出 {{ shelf.undoCount }} 项，原文件保留</span>
-      <button class="undo-button" type="button" :disabled="shelf.busy" title="撤销上次移出（Ctrl+Z）" @click="undo">撤销</button>
-    </div>
-    <p v-else-if="shelf.message" class="shelf-message" role="status">{{ shelf.message }}</p>
+    <GsapPresence
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <div
+        v-if="shelf.undoCount"
+        key="shelf-undo"
+        class="shelf-undo"
+      >
+        <span role="status">上次移出 {{ shelf.undoCount }} 项，原文件保留</span>
+        <button
+          v-gsap-press="shelf.busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+          class="undo-button"
+          type="button"
+          :disabled="shelf.busy"
+          title="撤销上次移出（Ctrl+Z）"
+          @click="undo"
+        >
+          撤销
+        </button>
+      </div>
+    </GsapPresence>
+    <p v-if="!shelf.undoCount && shelf.message" class="shelf-message" role="status">{{ shelf.message }}</p>
     <div v-if="!shelf.entries.length" class="shelf-empty">
       <Icon name="folder" :size="26" />
       <span>{{ dragOver ? '松开即可暂存' : '把文件或文件夹拖到这里' }}</span>

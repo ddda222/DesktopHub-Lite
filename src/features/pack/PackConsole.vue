@@ -9,10 +9,23 @@
  * P3 底部配置页脚（自动装机开关 + 摘要直达「设置 → 打包与联调」）
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
+import MotionSwitch from '@/components/MotionSwitch.vue'
+import { gsap, vGsapPulse } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop, listenHost, pickApplicationTarget } from '@/lib/desktop/desktop'
-import { openSettings, pushToast } from '@/store'
-import { clock, useTaskRunner } from './useTaskRunner'
+import { openSettings, pushToast, state } from '@/store'
+import {
+  BROWSER_MOCK_SCRIPTS,
+  PACK_PIPELINE_STEPS,
+  calcTaskProgress,
+  clock,
+  extractKeyLogSummary,
+  formatMinuteDuration,
+  resolvePackPhase,
+  useTaskRunner
+} from './useTaskRunner'
 import {
   DEFAULT_PACK_SETTINGS,
   DEFAULT_REVERSE_PORT,
@@ -43,38 +56,55 @@ const logExpanded = ref(false)
 let stopSettingsListener: (() => void) | null = null
 
 const running = computed(() => task.value.stage === 'running')
-const logLines = computed(() => log.value.slice(-60))
-const latestLogLine = computed(() => logLines.value[logLines.value.length - 1] ?? '')
+const logLines = computed(() => log.value.slice(-80))
 const runKey = computed(() => `${task.value.startedAt}:${task.value.stage}`)
 const showRunCard = computed(
   () => task.value.stage !== 'idle' && (running.value || dismissedRunKey.value !== runKey.value)
 )
 
+// 每次启动新任务时保持日志默认折叠，即便是失败态也只先展示 L2 核心摘要，点击「展开日志」后再展开全文
 watch(
-  () => task.value.stage,
-  stage => {
-    if (stage === 'error') logExpanded.value = true
-    else if (stage === 'running') logExpanded.value = false
+  () => task.value.startedAt,
+  () => {
+    logExpanded.value = false
   }
 )
 
+const progressFillEl = ref<HTMLElement | null>(null)
 const elapsedText = computed(() => clock(elapsedMs.value))
+const phaseInfo = computed(() => resolvePackPhase(task.value))
 const remainText = computed(() => {
   const estimate = task.value.estimateSec
-  if (!estimate) return ''
+  if (!estimate || phaseInfo.value.key === 'prepare') return ''
   const remain = estimate * 1000 - elapsedMs.value
   return remain > 0 ? `约剩 ${clock(remain)}` : `收尾中 · ${clock(elapsedMs.value)}`
 })
-const progress = computed(() => {
-  const estimate = task.value.estimateSec
-  if (running.value) {
-    if (!estimate || estimate <= 0) return null
-    return Math.min(1, elapsedMs.value / (estimate * 1000))
-  }
-  if (task.value.stage === 'done') return 1
-  if (estimate && estimate > 0) return Math.min(1, task.value.elapsedMs / (estimate * 1000))
-  return 0
+const doneDurationText = computed(() => formatMinuteDuration(task.value.elapsedMs || elapsedMs.value))
+const progress = computed(() => calcTaskProgress(task.value, elapsedMs.value))
+const heroStatusText = computed(() => {
+  if (task.value.stage === 'running') return phaseInfo.value.label || '在执行'
+  if (task.value.stage === 'done') return '完成'
+  if (task.value.stage === 'cancelled') return '已取消'
+  if (task.value.stage === 'error') return '出错'
+  return ''
 })
+const keySummary = computed(() => extractKeyLogSummary(task.value, log.value))
+const summaryTag = computed<'INFO' | 'ERR' | 'DONE' | 'STOP'>(() => {
+  if (task.value.stage === 'error') return 'ERR'
+  if (task.value.stage === 'done') return 'DONE'
+  if (task.value.stage === 'cancelled') return 'STOP'
+  return 'INFO'
+})
+
+watch(progress, (pct) => {
+  const el = progressFillEl.value
+  if (!el || pct === null) return
+  if (state.ui.islandReducedMotion) {
+    gsap.set(el, { width: `${Math.round(pct * 100)}%` })
+  } else {
+    gsap.to(el, { width: `${Math.round(pct * 100)}%`, duration: 0.42, ease: 'power2.out', overwrite: 'auto' })
+  }
+}, { flush: 'post' })
 
 const adbReady = computed(() => !!adb.value?.serial)
 const adbStateTone = computed(() => {
@@ -130,7 +160,7 @@ function applyPackSettings(next: PackSettings): void {
 function estimateText(script: PackScript): string {
   const seconds = estimateSeconds(script)
   if (seconds === null) return '首次'
-  const prefix = script.history.length ? '均 ' : '约 '
+  const prefix = script.history.length ? '约 ' : '预 '
   if (seconds < 10) return `${prefix}${seconds.toFixed(1)}s`
   return `${prefix}${clock(seconds * 1000)}`
 }
@@ -166,6 +196,7 @@ async function loadAdb(): Promise<void> {
 
 async function loadAll(): Promise<void> {
   if (!isDesktop) {
+    scripts.value = [...BROWSER_MOCK_SCRIPTS]
     applyPackSettings(DEFAULT_PACK_SETTINGS)
     return
   }
@@ -297,6 +328,19 @@ async function removeScript(id: string): Promise<void> {
   }
 }
 
+async function resetScriptHistory(id: string): Promise<void> {
+  if (!isDesktop || !id) return
+  try {
+    scripts.value = await invokeHost<PackScript[]>('reset_pack_script_history', { id })
+    if (editing.value && editing.value.id === id) {
+      editing.value = { ...editing.value, history: [], estimateSec: 0 }
+    }
+    pushToast('已清空历史耗时样本，后续将重新统计中位数', 'success')
+  } catch (error) {
+    pushToast(String(error), 'error')
+  }
+}
+
 async function pickScriptFile(): Promise<void> {
   if (!editing.value || !isDesktop) return
   const picked = await pickApplicationTarget('file')
@@ -366,26 +410,33 @@ function openPackSettings(): void {
 
 <template>
   <div class="pack-console">
-    <!-- P0 活动任务焦点区：空闲时不占位 -->
+    <!-- P0 活动任务三层焦点区（L1 核心状态与流水线 · L2 单条关键摘要 · L3 默认折叠的完整日志抽屉） -->
     <section
       v-if="showRunCard"
       class="run-focus"
       :class="`is-${task.stage}`"
       aria-label="当前任务状态"
     >
+      <!-- L1：目前展示关键阶段动词、四段式进度轨道与耗时 -->
       <div class="run-top">
         <div class="run-title">
-          <span class="run-dot" :class="`is-${task.stage}`" aria-hidden="true" />
+          <span
+            v-gsap-pulse="running && !state.ui.islandReducedMotion ? { scale: [1, 1.38], opacity: [0.75, 1], duration: 1.2 } : null"
+            class="run-dot"
+            :class="`is-${task.stage}`"
+            aria-hidden="true"
+          />
+          <span class="phase-pill" :class="`is-${task.stage}`">{{ heroStatusText }}</span>
           <strong>{{ task.name || '任务' }}</strong>
           <span v-if="task.env === 'remote'" class="risk-tag">正式</span>
         </div>
         <div class="run-right">
-          <span class="run-time">
+          <span class="run-time tnum">
             <template v-if="running">
               {{ remainText || `已用 ${elapsedText}` }}
             </template>
             <template v-else>
-              {{ task.stage === 'done' ? '完成' : task.stage === 'cancelled' ? '已取消' : '失败' }} · {{ elapsedText }}
+              总耗时 {{ doneDurationText }}
             </template>
           </span>
           <button v-if="running" class="btn-inline danger" type="button" @click="stopTask">
@@ -424,23 +475,41 @@ function openPackSettings(): void {
         </div>
       </div>
 
-      <div class="run-sub">
-        <span class="run-msg">{{ task.message }}</span>
-        <div
-          class="progress"
+      <ol v-if="task.kind === 'pack'" class="pack-stepper" aria-label="云打包流水线">
+        <li
+          v-for="(step, idx) in PACK_PIPELINE_STEPS"
+          :key="step.key"
+          class="step-item"
           :class="{
-            'is-indeterminate': running && progress === null,
-            'is-done': task.stage === 'done',
-            'is-error': task.stage === 'error',
-            'is-cancelled': task.stage === 'cancelled'
+            'is-done': task.stage === 'done' || phaseInfo.stepIndex > idx,
+            'is-current': running && phaseInfo.stepIndex === idx,
+            'is-error': task.stage === 'error' && idx === Math.max(0, phaseInfo.stepIndex)
           }"
         >
-          <span :style="progress !== null ? { width: `${Math.round(progress * 100)}%` } : undefined" />
-        </div>
+          <span class="step-dot" aria-hidden="true" />
+          <span class="step-label">{{ step.label }}</span>
+        </li>
+      </ol>
+
+      <div
+        class="progress"
+        :class="{
+          'is-indeterminate': running && progress === null,
+          'is-done': task.stage === 'done',
+          'is-error': task.stage === 'error',
+          'is-cancelled': task.stage === 'cancelled'
+        }"
+      >
+        <span ref="progressFillEl" :style="progress !== null ? { width: `${Math.round(progress * 100)}%` } : undefined" />
       </div>
 
-      <p v-if="task.detail" class="run-error">{{ task.detail }}</p>
+      <!-- L2：提炼后的单行关键动态 / 出错原因摘要 -->
+      <div class="run-summary-card" :class="`is-${summaryTag.toLowerCase()}`">
+        <span class="summary-badge">{{ summaryTag }}</span>
+        <span class="summary-text" :title="keySummary">{{ keySummary }}</span>
+      </div>
 
+      <!-- L3：原始构建日志（默认严格折叠，仅在用户主动点击后展开） -->
       <div v-if="logLines.length" class="log-box">
         <button
           class="log-toggle"
@@ -448,9 +517,9 @@ function openPackSettings(): void {
           :aria-expanded="logExpanded"
           @click="logExpanded = !logExpanded"
         >
-          <span class="log-preview">{{ latestLogLine }}</span>
+          <span class="log-preview">{{ logExpanded ? '收起完整构建日志' : '点击展开完整日志（默认折叠）' }}</span>
           <span class="log-count">
-            日志 ({{ logLines.length }})
+            {{ logExpanded ? '收起日志' : `展开日志 (${logLines.length})` }}
             <Icon name="chevron-down" :size="11" :class="{ rotated: logExpanded }" />
           </span>
         </button>
@@ -596,6 +665,15 @@ function openPackSettings(): void {
 
         <div class="editor-actions">
           <button class="btn-primary" type="button" @click="saveScript">保存</button>
+          <button
+            v-if="editing.id && editing.history.length"
+            class="btn-inline"
+            type="button"
+            title="清空已记录的历史耗时样本，消除偶发卡顿导致的预估偏差"
+            @click="resetScriptHistory(editing.id)"
+          >
+            清空历史耗时 ({{ editing.history.length }}次)
+          </button>
           <button class="btn-inline" type="button" @click="cancelEdit">取消</button>
         </div>
       </div>
@@ -663,7 +741,7 @@ function openPackSettings(): void {
                 class="btn-run"
                 :class="{ 'is-remote': script.env === 'remote' }"
                 type="button"
-                :disabled="running || !isDesktop"
+                :disabled="running"
                 @click="startScript(script)"
               >
                 <Icon name="play" :size="11" />运行
@@ -671,34 +749,50 @@ function openPackSettings(): void {
             </div>
           </div>
 
-          <div v-if="confirmDelete === script.id" class="confirm-bar">
-            <span>删除「{{ script.name }}」及其历史耗时？</span>
-            <div class="confirm-actions">
-              <button class="btn-inline danger" type="button" @click="removeScript(script.id)">删除</button>
-              <button class="btn-inline" type="button" @click="confirmDelete = null">取消</button>
+          <GsapPresence
+            mode="out-in"
+            :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+            :animate="{ opacity: 1, y: 0 }"
+            :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+            :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+          >
+            <div
+              v-if="confirmDelete === script.id"
+              :key="`del-${script.id}`"
+              class="confirm-bar"
+            >
+              <span>删除「{{ script.name }}」及其历史耗时？</span>
+              <div class="confirm-actions">
+                <button class="btn-inline danger" type="button" @click="removeScript(script.id)">删除</button>
+                <button class="btn-inline" type="button" @click="confirmDelete = null">取消</button>
+              </div>
             </div>
-          </div>
-          <div v-else-if="confirmRun?.id === script.id" class="confirm-bar is-remote">
-            <div class="confirm-text">
-              <template v-if="remoteIgnoreFiles.length">
-                <span>将临时忽略 <b>{{ remoteIgnoreFiles.length }}</b> 个文件的本地更改（云端排队后自动还原）：</span>
-                <span class="confirm-files" :title="remoteIgnoreFiles.join('\n')">{{ remoteIgnorePreview }}</span>
-              </template>
-              <span v-else>未配置「远程忽略文件」，将按当前工作区直接提交<b>正式远程</b>云打包。</span>
+            <div
+              v-else-if="confirmRun?.id === script.id"
+              :key="`run-${script.id}`"
+              class="confirm-bar is-remote"
+            >
+              <div class="confirm-text">
+                <template v-if="remoteIgnoreFiles.length">
+                  <span>将临时忽略 <b>{{ remoteIgnoreFiles.length }}</b> 个文件的本地更改（云端排队后自动还原）：</span>
+                  <span class="confirm-files" :title="remoteIgnoreFiles.join('\n')">{{ remoteIgnorePreview }}</span>
+                </template>
+                <span v-else>未配置「远程忽略文件」，将按当前工作区直接提交<b>正式远程</b>云打包。</span>
+              </div>
+              <div class="confirm-actions">
+                <button
+                  v-if="!remoteIgnoreFiles.length"
+                  class="btn-inline"
+                  type="button"
+                  @click="confirmRun = null; openPackSettings()"
+                >
+                  去配置
+                </button>
+                <button class="btn-run is-remote" type="button" @click="doStart(script)">继续</button>
+                <button class="btn-inline" type="button" @click="confirmRun = null">取消</button>
+              </div>
             </div>
-            <div class="confirm-actions">
-              <button
-                v-if="!remoteIgnoreFiles.length"
-                class="btn-inline"
-                type="button"
-                @click="confirmRun = null; openPackSettings()"
-              >
-                去配置
-              </button>
-              <button class="btn-run is-remote" type="button" @click="doStart(script)">继续</button>
-              <button class="btn-inline" type="button" @click="confirmRun = null">取消</button>
-            </div>
-          </div>
+          </GsapPresence>
         </li>
       </ul>
     </section>
@@ -713,7 +807,7 @@ function openPackSettings(): void {
         title="关闭时只保存 APK 到输出目录，不覆盖手机上已安装的应用"
         @click="toggleAutoInstall"
       >
-        <span class="switch" :class="{ 'is-on': autoInstall }" />
+        <MotionSwitch :checked="autoInstall" as-decorative />
         <span>自动装机</span>
       </button>
 
@@ -878,14 +972,16 @@ function openPackSettings(): void {
 }
 .run-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px 8px;
 }
 .run-title {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 1 1 160px;
   min-width: 0;
 }
 .run-title strong {
@@ -925,14 +1021,131 @@ function openPackSettings(): void {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.run-sub {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+.phase-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  background: var(--accent-weak);
+  color: var(--accent);
 }
-.run-msg {
+.phase-pill.is-done {
+  background: color-mix(in srgb, #10b981 14%, transparent);
+  color: #10b981;
+}
+.phase-pill.is-error {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.phase-pill.is-cancelled {
+  background: color-mix(in srgb, var(--text-3) 14%, transparent);
+  color: var(--text-2);
+}
+.pack-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
+}
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  font-size: 10.5px;
+  color: var(--text-3);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  opacity: .5;
+}
+.step-item.is-done {
+  color: var(--text-2);
+  background: color-mix(in srgb, #10b981 10%, transparent);
+}
+.step-item.is-done .step-dot {
+  background: #10b981;
+  opacity: 1;
+}
+.step-item.is-current {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-weak);
+}
+.step-item.is-current .step-dot {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  opacity: 1;
+}
+.step-item.is-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.step-item.is-error .step-dot {
+  background: var(--danger);
+  opacity: 1;
+}
+.run-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--text) 4.5%, transparent);
+  border: 1px solid var(--line);
   font-size: 11px;
   color: var(--text-2);
+}
+.run-summary-card.is-err {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+.run-summary-card.is-done {
+  border-color: color-mix(in srgb, #10b981 36%, var(--line));
+  background: color-mix(in srgb, #10b981 8%, transparent);
+}
+.summary-badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  font-weight: 700;
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+.run-summary-card.is-err .summary-badge {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+}
+.run-summary-card.is-done .summary-badge {
+  background: color-mix(in srgb, #10b981 16%, transparent);
+  color: #10b981;
+}
+.run-summary-card.is-stop .summary-badge {
+  background: color-mix(in srgb, var(--text-3) 16%, transparent);
+  color: var(--text-2);
+}
+.summary-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .progress {
   position: relative;

@@ -292,6 +292,7 @@ const contours = computed(() => {
 .liquid-skin { position:absolute; inset:0; width:100%; height:100%; z-index:0; pointer-events:none; }
 .liquid-skin.is-suspended { visibility: hidden; }
 .skin { fill:var(--surface); stroke:var(--island-rim, var(--island-outline)); stroke-width:1px; }
+.variant-standard .skin { fill:transparent; stroke:none; }
 .variant-mecha .skin { stroke-width:1.4px; }
 .variant-scroll .skin { stroke-width:1.5px; }
 .variant-pixel { shape-rendering:crispEdges; }

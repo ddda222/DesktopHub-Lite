@@ -229,12 +229,9 @@
   background: transparent; box-shadow: none; color: #fff;
 }
 :root[data-theme='scroll'] .settings-ui .switch { border-radius: 2px; }
-:root[data-theme='scroll'] .settings-ui .switch-knob { border-radius: 1px; transform: rotate(45deg) scale(0.78); }
-:root[data-theme='scroll'] .settings-ui .switch[data-touched='1'] .switch-knob { animation: none; }
-:root[data-theme='scroll'] .settings-ui .switch:active:not(:disabled) .switch-knob,
-:root[data-theme='scroll'] .settings-ui .switch-row:active:not(:has(input:disabled)) .switch-knob { scale: 1; }
+:root[data-theme='scroll'] .settings-ui .switch-knob { border-radius: 1px; rotate: 45deg; scale: 0.78; }
 :root[data-theme='scroll'] .settings-ui .switch.is-on { background: var(--accent); border-color: var(--accent); }
-:root[data-theme='scroll'] .settings-ui .switch.is-on .switch-knob { transform: translateX(18px) rotate(45deg) scale(0.78); background: #fff; }
+:root[data-theme='scroll'] .settings-ui .switch.is-on .switch-knob { left: 19px; background: #fff; }
 :root[data-theme='scroll'] .toast {
   border-radius: 2px; border: 1.5px solid #2c302e; box-shadow: inset 4px 0 0 var(--accent), 0 10px 26px rgba(31, 36, 33, 0.22);
 }
@@ -371,11 +368,8 @@
 :root[data-theme='pixel'] .settings-ui .switch-knob {
   border-radius: 0; top: 2px; left: 2px; width: 16px; height: 16px; background: #94a3b8; border: 2px solid #0f0d1a;
 }
-:root[data-theme='pixel'] .settings-ui .switch[data-touched='1'] .switch-knob { animation: none; }
-:root[data-theme='pixel'] .settings-ui .switch:active:not(:disabled) .switch-knob,
-:root[data-theme='pixel'] .settings-ui .switch-row:active:not(:has(input:disabled)) .switch-knob { scale: 1; }
 :root[data-theme='pixel'] .settings-ui .switch.is-on { background: var(--accent); }
-:root[data-theme='pixel'] .settings-ui .switch.is-on .switch-knob { background: #facc15; transform: translateX(18px); }
+:root[data-theme='pixel'] .settings-ui .switch.is-on .switch-knob { background: #facc15; left: 16px; }
 :root[data-theme='pixel'] .settings-ui .seg.has-thumb .seg-item.is-on {
   background: var(--accent); color: #0f0d1a;
 }

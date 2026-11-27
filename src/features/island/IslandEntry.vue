@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import CapsuleMorphGlyph from './CapsuleMorphGlyph.vue'
+import CapsuleOrbitTrack from './motion/CapsuleOrbitTrack.vue'
+import { animateFlipFromState, animateScrambleText, captureFlipSnapshot, Flip, gsap, playFlipSnapshot, vGsapHover, vGsapPress } from '@/lib/gsapMotion'
 import Icon from '@/components/Icon.vue'
 import GlassLight from '@/components/GlassLight.vue'
 import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
-import IslandParticles from './motion/IslandParticles.vue'
 import ApprovalPrompt from './ApprovalPrompt.vue'
 import OcrResultPanel from '@/features/ocr/OcrResultPanel.vue'
 import MailNotices from '@/features/mail/MailNotices.vue'
 import { providerName, useMailList, type MailNotice } from '@/features/mail/mail'
 import { useApprovals } from './useApprovals'
 import { useIslandEffects, type IslandCue } from './motion/useIslandEffects'
-import { advanceSpring } from './motion/physics'
+import { getMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import {
   computeDismissPull,
   shouldAutoCollapseOnWindowBlur,
@@ -30,7 +33,15 @@ import FileShelf from '@/features/files/FileShelf.vue'
 import AudioMixer from '@/features/audio/AudioMixer.vue'
 import { addShelfFiles, shelf, subscribeShelf } from '@/features/files/shelf'
 import PackConsole from '@/features/pack/PackConsole.vue'
-import { capsuleTaskText, useTaskRunner } from '@/features/pack/useTaskRunner'
+import {
+  calcTaskProgress,
+  capsuleTaskText,
+  clock,
+  extractKeyLogSummary,
+  formatMinuteDuration,
+  resolvePackPhase,
+  useTaskRunner
+} from '@/features/pack/useTaskRunner'
 import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
@@ -78,6 +89,10 @@ const windowDrag = useWindowDrag(viewport, {
   onError: error => pushToast(`无法拖动窗口：${String(error)}`, 'error')
 })
 const panel = ref<HTMLElement | null>(null)
+const capsuleTextEl = ref<HTMLElement | null>(null)
+const capsuleStatusLabelEl = ref<HTMLElement | null>(null)
+const quickCodeTextEl = ref<HTMLElement | null>(null)
+const appGridEl = ref<HTMLElement | null>(null)
 function resolveVariant(mode = state.settings.theme): IslandVariant {
   if (mode === 'liquid') return 'liquid'
   if (mode === 'midnight') return 'telemetry'
@@ -144,22 +159,51 @@ const mailSummary = computed(() => {
 })
 const { current: approval, count: approvalCount, busy: answering, answer: answerApproval } =
   useApprovals(message => pushToast(message, 'error'))
-// 打包 / 联调台的任务状态：只在运行中占用胶囊中间的位置。
-const { task: runTask, elapsedMs: runElapsed } = useTaskRunner(message => pushToast(message, 'error'))
+// 打包 / 联调台的任务状态与实时日志流：与灵动岛胶囊、副条及 07 轨道联动。
+const { task: runTask, log: runLog, elapsedMs: runElapsed } = useTaskRunner(
+  message => pushToast(message, 'error'),
+  { withLog: true }
+)
 const suppressed = computed(() => state.ui.fullscreenSuppressed)
 const hoverClosing = ref(false)
 const expanded = computed(() => !!approval.value || (hostExpanded.value && !hoverClosing.value))
+const feedbackIsError = ref(false)
+const packStripDismissedKey = ref('')
+const packHighlightTone = ref<'success' | 'error' | null>(null)
+let packHighlightTimer: ReturnType<typeof setTimeout> | undefined
+const packInfoTextEl = ref<HTMLElement | null>(null)
+const runKey = computed(() => `${runTask.value.startedAt}:${runTask.value.stage}`)
+const runProgress = computed(() => calcTaskProgress(runTask.value, runElapsed.value))
+const runPercentText = computed(() => runProgress.value === null ? '' : `${Math.round(runProgress.value * 100)}%`)
+const runOvertime = computed(() =>
+  runTask.value.stage === 'running' && !!runTask.value.estimateSec && runElapsed.value >= runTask.value.estimateSec * 1000
+)
+const runDurationMinuteText = computed(() => formatMinuteDuration(runTask.value.elapsedMs || runElapsed.value))
+const packPhase = computed(() => resolvePackPhase(runTask.value))
+const runLatestLog = computed(() => extractKeyLogSummary(runTask.value, runLog.value))
+const packLiveBadge = computed<'INFO' | 'LOG' | 'WARN' | 'ERR' | 'DONE'>(() => {
+  if (runTask.value.stage === 'error') return 'ERR'
+  if (runTask.value.stage === 'done') return 'DONE'
+  const raw = runLog.value[runLog.value.length - 1] ?? ''
+  if (/^\[(ERR|ERROR)\]/i.test(raw)) return 'ERR'
+  if (/^\[WARN\]/i.test(raw)) return 'WARN'
+  if (/^\[INFO\]/i.test(raw)) return 'INFO'
+  return 'LOG'
+})
+const packLiveSummary = computed(() => {
+  if (runTask.value.stage === 'error') {
+    return runLatestLog.value || '执行出错，点击查看详情'
+  }
+  if (runTask.value.stage === 'done') {
+    const verb = runTask.value.kind === 'pack' ? '打包完成' : '执行完成'
+    return `${verb} · 用时 ${runDurationMinuteText.value}${runLatestLog.value ? ` · ${runLatestLog.value}` : ''}`
+  }
+  return runLatestLog.value || packPhase.value.label || '准备中'
+})
 watch([mailNotices, viewingMail, expanded, approval], ([items, selected, open, prompt]) => {
   if (!items.length) mailSelected.value = false
   const ids = items.map(item => item.id)
   seenMail.value = selected && open && !prompt ? ids : seenMail.value.filter(id => ids.includes(id))
-})
-// 打包/联调任务结束才给胶囊反馈；before === 'idle' 表示只是加载到上次结果，不补播过期提示。
-watch(() => runTask.value.stage, (stage, before) => {
-  if (before === 'idle') return
-  if (stage === 'done') showFeedback('task-done', runTask.value.kind === 'pack' ? '打包完成' : '执行完成')
-  else if (stage === 'cancelled') showFeedback('task-cancelled', '已取消')
-  else if (stage === 'error') showFeedback('task-error', '执行失败')
 })
 // 避让只决定收起形态；细线也能悬停展开。
 const tucked = computed(() => suppressed.value && !expanded.value)
@@ -170,7 +214,7 @@ const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(systemMotion.matches)
 const motionReduced = computed(() => state.ui.islandReducedMotion || reducedMotion.value)
 const materialRequested = computed(() => state.ui.islandAppearance.webgl !== false)
-const { active: effectsActive, cue, signal, quality, plainMaterial } = useIslandEffects(panel, tucked, motionReduced, materialRequested)
+const { active: effectsActive, quality, plainMaterial } = useIslandEffects(panel, tucked, motionReduced, materialRequested)
 const shape = computed(() => tucked.value ? 'line' : expanded.value ? 'expanded' : 'compact')
 const glassAvailable = ref(true)
 const clockText = ref(formatTime())
@@ -211,12 +255,12 @@ const showQuickOcr = computed(() =>
 const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: string; icon: IconName | null; kind: string }>(() => {
   if (approval.value) return { text: approval.value.kind === 'approval' ? '待审批' : '有提问', ariaText: approval.value.title, icon: 'info', kind: 'approval' }
   // 打包/联调任务运行中：胶囊中间实时显示「任务名 · 约剩 mm:ss」
-  if (runTask.value.stage === 'running') return { text: capsuleTaskText(runTask.value, runElapsed.value), ariaText: `${runTask.value.name}：${runTask.value.message}`, tooltip: '打包 / 联调任务运行中', icon: 'terminal', kind: 'working' }
+  if (runTask.value.stage === 'running') return { text: capsuleTaskText(runTask.value, runElapsed.value), ariaText: `${runTask.value.name}：${runTask.value.message}`, tooltip: `${runTask.value.name} · ${packLiveSummary.value}`, icon: 'terminal', kind: 'working' }
   if (receivingFiles.value) return { text: '松开暂存', icon: 'folder', kind: 'working' }
   if (shelf.busy) return { text: shelf.activity || '文件处理中', icon: 'folder', kind: 'working' }
   const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
   if (pending) return { text: pending > 1 ? `翻译中 · ${pending}` : '翻译中', icon: 'translate', kind: 'working' }
-  if (feedbackText.value) return { text: feedbackText.value, icon: feedbackText.value === '翻译失败' ? 'info' : 'check', kind: 'feedback' }
+  if (feedbackText.value) return { text: feedbackText.value, icon: feedbackIsError.value ? 'info' : 'check', kind: 'feedback' }
   if (showQuickOcr.value) {
     return {
       text: '已截屏',
@@ -253,7 +297,67 @@ const capsuleBadges = computed<{ id: string; icon: IconName; text: string; title
   return list
 })
 const showQuickCode = computed(() => !expanded.value && !tucked.value && !approval.value && !feedbackText.value && !showQuickOcr.value && !!quickMailCode.value)
+const showPackStrip = computed(() =>
+  !expanded.value &&
+  !tucked.value &&
+  !approval.value &&
+  !quickMenuOpen.value &&
+  (runTask.value.stage === 'running' || (packHighlightTone.value !== null && packStripDismissedKey.value !== runKey.value))
+)
+watch(() => runTask.value.stage, (stage, before) => {
+  clearTimeout(packHighlightTimer)
+  if (stage === 'running') {
+    packStripDismissedKey.value = ''
+    packHighlightTone.value = null
+    return
+  }
+  if (before === 'idle' || stage === 'idle') {
+    packHighlightTone.value = null
+    return
+  }
+  if (stage === 'done') {
+    packHighlightTone.value = 'success'
+    const verb = runTask.value.kind === 'pack' ? '打包完成' : '执行完成'
+    showFeedback('task-done', `${verb} · ${runDurationMinuteText.value}`)
+    packHighlightTimer = setTimeout(() => { packHighlightTone.value = null }, 5500)
+  } else if (stage === 'cancelled') {
+    packHighlightTone.value = null
+    showFeedback('task-cancelled', '已取消')
+  } else if (stage === 'error') {
+    packHighlightTone.value = 'error'
+    showFeedback('task-error', runTask.value.kind === 'pack' ? '打包出错' : '执行失败')
+    packHighlightTimer = setTimeout(() => { packHighlightTone.value = null }, 7000)
+  }
+})
+watch([packLiveSummary, showPackStrip], ([text, visible]) => {
+  if (!visible || !text) return
+  void nextTick(() => {
+    animateScrambleText(packInfoTextEl.value, text, motionReduced.value, { chars: '01·INFO_', duration: 0.24, speed: 0.85 })
+  })
+}, { flush: 'post' })
 const isNoticeStatus = computed(() => capsuleStatus.value.kind !== 'idle' && capsuleStatus.value.kind !== 'telemetry')
+const orbitActive = computed(() =>
+  !motionReduced.value &&
+  !tucked.value &&
+  (capsuleStatus.value.kind === 'working' ||
+    capsuleStatus.value.kind === 'quick-ocr' ||
+    capsuleStatus.value.kind === 'approval' ||
+    packHighlightTone.value !== null)
+)
+const orbitTone = computed<'accent' | 'success' | 'error' | 'warning'>(() => {
+  if (packHighlightTone.value) return packHighlightTone.value
+  if (runTask.value.stage === 'running' && runOvertime.value) return 'warning'
+  return 'accent'
+})
+const orbitSpeed = computed(() => {
+  if (packHighlightTone.value === 'error') return 1.5
+  if (packHighlightTone.value === 'success') return 1.25
+  if (runTask.value.stage === 'running') {
+    if (runOvertime.value) return 1.65
+    return runTask.value.env === 'remote' ? 1.35 : 1.05
+  }
+  return 1
+})
 const taskSignal = computed(() => {
   if (capsuleStatus.value.kind === 'idle') return 'idle'
   if (capsuleStatus.value.kind === 'telemetry') return 'telemetry'
@@ -268,7 +372,6 @@ let stopShelf: (() => void) | undefined
 const content = ref<HTMLElement | null>(null)
 const chrome = ref<HTMLElement | null>(null)
 const modeNav = ref<HTMLElement | null>(null)
-const modeSelection = ref<HTMLElement | null>(null)
 const paneDir = ref<1 | -1>(1)
 const contentHeight = ref(330)
 const chromeHeight = ref(56)
@@ -289,6 +392,63 @@ const keepTaskOpen = computed(() => ocrPanelOpen.value || (!viewingMail.value &&
    (page.value === 'clipboard' && readingExplanation.value))))
 const appearance = computed(() => state.ui.islandAppearance)
 const motionMode = computed<MotionMode>(() => normalizeMotionMode(appearance.value.motion))
+const motionPreset = computed(() => getMotionPreset(motionMode.value))
+const shellTransition = computed(() => {
+  if ((isDesktop && tucked.value) || motionReduced.value) return INSTANT_TRANSITION
+  if (pageSwitching.value && expanded.value) return motionPreset.value.shellResize
+  return expanded.value ? motionPreset.value.shellExpand : motionPreset.value.shellCollapse
+})
+const pillTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION : motionPreset.value.pill))
+const paneTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION : motionPreset.value.paneTransition))
+const contentRevealTransition = computed(() => {
+  if (motionReduced.value) return INSTANT_TRANSITION
+  return expanded.value
+    ? motionPreset.value.contentRevealTransition
+    : { duration: 0.075, delay: 0, ease: 'power3.out' }
+})
+const contentHiddenPose = computed(() => {
+  const preset = motionPreset.value
+  return {
+    opacity: 0,
+    y: preset.contentOffsetY,
+    scaleX: preset.contentScaleX,
+    scaleY: preset.contentScaleY,
+    filter: preset.contentBlurPx ? `blur(${preset.contentBlurPx}px)` : 'blur(0px)'
+  }
+})
+const paneInitial = computed(() => {
+  if (motionReduced.value) return false
+  const preset = motionPreset.value
+  return {
+    opacity: motionMode.value === 'flicker' ? 0.18 : 0,
+    x: paneDir.value * preset.paneOffsetX,
+    y: preset.paneOffsetY,
+    scaleX: preset.paneScaleX,
+    scaleY: preset.paneScaleY,
+    filter: preset.paneBlurPx ? `blur(${preset.paneBlurPx}px)` : 'blur(0px)'
+  }
+})
+const paneExit = computed(() => {
+  if (motionReduced.value) return { opacity: 0 }
+  const preset = motionPreset.value
+  return {
+    opacity: 0,
+    x: paneDir.value * -preset.paneOffsetX * 0.65,
+    y: -preset.paneOffsetY * 0.65,
+    scaleX: preset.paneScaleX === 1 ? 1 : 0.97,
+    scaleY: preset.paneScaleY === 1 ? 1 : 0.99,
+    filter: preset.paneBlurPx ? `blur(${Math.round(preset.paneBlurPx * 0.65)}px)` : 'blur(0px)'
+  }
+})
+const capsuleTextTransition = computed(() => {
+  if (motionReduced.value) return INSTANT_TRANSITION
+  return expanded.value
+    ? { duration: 0.09, ease: 'power3.out' }
+    : { duration: 0.14, delay: 0.05, ease: 'power3.out' }
+})
+const actionHoverPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.tileHover))
+const actionTapPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.buttonTap))
+const tileTapPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.tileTap))
 const materialAllowed = computed(() => materialRequested.value && !motionReduced.value && !plainMaterial.value)
 const materialReady = ref(false)
 watch([effectsActive, materialAllowed], ([active, allowed]) => {
@@ -334,7 +494,10 @@ const visibleWidth = computed(() => {
   else if (variant.value === 'blueprint' || variant.value === 'neon') baseWidth = (idle ? 184 : 216) * scale.value
   else if (variant.value === 'clay') baseWidth = (idle ? 168 : 200) * scale.value
   if (runTask.value.stage === 'running') {
-    baseWidth = Math.max(baseWidth, 236 * scale.value)
+    baseWidth = Math.max(baseWidth, 276 * scale.value)
+  }
+  if (showPackStrip.value) {
+    baseWidth = Math.max(baseWidth, 356 * scale.value)
   }
   return Math.min(availableWidth.value - 24, Math.max(menuFloor, Math.round(baseWidth + badgeExtra)))
 })
@@ -353,7 +516,7 @@ const visibleHeight = computed(() => {
     return Math.min(rawExpandedHeight.value, maxExpandedHeight.value)
   }
   if (suppressed.value) return lineHeights[variant.value] * scale.value
-  return compactHeights[variant.value] * scale.value + (quickMenuOpen.value ? 42 : 0)
+  return compactHeights[variant.value] * scale.value + (quickMenuOpen.value ? 42 : 0) + (showPackStrip.value ? Math.round(32 * scale.value) : 0)
 })
 const cornerRadius = computed(() => {
   if (variant.value === 'mecha' || variant.value === 'scroll' || variant.value === 'pixel') return 4
@@ -390,57 +553,28 @@ const sections = [
   { value: 'audio', label: '调音台', icon: 'volume' },
   { value: 'pack', label: '打包', icon: 'terminal' }
 ] as const
-let navMeasureRaf = 0
-let lastNavLeft = -1
-let indicatorStretchAnim: Animation | null = null
 const pageSwitching = ref(false)
 let pageSwitchTimer: ReturnType<typeof setTimeout> | undefined
 const pageSwitchDuration = () => (
   motionMode.value === 'flicker'
-    ? 100
-    : motionMode.value === 'step'
-      ? 135
+    ? 60
+    : motionMode.value === 'focus'
+      ? 165
       : motionMode.value === 'sweep'
-        ? 170
+        ? 185
         : motionMode.value === 'bounce'
-          ? 185
-          : 150
+          ? 210
+          : 170
 )
 function revealSelectedPage(): void {
-  navMeasureRaf = 0
   const nav = modeNav.value
   const selected = nav?.querySelector<HTMLElement>('button.selected')
   if (!nav || !selected) return
-  const indicator = modeSelection.value
-  if (indicator) {
-    const nextLeft = selected.offsetLeft
-    const nextWidth = selected.offsetWidth
-    const delta = lastNavLeft >= 0 ? nextLeft - lastNavLeft : 0
-    indicator.style.transform = `translate3d(${nextLeft}px, 0, 0)`
-    indicator.style.width = `${nextWidth}px`
-    // 粘液蠕虫模式：导航指示块横向切换时短暂沿移动方向拉伸再回弹（可被随时打断）
-    if (motionMode.value === 'sweep' && !motionReduced.value && Math.abs(delta) > 4 && typeof indicator.animate === 'function') {
-      indicatorStretchAnim?.cancel()
-      const sx = Math.min(1.32, 1 + Math.abs(delta) / 140)
-      indicatorStretchAnim = indicator.animate(
-        [
-          { scale: '1 1', offset: 0 },
-          { scale: `${sx} 0.92`, offset: 0.42 },
-          { scale: '0.96 1.03', offset: 0.78 },
-          { scale: '1 1', offset: 1 }
-        ],
-        { duration: 220, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' }
-      )
-    }
-    lastNavLeft = nextLeft
-  }
   if (selected.offsetLeft < nav.scrollLeft) nav.scrollLeft = selected.offsetLeft
   else if (selected.offsetLeft + selected.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = selected.offsetLeft + selected.offsetWidth - nav.clientWidth
 }
 function syncSelectedIndicator(): void {
-  revealSelectedPage()
-  cancelAnimationFrame(navMeasureRaf)
-  navMeasureRaf = requestAnimationFrame(revealSelectedPage)
+  void nextTick(revealSelectedPage)
 }
 watch([page, expanded, variant, viewingMail], syncSelectedIndicator, { flush: 'post' })
 watch(scale, syncSelectedIndicator, { flush: 'post' })
@@ -461,9 +595,13 @@ let stopOcrResult: (() => void) | undefined
 let stopOcrError: (() => void) | undefined
 let stopQuickImageOcr: (() => void) | undefined
 const dismissHandle = ref<HTMLButtonElement | null>(null)
-let dismissSpring = { value: 0, velocity: 0, target: 0 }
-let dismissSpringFrame = 0
-let dismissSpringPrev = 0
+const dismissProxy = { y: 0, scaleY: 1 }
+let dismissTween: gsap.core.Tween | null = null
+let shellTween: gsap.core.Tween | gsap.core.Timeline | null = null
+let capsuleTween: gsap.core.Tween | null = null
+let chromeTween: gsap.core.Tween | null = null
+let contentTween: gsap.core.Tween | null = null
+let dismissCurrentY = 0
 let suppressDismissClick = false
 let dismissSession: {
   pointerId: number
@@ -497,9 +635,21 @@ function showFeedback(kind: string, customLabel?: string): void {
   if (tucked.value) return
   if (!customLabel && !['copied', 'translated', 'translation-error'].includes(kind)) return
   clearTimeout(feedbackTimer)
+  feedbackIsError.value = kind === 'translation-error' || kind === 'task-error' || kind === 'task-cancelled'
   feedbackText.value = customLabel ?? (kind === 'copied' ? '已复制' : kind === 'translated' ? '翻译完成' : '翻译失败')
-  signal(kind === 'translation-error' ? 'notice' : 'complete')
-  feedbackTimer = setTimeout(() => { feedbackText.value = '' }, 2400)
+  feedbackTimer = setTimeout(() => {
+    feedbackText.value = ''
+    feedbackIsError.value = false
+  }, kind.startsWith('task-') ? 3400 : 2400)
+}
+
+async function openPackConsoleFromCapsule(): Promise<void> {
+  closeOcrPanel()
+  mailSelected.value = false
+  quickMenuOpen.value = false
+  await selectPage('pack')
+  manualCollapseUntil = 0
+  if (!expanded.value) expand(true, true)
 }
 
 /** 收起态一键直拷最新邮件验证码，不打断当前窗口工作流。 */
@@ -545,7 +695,6 @@ function showQuickImageOcr(payload: QuickImageOcrPayload): void {
   clearTimeout(feedbackTimer)
   feedbackText.value = ''
   quickOcrClip.value = payload
-  signal('complete')
   scheduleQuickOcrExpire(15000)
 }
 
@@ -616,18 +765,9 @@ watch(() => props.previewFeedback, value => {
   feedbackText.value = ''
   if (value.kind) showFeedback(value.kind)
 })
-watch(() => props.previewCue, value => {
-  if (!isDesktop && value) signal(value.kind)
-}, { flush: 'post' })
 watch(() => props.previewTelemetry, value => {
   if (!isDesktop) applyTelemetrySample(value ?? null)
 }, { immediate: true })
-watch(() => capsuleStatus.value.kind === 'working', (working, before) => {
-  if (working && !before) signal('loading')
-})
-watch(() => state.ui.wechatEvent, (event, previous) => {
-  if (event !== previous && state.ui.wechatEnabled && state.ui.wechatAttention) signal('notice')
-})
 function updateTheme(): void {
   dark.value = isDarkTheme()
   variant.value = resolveVariant()
@@ -635,6 +775,14 @@ function updateTheme(): void {
 
 watch(() => state.settings.theme, updateTheme)
 watch(geometryMoving, queueGeometry, { flush: 'post' })
+
+function settleGeometry(): void {
+  clearTimeout(geometryTimer)
+  geometryTimer = undefined
+  viewportSize.value = { ...bounds.value }
+  geometryMoving.value = false
+  queueGeometry()
+}
 
 function reserveGeometry(): void {
   clearTimeout(geometryTimer)
@@ -645,20 +793,21 @@ function reserveGeometry(): void {
     queueGeometry()
     return
   }
+  const headroom = expanded.value ? motionPreset.value.bounceHeadroom : 0
   geometryMoving.value = true
   viewportSize.value = {
-    width: Math.max(viewportSize.value.width, target.width),
-    height: Math.max(viewportSize.value.height, target.height)
+    width: Math.max(viewportSize.value.width, target.width + headroom),
+    height: Math.max(viewportSize.value.height, target.height + headroom)
   }
   const durationMs = Math.max(
     expanded.value ? expandMs.value : collapseMs.value,
     pageSwitching.value ? pageSwitchDuration() : 0
   )
-  geometryTimer = setTimeout(() => {
-    viewportSize.value = { ...bounds.value }
-    geometryMoving.value = false
-    queueGeometry()
-  }, durationMs + 24)
+  geometryTimer = setTimeout(settleGeometry, durationMs + 140)
+}
+
+function onShellAnimationComplete(): void {
+  if (geometryMoving.value && !dismissSession) settleGeometry()
 }
 
 watch([bounds, expanded, () => state.ui.islandReducedMotion, reducedMotion], reserveGeometry, { flush: 'sync' })
@@ -711,18 +860,17 @@ function expand(value: boolean, focus = false): void {
   })
 }
 
-function applyDismissVisual(offsetY: number, scaleY: number, dragging: boolean, ready: boolean): void {
+function syncDismissTransform(): void {
   const surface = panel.value
-  if (surface) {
-    if (offsetY === 0 && scaleY === 1) {
-      surface.style.translate = ''
-      surface.style.scale = ''
-    } else {
-      surface.style.translate = `0 ${offsetY.toFixed(2)}px`
-      surface.style.scale = `1 ${scaleY.toFixed(4)}`
-    }
-    surface.classList.toggle('dismiss-dragging', dragging)
-  }
+  if (surface) gsap.set(surface, { y: dismissProxy.y, scaleY: dismissProxy.scaleY })
+}
+
+function applyDismissVisual(offsetY: number, scaleY: number, dragging: boolean, ready: boolean): void {
+  dismissProxy.y = offsetY
+  dismissProxy.scaleY = scaleY
+  syncDismissTransform()
+  const surface = panel.value
+  if (surface) surface.classList.toggle('dismiss-dragging', dragging)
   const handle = dismissHandle.value
   if (handle) {
     handle.classList.toggle('dragging', dragging)
@@ -731,42 +879,38 @@ function applyDismissVisual(offsetY: number, scaleY: number, dragging: boolean, 
 }
 
 function stopDismissSpring(): void {
-  if (dismissSpringFrame) {
-    cancelAnimationFrame(dismissSpringFrame)
-    dismissSpringFrame = 0
-  }
-  dismissSpringPrev = 0
+  dismissTween?.kill()
+  dismissTween = null
 }
 
 function clearDismissVisual(): void {
   stopDismissSpring()
-  dismissSpring = { value: 0, velocity: 0, target: 0 }
+  dismissCurrentY = 0
   dismissSession = undefined
   applyDismissVisual(0, 1, false, false)
 }
 
-function startDismissSnapBack(initialVelocityPxPerSec: number): void {
+function startDismissSnapBack(_initialVelocityPxPerSec: number): void {
   stopDismissSpring()
-  if (motionReduced.value || Math.abs(dismissSpring.value) < 0.05) {
+  if (motionReduced.value || Math.abs(dismissCurrentY) < 0.05) {
     clearDismissVisual()
     return
   }
-  dismissSpring.target = 0
-  dismissSpring.velocity = initialVelocityPxPerSec
-  dismissSpringPrev = performance.now()
-  const step = (now: number): void => {
-    dismissSpringFrame = 0
-    if (disposed || !expanded.value || dismissSession) return
-    const dt = Math.min(0.064, Math.max(0.001, (now - dismissSpringPrev) / 1000))
-    dismissSpringPrev = now
-    const moving = advanceSpring(dismissSpring, dt, 22, 16)
-    const offsetY = dismissSpring.value
-    const scaleY = offsetY < 0 ? Math.max(0.94, 1 + offsetY * 0.0011) : 1
-    applyDismissVisual(offsetY, scaleY, false, false)
-    if (moving) dismissSpringFrame = requestAnimationFrame(step)
-    else clearDismissVisual()
-  }
-  dismissSpringFrame = requestAnimationFrame(step)
+  const snapTransition = motionPreset.value.dismissSnap
+  dismissTween = gsap.to(dismissProxy, {
+    y: 0,
+    scaleY: 1,
+    duration: Math.max(0.001, snapTransition.duration),
+    ease: snapTransition.ease,
+    onUpdate: syncDismissTransform,
+    onComplete: () => {
+      dismissTween = null
+      if (!disposed && !dismissSession) {
+        dismissCurrentY = 0
+        applyDismissVisual(0, 1, false, false)
+      }
+    }
+  })
 }
 
 function collapseNow(clearPin = true): void {
@@ -816,7 +960,8 @@ function beginDismissDrag(event: PointerEvent): void {
   if (event.button !== 0 || !event.isPrimary || !expanded.value || approval.value) return
   const handle = event.currentTarget as HTMLButtonElement | null
   if (!handle) return
-  const liveOffset = dismissSpring.value
+  const liveOffset = dismissProxy.y
+  dismissCurrentY = liveOffset
   stopDismissSpring()
   pressed.value = true
   cancelHover()
@@ -856,7 +1001,7 @@ function moveDismissDrag(event: PointerEvent): void {
   session.samples.push({ y: event.clientY, ts })
   if (session.samples.length > 10) session.samples.shift()
   const pull = computeDismissPull(session.baseOffsetY + dy)
-  dismissSpring.value = pull.offsetY
+  dismissCurrentY = pull.offsetY
   session.lastOffsetY = pull.offsetY
   const visualY = motionReduced.value ? 0 : pull.offsetY
   const visualScale = motionReduced.value ? 1 : pull.scaleY
@@ -1097,7 +1242,6 @@ async function openSeparateTranslation(): Promise<void> {
 async function launch(id: string): Promise<void> {
   const application = state.apps.find(item => item.id === id)
   if (!application) return
-  signal('launch')
   if (await launchApp(application)) expand(false)
 }
 
@@ -1235,21 +1379,205 @@ async function sendGeometry(): Promise<void> {
 
 function measureContent(): void {
   // offsetHeight 读取布局高度，不受父级动画的亚像素位移影响，避免 ceil 把 188 算成 189。
-  const height = content.value?.offsetHeight
+  const el = content.value as HTMLElement | null
+  const height = el?.offsetHeight
   if (height) contentHeight.value = Math.min(478, height)
-  const header = chrome.value?.offsetHeight
+  const hdr = chrome.value as HTMLElement | null
+  const header = hdr?.offsetHeight
   if (header) chromeHeight.value = header
 }
 
-function onPaneBeforeLeave(el: Element): void {
-  if (el instanceof HTMLElement) el.inert = true
-}
-
-watch([ocrPanelOpen, () => state.ocr.status, () => state.ocr.text], () => {
+watch([ocrPanelOpen, () => state.ocr.status, () => state.ocr.text, page], () => {
   void nextTick(measureContent)
 })
 
+function runShellResize(): void {
+  const el = panel.value
+  if (!el) return
+  shellTween?.kill()
+  shellTween = null
+  const targetW = `${visibleWidth.value}px`
+  const targetH = `${visibleHeight.value}px`
+  if ((isDesktop && tucked.value) || motionReduced.value) {
+    gsap.set(el, { width: targetW, height: targetH })
+    onShellAnimationComplete()
+    return
+  }
+  if (motionMode.value === 'sweep' && !pageSwitching.value) {
+    const tl = gsap.timeline({
+      onComplete: () => {
+        shellTween = null
+        onShellAnimationComplete()
+      }
+    })
+    if (expanded.value) {
+      // 粘液蠕虫特征：先横向拉开，慢半拍再垂展高度
+      tl.to(el, { width: targetW, duration: 0.28, ease: 'back.out(1.45)' }, 0)
+        .to(el, { height: targetH, duration: 0.42, ease: 'elastic.out(0.95, 0.62)' }, 0.085)
+    } else {
+      // 收起先压扁，再缩窄
+      tl.to(el, { height: targetH, duration: 0.16, ease: 'power3.inOut' }, 0)
+        .to(el, { width: targetW, duration: 0.22, ease: 'power3.out' }, 0.065)
+    }
+    shellTween = tl
+    return
+  }
+  const spec = shellTransition.value
+  shellTween = gsap.to(el, {
+    width: targetW,
+    height: targetH,
+    duration: Math.max(0.001, spec.duration),
+    ease: spec.ease,
+    onComplete: () => {
+      shellTween = null
+      onShellAnimationComplete()
+    }
+  })
+}
+
+watch([visibleWidth, visibleHeight], runShellResize, { flush: 'post' })
+
+watch([expanded, isNoticeStatus], ([open, notice]) => {
+  const el = capsuleTextEl.value
+  if (!el) return
+  capsuleTween?.kill()
+  const hide = open && !notice
+  const spec = capsuleTextTransition.value
+  if (motionReduced.value) {
+    gsap.set(el, hide ? { opacity: 0, y: -3, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 })
+    return
+  }
+  capsuleTween = gsap.to(el, {
+    opacity: hide ? 0 : 1,
+    y: hide ? -3 : 0,
+    scale: hide ? 0.96 : 1,
+    duration: Math.max(0.001, spec.duration),
+    delay: spec.delay ?? 0,
+    ease: spec.ease
+  })
+}, { flush: 'post' })
+
+watch(expanded, (open) => {
+  const ch = chrome.value
+  const co = content.value
+  chromeTween?.kill()
+  contentTween?.kill()
+  const spec = contentRevealTransition.value
+  const hidden = contentHiddenPose.value
+  if (motionReduced.value) {
+    if (ch) gsap.set(ch, open ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1 } : { opacity: 0, y: -4, scaleX: 0.98, scaleY: 0.98 })
+    if (co) gsap.set(co, open ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : hidden)
+    return
+  }
+
+  if (open) {
+    const tl = gsap.timeline()
+    if (ch) {
+      tl.to(ch, {
+        opacity: 1,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        duration: Math.max(0.001, spec.duration),
+        delay: spec.delay ?? 0,
+        ease: spec.ease
+      }, 0)
+    }
+    if (co) {
+      tl.to(co, {
+        opacity: 1,
+        y: 0,
+        scaleX: 1,
+        scaleY: 1,
+        filter: 'blur(0px)',
+        duration: Math.max(0.001, spec.duration),
+        delay: spec.delay ?? 0,
+        ease: spec.ease
+      }, 0.02)
+      const tiles = co.querySelectorAll<HTMLElement>('.app-tile, .categories button')
+      if (tiles.length && tiles.length <= 28 && motionMode.value !== 'flicker') {
+        tl.fromTo(
+          tiles,
+          { opacity: 0, y: 6, scale: 0.95 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.22, stagger: 0.012, ease: spec.ease, clearProps: 'transform,opacity' },
+          (spec.delay ?? 0) + 0.03
+        )
+      }
+    }
+    contentTween = tl as unknown as gsap.core.Tween
+    return
+  }
+
+  if (ch) {
+    chromeTween = gsap.to(ch, {
+      opacity: 0,
+      y: -4,
+      scaleX: 0.98,
+      scaleY: 0.98,
+      duration: Math.max(0.001, spec.duration),
+      ease: spec.ease
+    })
+  }
+  if (co) {
+    contentTween = gsap.to(co, {
+      opacity: 0,
+      y: hidden.y ?? 0,
+      scaleX: hidden.scaleX ?? 1,
+      scaleY: hidden.scaleY ?? 1,
+      filter: hidden.filter ?? 'blur(0px)',
+      duration: Math.max(0.001, spec.duration),
+      ease: spec.ease
+    })
+  }
+}, { flush: 'post' })
+
+watch(() => [showQuickCode.value, quickMailCode.value?.code], ([visible, code]) => {
+  if (!visible || typeof code !== 'string') return
+  void nextTick(() => {
+    animateScrambleText(quickCodeTextEl.value, code, motionReduced.value, { chars: '0123456789', duration: 0.42 })
+  })
+}, { flush: 'post' })
+
+watch(() => [capsuleStatus.value.kind, capsuleStatus.value.text], ([kind, text]) => {
+  if (kind !== 'feedback' || !text) return
+  void nextTick(() => {
+    animateScrambleText(capsuleStatusLabelEl.value, text, motionReduced.value, { chars: '✓✦01·', duration: 0.28, speed: 0.8 })
+  })
+}, { flush: 'post' })
+
+watch(() => filteredApps.value.map(item => item.id).join('|'), () => {
+  if (!expanded.value || page.value !== 'applications') return
+  const snap = captureFlipSnapshot(appGridEl.value, '.app-tile', motionReduced.value, 36)
+  if (!snap) return
+  void nextTick(() => playFlipSnapshot(snap, appGridEl.value, '.app-tile', pillTransition.value, { stagger: 0.01, maxItems: 36 }))
+}, { flush: 'pre' })
+
+watch([page, expanded, viewingMail, ocrPanelOpen], () => {
+  const nav = modeNav.value
+  if (!nav || motionReduced.value) return
+  const prev = nav.querySelector<HTMLElement>('.mode-selection')
+  if (!prev) return
+  const flipState = Flip.getState(prev)
+  void nextTick(() => {
+    const next = nav.querySelector<HTMLElement>('.mode-selection')
+    if (next) animateFlipFromState(flipState, next, pillTransition.value, { absolute: true })
+  })
+}, { flush: 'pre' })
+
 onMounted(() => {
+  if (panel.value) {
+    gsap.set(panel.value, { width: `${visibleWidth.value}px`, height: `${visibleHeight.value}px` })
+  }
+  if (capsuleTextEl.value) {
+    const hide = expanded.value && !isNoticeStatus.value
+    gsap.set(capsuleTextEl.value, hide ? { opacity: 0, y: -3, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 })
+  }
+  if (chrome.value) {
+    gsap.set(chrome.value, expanded.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1 } : { opacity: 0, y: -4, scaleX: 0.98, scaleY: 0.98 })
+  }
+  if (content.value) {
+    gsap.set(content.value, expanded.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : contentHiddenPose.value)
+  }
   void subscribeShelf().then(off => { if (disposed) off(); else stopShelf = off })
     .catch(() => { shelf.error = '暂时无法同步中转文件状态' })
   if (isDesktop) {
@@ -1323,6 +1651,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true
+  shellTween?.kill()
+  capsuleTween?.kill()
+  chromeTween?.kill()
+  contentTween?.kill()
   observer?.disconnect()
   contentObserver?.disconnect()
   cancelAnimationFrame(frame)
@@ -1330,6 +1662,7 @@ onBeforeUnmount(() => {
   clearTimeout(leaveTimer)
   clearTimeout(clockTimer)
   clearTimeout(feedbackTimer)
+  clearTimeout(packHighlightTimer)
   clearTimeout(quickOcrTimer)
   stopFeedback?.()
   stopTelemetry?.()
@@ -1344,7 +1677,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', updateClock)
   clearTimeout(closeTimer)
   clearTimeout(geometryTimer)
-  cancelAnimationFrame(navMeasureRaf)
   clearTimeout(pageSwitchTimer)
   window.removeEventListener('pointerup', handlePointerUp)
   window.removeEventListener('pointercancel', handlePointerUp)
@@ -1361,13 +1693,26 @@ onBeforeUnmount(() => {
     @mouseenter="enter" @mouseleave="leave" @pointermove="trackPointerSpeed" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
-    <div ref="panel" class="island solid-surface" :data-motion="motionMode" :class="[{ expanded, 'page-switching': pageSwitching, tucked: !revealed, telemetry, 'has-quick-menu': quickMenuOpen && !expanded, 'no-physics': !(effectsActive && quality === 'full') && !motionReduced }, `variant-${variant}`, `motion-${motionMode}`]"
-      :style="{ width: `${visibleWidth}px`, height: `${visibleHeight}px` }">
+    <div
+      ref="panel"
+      class="island solid-surface"
+      :data-motion="motionMode"
+      :class="[{ expanded, 'page-switching': pageSwitching, tucked: !revealed, telemetry, 'has-quick-menu': quickMenuOpen && !expanded, 'no-physics': !(effectsActive && quality === 'full') && !motionReduced }, `variant-${variant}`, `motion-${motionMode}`]"
+    >
       <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" :moving="geometryMoving || pageSwitching" />
       <GlassLight v-if="materialReady && glassAvailable"
-        :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :paused="geometryMoving || pageSwitching" :corner-radius="cornerRadius" :palette="glassPalette" @unavailable="glassAvailable = false" />
-      <IslandParticles v-if="materialReady"
-        :cue="cue" :active="effectsActive" :quality="quality" :dark="dark" :motion="motionMode" />
+        :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :paused="pageSwitching"
+        :corner-radius="variant === 'mecha' || variant === 'scroll' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : undefined"
+        :palette="glassPalette" @unavailable="glassAvailable = false" />
+      <CapsuleOrbitTrack
+        :width="visibleWidth"
+        :height="visibleHeight"
+        :corner-radius="cornerRadius"
+        :active="orbitActive"
+        :tone="orbitTone"
+        :speed="orbitSpeed"
+        :reduced="motionReduced"
+      />
       <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
       <div class="capsule-bar" :class="{ 'has-quick-code': showQuickOcr || showQuickCode }">
         <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
@@ -1375,7 +1720,12 @@ onBeforeUnmount(() => {
           :aria-label="approval ? approval.title : `${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
           :inert="!revealed" aria-description="按住拖动位置，单击展开或收起，右键打开快捷操作"
           @pointerdown.stop="windowDrag.begin" @click="activateCapsule" @contextmenu.prevent="toggleQuickMenu">
-          <span class="capsule-text" :class="{ feedback: isNoticeStatus }" aria-hidden="true">
+          <span
+            ref="capsuleTextEl"
+            class="capsule-text"
+            :class="{ feedback: isNoticeStatus }"
+            aria-hidden="true"
+          >
             <span v-if="telemetry && !expanded" class="telemetry-led" :class="capsuleStatus.kind" />
             <span v-else-if="variant === 'liquid' && !expanded" class="liquid-orb-dot" />
             <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
@@ -1392,7 +1742,15 @@ onBeforeUnmount(() => {
                 </template>
               </template>
               <template v-else>
-                <Icon v-if="capsuleStatus.icon" :name="capsuleStatus.icon" :size="13" />{{ capsuleStatus.text }}
+                <CapsuleMorphGlyph
+                  v-if="capsuleStatus.kind !== 'idle'"
+                  :kind="capsuleStatus.kind"
+                  :error="capsuleStatus.icon === 'info'"
+                  :progress="runTask.stage === 'running' ? runProgress : null"
+                  :reduced="motionReduced"
+                />
+                <span ref="capsuleStatusLabelEl">{{ capsuleStatus.text }}</span>
+                <span v-if="runTask.stage === 'running' && runPercentText" class="capsule-pct">{{ runPercentText }}</span>
               </template>
             </span>
             <!-- 右侧副舱微徽标：与时钟/微读数和平并存 -->
@@ -1411,74 +1769,162 @@ onBeforeUnmount(() => {
           <span class="grip" aria-hidden="true" />
         </button>
         <!-- 检测到 Win+Shift+S 等新截图进入剪贴板时：收起态浮现一键识字按钮 -->
-        <div
-          v-if="showQuickOcr && quickOcrClip"
-          class="capsule-ocr-actions"
-          @pointerenter="hoveringQuickAction = true; cancelHover(); scheduleQuickOcrExpire(15000)"
-          @pointerleave="hoveringQuickAction = false"
+        <GsapPresence
+          :initial="motionReduced ? false : { opacity: 0, x: -4, scale: 0.94 }"
+          :animate="{ opacity: 1, x: 0, scale: 1 }"
+          :exit="motionReduced ? { opacity: 0 } : { opacity: 0, x: -4, scale: 0.94 }"
+          :transition="pillTransition"
+        >
+          <div
+            v-if="showQuickOcr && quickOcrClip"
+            key="quick-ocr"
+            class="capsule-ocr-actions"
+            @pointerenter="hoveringQuickAction = true; cancelHover(); scheduleQuickOcrExpire(15000)"
+            @pointerleave="hoveringQuickAction = false"
+          >
+            <button
+              v-gsap-press="actionTapPose"
+              class="capsule-code-btn capsule-ocr-btn"
+              type="button"
+              title="识别刚刚截取的图片中的文字"
+              @click.stop="triggerQuickImageOcr"
+            >
+              <Icon name="scan-text" :size="11" />
+              <span>识字</span>
+            </button>
+            <button
+              v-gsap-press="actionTapPose"
+              class="capsule-ocr-dismiss"
+              type="button"
+              title="关闭提示"
+              aria-label="关闭截图识字提示"
+              @click.stop="clearQuickOcr"
+            >
+              <Icon name="close" :size="10" />
+            </button>
+          </div>
+        </GsapPresence>
+        <!-- 检测到新邮件验证码时：收起态直接露出一键直拷按钮 -->
+        <GsapPresence
+          :initial="motionReduced ? false : { opacity: 0, x: -4, scale: 0.94 }"
+          :animate="{ opacity: 1, x: 0, scale: 1 }"
+          :exit="motionReduced ? { opacity: 0 } : { opacity: 0, x: -4, scale: 0.94 }"
+          :transition="pillTransition"
         >
           <button
-            class="capsule-code-btn capsule-ocr-btn"
+            v-if="showQuickCode && quickMailCode"
+            key="quick-code"
+            v-gsap-press="actionTapPose"
+            class="capsule-code-btn"
             type="button"
-            title="识别刚刚截取的图片中的文字"
-            @click.stop="triggerQuickImageOcr"
+            :disabled="copyingQuickCode"
+            :title="`一键复制来自 ${quickMailCode.sender || '邮件'} 的验证码`"
+            @click.stop="copyQuickMailCode"
           >
-            <Icon name="scan-text" :size="11" />
-            <span>识字</span>
+            <Icon name="copy" :size="11" />
+            <span ref="quickCodeTextEl">{{ quickMailCode.code }}</span>
           </button>
+        </GsapPresence>
+      </div>
+      <!-- 打包/联调实时日志、INFO、出错详情与剩余分钟副条 -->
+      <GsapPresence
+        :initial="motionReduced ? false : { opacity: 0, y: -4 }"
+        :animate="{ opacity: 1, y: 0 }"
+        :exit="motionReduced ? { opacity: 0 } : { opacity: 0, y: -4 }"
+        :transition="pillTransition"
+      >
+        <div
+          v-if="showPackStrip"
+          key="pack-live-strip"
+          class="capsule-pack-strip"
+          :class="`is-${packLiveBadge.toLowerCase()}`"
+          role="status"
+          @click="openPackConsoleFromCapsule"
+        >
+          <span class="pack-badge">{{ packLiveBadge }}</span>
+          <span ref="packInfoTextEl" class="pack-msg" :title="packLiveSummary">{{ packLiveSummary }}</span>
+          <span v-if="runTask.stage === 'error'" class="pack-jump">查看日志 ↗</span>
           <button
-            class="capsule-ocr-dismiss"
+            v-else-if="runTask.stage !== 'running'"
             type="button"
-            title="关闭提示"
-            aria-label="关闭截图识字提示"
-            @click.stop="clearQuickOcr"
+            class="pack-dismiss"
+            title="收起提示"
+            aria-label="收起打包状态条"
+            @click.stop="packStripDismissedKey = runKey; packHighlightTone = null"
           >
             <Icon name="close" :size="10" />
           </button>
+          <span v-if="runTask.stage === 'running'" class="pack-bar">
+            <i :style="{ width: runProgress !== null ? `${Math.round(runProgress * 100)}%` : '38%' }" :class="{ indeterminate: runProgress === null }" />
+          </span>
         </div>
-        <!-- 检测到新邮件验证码时：收起态直接露出一键直拷按钮 -->
-        <button
-          v-if="showQuickCode && quickMailCode"
-          class="capsule-code-btn"
-          type="button"
-          :disabled="copyingQuickCode"
-          :title="`一键复制来自 ${quickMailCode.sender || '邮件'} 的验证码`"
-          @click.stop="copyQuickMailCode"
-        >
-          <Icon name="copy" :size="11" />
-          <span>{{ quickMailCode.code }}</span>
-        </button>
-      </div>
+      </GsapPresence>
       <!-- 右键胶囊免展开快捷操作条 -->
-      <div v-if="quickMenuOpen && !expanded && !tucked" class="capsule-quick-menu" role="toolbar" aria-label="胶囊快捷操作">
-        <button type="button" @click="runQuickAction('pause')">
-          <Icon :name="state.ui.paused ? 'play' : 'pause'" :size="12" />{{ state.ui.paused ? '恢复剪贴板' : '暂停剪贴板' }}
-        </button>
-        <button type="button" @click="runQuickAction('ocr')"><Icon name="scan-text" :size="12" />截图识字</button>
-        <button type="button" @click="runQuickAction('pin-open')"><Icon name="pin" :size="12" />钉住展开</button>
-        <button type="button" @click="runQuickAction('audio')"><Icon name="volume" :size="12" />调音台</button>
-        <button type="button" @click="runQuickAction('settings')"><Icon name="settings" :size="12" />设置</button>
-      </div>
+      <GsapPresence
+        :initial="motionReduced ? false : { opacity: 0, y: -4, scale: 0.96 }"
+        :animate="{ opacity: 1, y: 0, scale: 1 }"
+        :exit="motionReduced ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }"
+        :transition="pillTransition"
+      >
+        <div
+          v-if="quickMenuOpen && !expanded && !tucked"
+          key="quick-menu"
+          class="capsule-quick-menu"
+          role="toolbar"
+          aria-label="胶囊快捷操作"
+        >
+          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('pause')">
+            <Icon :name="state.ui.paused ? 'play' : 'pause'" :size="12" />{{ state.ui.paused ? '恢复剪贴板' : '暂停剪贴板' }}
+          </button>
+          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('ocr')"><Icon name="scan-text" :size="12" />截图识字</button>
+          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('pin-open')"><Icon name="pin" :size="12" />钉住展开</button>
+          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('audio')"><Icon name="volume" :size="12" />调音台</button>
+          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('settings')"><Icon name="settings" :size="12" />设置</button>
+        </div>
+      </GsapPresence>
       <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && isNoticeStatus ? capsuleStatus.text : '' }}</span>
       <div class="expanded-content" :class="{ 'can-scroll': needsOuterScroll, 'fixed-search': !approval && !ocrPanelOpen && !viewingMail && page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
-        <div ref="chrome" v-show="!approval" class="island-chrome">
+        <div
+          ref="chrome"
+          v-show="!approval"
+          class="island-chrome"
+        >
           <header class="toolbar">
             <nav ref="modeNav" class="mode-nav" aria-label="灵动岛功能">
-              <span v-show="!viewingMail && !ocrPanelOpen" ref="modeSelection" class="mode-selection" aria-hidden="true" />
-              <button v-for="(section, idx) in sections" :key="section.value" type="button"
+              <button v-for="(section, idx) in sections" :key="section.value" v-gsap-press="actionTapPose" type="button"
                 :title="`${section.label}（按 ${idx + 1} 或 Alt+${idx + 1}）`" :aria-label="section.label" :aria-pressed="!viewingMail && !ocrPanelOpen && page === section.value"
-                :class="{ selected: !viewingMail && !ocrPanelOpen && page === section.value }" @click="selectPage(section.value)">
+                :class="{ selected: !viewingMail && !ocrPanelOpen && page === section.value }"
+                @click="selectPage(section.value)">
+                <span
+                  v-if="!viewingMail && !ocrPanelOpen && page === section.value"
+                  data-flip-id="island-nav-pill"
+                  class="mode-selection"
+                  aria-hidden="true"
+                />
                 <Icon :name="section.icon" :size="19" :stroke="1.7" />
                 <span class="mode-label">{{ section.label }}</span>
               </button>
             </nav>
             <div class="tools">
-              <button v-if="mailNotices.length" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="closeOcrPanel(); mailSelected = !viewingMail"><Icon name="mail" :size="16" /></button>
-              <button class="round-action" type="button" :title="`截图识字（${state.shortcuts.ocr || 'Ctrl+Shift+O'}）`" aria-label="截图识字" :aria-pressed="ocrPanelOpen" @click="startScreenOcr"><Icon name="scan-text" :size="16" /></button>
-              <button v-if="!viewingMail && !ocrPanelOpen && page === 'translation'" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="16" /></button>
-              <button class="round-action pin-action" type="button" :title="pinned ? '已钉住展开（点击或按 Esc 取消）' : '钉住展开，移开鼠标不自动收起（Alt+P）'" aria-label="钉住灵动岛" :aria-pressed="pinned" @click="pinned = !pinned"><Icon name="pin" :size="15" /></button>
-              <button class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="16" /></button>
-              <button class="round-action collapse-action" type="button" title="收起（Esc）" aria-label="收起灵动岛" @click="collapseNow(true)"><Icon name="chevron-down" :size="16" /></button>
+              <button
+                v-if="(runTask.stage === 'running' || packHighlightTone !== null) && (viewingMail || ocrPanelOpen || page !== 'pack')"
+                v-gsap-press="actionTapPose"
+                class="toolbar-pack-pill"
+                :class="runTask.stage === 'error' ? 'is-err' : runTask.stage === 'done' ? 'is-done' : 'is-run'"
+                type="button"
+                :title="`${runTask.name || '打包'}：${packLiveSummary}（点击切回打包台）`"
+                @click="openPackConsoleFromCapsule"
+              >
+                <span class="pill-dot" aria-hidden="true" />
+                <span class="pill-text">{{ packPhase.label || '打包' }}</span>
+                <span v-if="runTask.stage === 'running'" class="pill-time">{{ clock(runElapsed) }}</span>
+              </button>
+              <button v-if="mailNotices.length" v-gsap-press="actionTapPose" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="closeOcrPanel(); mailSelected = !viewingMail"><Icon name="mail" :size="16" /></button>
+              <button v-gsap-press="actionTapPose" class="round-action" type="button" :title="`截图识字（${state.shortcuts.ocr || 'Ctrl+Shift+O'}）`" aria-label="截图识字" :aria-pressed="ocrPanelOpen" @click="startScreenOcr"><Icon name="scan-text" :size="16" /></button>
+              <button v-if="!viewingMail && !ocrPanelOpen && page === 'translation'" v-gsap-press="actionTapPose" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="16" /></button>
+              <button v-gsap-press="actionTapPose" class="round-action pin-action" type="button" :title="pinned ? '已钉住展开（点击或按 Esc 取消）' : '钉住展开，移开鼠标不自动收起（Alt+P）'" aria-label="钉住灵动岛" :aria-pressed="pinned" @click="pinned = !pinned"><Icon name="pin" :size="15" /></button>
+              <button v-gsap-press="actionTapPose" class="round-action" type="button" title="设置" aria-label="设置" @click="openSettings()"><Icon name="settings" :size="16" /></button>
+              <button v-gsap-press="actionTapPose" class="round-action collapse-action" type="button" title="收起（Esc）" aria-label="收起灵动岛" @click="collapseNow(true)"><Icon name="chevron-down" :size="16" /></button>
             </div>
           </header>
           <div v-if="state.ui.wechatAttention" class="attention-strip" role="status">
@@ -1487,13 +1933,27 @@ onBeforeUnmount(() => {
             <button type="button" @click="invokeHost('clear_wechat_attention')">清除待关注</button>
           </div>
         </div>
-        <div ref="content" class="island-content">
+        <div
+          ref="content"
+          class="island-content"
+        >
           <ApprovalPrompt v-if="approval" :key="approval.id" :card="approval" :count="approvalCount" :busy="answering" @answer="answerApproval" />
           <OcrResultPanel v-else-if="ocrPanelOpen && expanded" />
           <MailNotices v-else-if="viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
           <div v-show="!approval && !ocrPanelOpen && !viewingMail" class="ordinary-pane" :style="{ '--pane-dir': paneDir }">
-          <Transition name="island-pane" @before-leave="onPaneBeforeLeave" @enter="measureContent" @after-enter="measureContent" @after-leave="measureContent">
-            <div v-if="page === 'applications'" :key="'applications'" class="applications">
+          <GsapPresence
+            mode="out-in"
+            :initial="paneInitial"
+            :animate="{ opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' }"
+            :exit="paneExit"
+            :transition="paneTransition"
+            @animation-complete="measureContent"
+          >
+            <div
+              v-if="page === 'applications'"
+              key="applications"
+              class="applications"
+            >
               <div class="app-toolbar">
                 <div class="app-search-box">
                   <Icon name="search" :size="13" />
@@ -1513,27 +1973,41 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <nav class="categories" aria-label="应用分类">
-                <button v-for="category in state.categories" :key="category.id" type="button"
+                <button v-for="category in state.categories" :key="category.id" v-gsap-press="actionTapPose" type="button"
                   :class="{ selected: state.ui.activeCategoryId === category.id }" :aria-pressed="state.ui.activeCategoryId === category.id"
                   @click="setCategory(category.id)">{{ category.name }}</button>
               </nav>
               <p v-if="!filteredApps.length" class="empty">{{ appSearch ? '没有匹配的应用' : '这个分类还没有应用' }}</p>
-              <div v-else class="app-grid scroll-y" :class="{ 'with-names': showAppNames }">
-                <button v-for="app in filteredApps" :key="app.id" class="app-tile" type="button" :title="app.name" :aria-label="app.name" @click="launch(app.id)">
+              <div v-else ref="appGridEl" class="app-grid scroll-y" :class="{ 'with-names': showAppNames }">
+                <button
+                  v-for="app in filteredApps"
+                  :key="app.id"
+                  v-gsap-hover="actionHoverPose"
+                  v-gsap-press="tileTapPose"
+                  class="app-tile"
+                  type="button"
+                  :title="app.name"
+                  :aria-label="app.name"
+                  @click="launch(app.id)"
+                >
                   <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
                   <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
                   <span v-if="showAppNames" class="app-name">{{ app.name }}</span>
                 </button>
               </div>
             </div>
-            <div v-else :key="page" class="feature-pane scroll-y">
+            <div
+              v-else
+              :key="page"
+              class="feature-pane scroll-y"
+            >
               <ClipboardPopover v-if="page === 'clipboard'" @reading-explanation="setReadingExplanation" />
               <TranslationPanel v-else-if="page === 'translation'" />
               <FileShelf v-else-if="page === 'files'" :drag-over="receivingFiles" />
               <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
               <PackConsole v-else-if="page === 'pack'" />
             </div>
-          </Transition>
+          </GsapPresence>
           </div>
         </div>
       </div>
@@ -1594,16 +2068,20 @@ onBeforeUnmount(() => {
   background: transparent;
   isolation: isolate;
 }
-.island.variant-standard,
+.island.variant-standard {
+  background: var(--surface-glass);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--island-drop-shadow);
+}
 .island.variant-telemetry {
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--island-rim, var(--island-outline)), inset 0 1px 0 var(--island-top-sheen);
 }
 .island {
-  position: absolute; top: var(--surface-inset); left: 50%; transform: translateX(-50%); transform-origin: 50% 0;
+  position: absolute; top: var(--surface-inset); left: 0; right: 0; margin-inline: auto; transform-origin: 50% 0;
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   box-shadow: inset 0 1px 0 var(--island-top-sheen);
-  transition: var(--size-transition), top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
+  transition: top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
 .island.dismiss-dragging { transition: none !important; }
 .island.expanded { border-radius: 18px; }
@@ -1641,26 +2119,59 @@ onBeforeUnmount(() => {
 }
 .capsule-badge.tone-accent { background: var(--accent-weak); color: var(--accent); border-color: var(--accent); }
 .capsule-badge.tone-paused { color: var(--danger); border-color: var(--danger-weak); background: var(--danger-weak); }
+.capsule-pct {
+  display: inline-flex; align-items: center; height: 17px; padding: 0 5px; margin-left: 2px;
+  border-radius: 999px; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-weak); color: var(--accent);
+}
+.capsule-pack-strip {
+  position: relative; z-index: 3; display: flex; align-items: center; gap: 6px;
+  height: 28px; margin: 0 8px 4px; padding: 0 8px;
+  border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--text-2);
+  font-size: 11px; cursor: pointer; overflow: hidden;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.capsule-pack-strip:hover { border-color: var(--line-strong); color: var(--text); }
+.capsule-pack-strip.is-err { border-color: color-mix(in srgb, var(--danger) 48%, var(--line)); background: color-mix(in srgb, var(--danger) 10%, var(--surface-2)); }
+.capsule-pack-strip.is-done { border-color: color-mix(in srgb, #10b981 48%, var(--line)); background: color-mix(in srgb, #10b981 10%, var(--surface-2)); }
+.pack-badge {
+  flex: none; padding: 1px 5px; border-radius: 5px;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
+  background: var(--accent-weak); color: var(--accent);
+}
+.capsule-pack-strip.is-warn .pack-badge { background: color-mix(in srgb, #f59e0b 16%, transparent); color: #d97706; }
+.capsule-pack-strip.is-err .pack-badge { background: var(--danger-weak); color: var(--danger); }
+.capsule-pack-strip.is-done .pack-badge { background: color-mix(in srgb, #10b981 16%, transparent); color: #10b981; }
+.pack-msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.pack-jump { flex: none; font-size: 10.5px; font-weight: 650; color: var(--danger); }
+.pack-dismiss {
+  flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 99px;
+  color: var(--text-3);
+}
+.pack-dismiss:hover { background: var(--hover); color: var(--text); }
+.pack-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: color-mix(in srgb, var(--line) 50%, transparent);
+}
+.pack-bar i {
+  display: block; height: 100%; border-radius: 99px; background: var(--accent);
+  transition: width 360ms var(--ease-out);
+}
+.pack-bar i.indeterminate { animation: pack-bar-slide 1.2s ease-in-out infinite alternate; }
+@keyframes pack-bar-slide { from { transform: translateX(0); } to { transform: translateX(160%); } }
 .capsule-code-btn {
   flex: none; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
   border-radius: 999px; border: 1px solid var(--accent); background: var(--accent-weak); color: var(--text);
   font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: .04em; cursor: pointer;
   transform-origin: right center;
   touch-action: manipulation;
-  transition: transform 150ms var(--ease-out), opacity 150ms var(--ease-out), background-color 120ms ease, color 120ms ease;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 .capsule-code-btn:hover { background: var(--accent); color: var(--accent-text); }
 .capsule-ocr-actions {
   position: relative; z-index: 3; flex: none; display: inline-flex; align-items: center; gap: 4px;
   transform-origin: right center;
-  transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
-}
-@starting-style {
-  .capsule-ocr-actions,
-  .capsule-code-btn {
-    opacity: 0;
-    transform: translate3d(-4px, 0, 0) scale(.94);
-  }
 }
 .capsule-ocr-btn { font-family: var(--font-sans); letter-spacing: 0; }
 .capsule-ocr-dismiss {
@@ -1673,13 +2184,6 @@ onBeforeUnmount(() => {
   position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 4px 8px 7px; border-top: 1px solid var(--line);
   transform-origin: top center;
-  transition: opacity 170ms var(--ease-out), transform 170ms var(--ease-out);
-}
-@starting-style {
-  .capsule-quick-menu {
-    opacity: 0;
-    transform: translate3d(0, -4px, 0) scale(.96);
-  }
 }
 .capsule-quick-menu button {
   display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px;
@@ -1695,9 +2199,7 @@ onBeforeUnmount(() => {
 .capsule-text {
   display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px;
   font-weight: 600; letter-spacing: .22px; font-variant-numeric: tabular-nums; color: var(--text);
-  transition: opacity calc(var(--geometry-time) * .36) var(--ease-out) calc(var(--geometry-time) * .28), transform calc(var(--geometry-time) * .68) var(--geometry-ease);
 }
-.expanded .capsule-text:not(.feedback) { opacity: 0; transform: translateY(-3px) scale(.96); transition: opacity calc(var(--geometry-time) * .2) var(--ease-out), transform calc(var(--geometry-time) * .28) var(--ease-out); }
 .capsule-text.feedback { font-size: 12px; letter-spacing: .2px; }
 .capsule-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .grip {
@@ -1729,44 +2231,57 @@ onBeforeUnmount(() => {
   width: calc(var(--content-width) - 2 * var(--content-gutter));
 }
 .ordinary-pane { position: relative; display: block; overflow: clip; }
-.island-pane-enter-active {
-  will-change: transform, opacity;
-  transition: opacity 115ms var(--ease-out), transform 130ms var(--ease-out);
-}
-.island-pane-leave-active {
-  position: absolute; top: 0; left: 0; right: 0;
-  pointer-events: none;
-  will-change: transform, opacity;
-  transition: opacity 75ms var(--ease-out), transform 85ms var(--ease-out);
-}
-.island-pane-enter-from { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * 6px), 0, 0); }
-.island-pane-leave-to { opacity: 0; transform: translate3d(calc(var(--pane-dir, 1) * -4px), 0, 0); }
 .toolbar {
   display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
   gap: 6px; margin-bottom: 8px; padding: 0 0 7px; border-bottom: 1px solid var(--line);
 }
 .tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.toolbar-pack-pill {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; margin-right: 2px;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: var(--accent-weak); color: var(--accent); font-size: 11px; font-weight: 600;
+  white-space: nowrap; cursor: pointer;
+}
+.toolbar-pack-pill.is-done {
+  border-color: color-mix(in srgb, #10b981 48%, var(--line));
+  background: color-mix(in srgb, #10b981 12%, var(--surface)); color: #10b981;
+}
+.toolbar-pack-pill.is-err {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface)); color: var(--danger);
+}
+.toolbar-pack-pill .pill-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none;
+}
+.toolbar-pack-pill.is-run .pill-dot {
+  box-shadow: 0 0 6px currentColor;
+}
+.toolbar-pack-pill .pill-time {
+  font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; opacity: .88;
+}
 .round-action {
   display: grid; place-items: center; flex: none; width: 28px; height: 28px;
   border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text-3);
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 .collapse-action svg { transform: rotate(180deg); }
-.round-action:hover { background: var(--surface-3); border-color: var(--line); color: var(--text); }
-.tools .round-action[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
-.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; max-height: 74px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin: 0 0 8px; padding: 1px; }
-.categories button { flex: none; padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; min-height: 26px; font-size: 12px; color: var(--text-2); }
-.categories .selected { color: var(--text); background: var(--surface-3); font-weight: 600; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.round-action:hover { background: var(--tile-surface); border-color: var(--line); color: var(--text); box-shadow: var(--tile-shadow); }
+.tools .round-action[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); box-shadow: var(--tile-shadow); }
+.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 74px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin: 0 0 8px; padding: 2px; }
+.categories button { flex: none; padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; min-height: 26px; font-size: 12px; color: var(--text-2); transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
+.categories .selected { color: var(--text); background: var(--tile-surface); font-weight: 600; border-color: var(--line); box-shadow: var(--tile-shadow); }
 .categories button:hover:not(.selected) { color: var(--text); background: var(--hover); border-color: var(--line); }
 .app-toolbar {
   display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
 }
 .app-search-box {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 9px; border-radius: 9px;
-  background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  height: 31px; padding: 0 10px; border-radius: 10px;
+  background: var(--well-bg); border: 1px solid var(--line); color: var(--text-2);
+  box-shadow: var(--well-shadow);
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
-.app-search-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-weak); color: var(--text); }
+.app-search-box:focus-within { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 2px var(--accent-weak), var(--well-shadow); color: var(--text); }
 .app-search-box input {
   flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; outline: none;
 }
@@ -1792,13 +2307,19 @@ onBeforeUnmount(() => {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   width: 100%; height: 100%; padding: 6px;
   border-radius: 12px; border: 1px solid transparent; min-width: 0;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.variant-standard .app-tile {
+  background: var(--tile-surface);
+  border-color: var(--line);
+  box-shadow: var(--tile-shadow);
 }
 .app-name {
   width: 100%; font-size: 11px; line-height: 1.25; color: var(--text-2); text-align: center;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .app-tile:hover .app-name { color: var(--text); }
-.app-tile:hover { background: var(--hover); border-color: var(--line); }
+.app-tile:hover { background: var(--tile-surface); border-color: var(--line-strong); box-shadow: var(--tile-hover-shadow); }
 .app-grid:hover, .app-grid:focus-within { scrollbar-color: var(--line-strong) transparent; }
 .app-tile img, .fallback { flex: none; width: var(--app-icon-size); height: var(--app-icon-size); object-fit: contain; }
 .app-tile img { filter: drop-shadow(0 3px 2px rgba(0,0,0,.08)); }
@@ -1814,25 +2335,31 @@ onBeforeUnmount(() => {
 .empty { display: flex; align-items: center; min-height: 64px; margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.8; padding: 16px 4px; }
 .mode-nav {
   position: relative; display: flex; flex: 1; align-items: center; gap: 2px;
-  min-width: 0; width: auto; height: 38px; padding: 2px;
+  min-width: 0; width: auto; height: 38px; padding: 3px;
   overflow-x: auto; overflow-y: hidden; scrollbar-width: none; color: var(--text);
+  border-radius: 12px;
+}
+.variant-standard .mode-nav {
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+  border: 1px solid var(--line);
 }
 .island .mode-nav::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .mode-selection {
-  position: absolute; top: 2px; bottom: 2px; left: 0;
-  width: 36px; border-radius: 10px;
-  background: var(--accent-weak); box-shadow: inset 0 0 0 1px var(--line-strong);
-  contain: layout style;
-  will-change: transform;
-  transform: translate3d(2px, 0, 0);
-  transition: transform 150ms var(--ease-out), width 150ms var(--ease-out);
+  position: absolute; inset: 0; z-index: 0;
+  border-radius: 9px;
+  background: var(--tile-surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--tile-shadow);
   pointer-events: none;
 }
 .mode-nav button {
   position: relative; z-index: 1; display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 0;
   height: 34px; min-width: 34px; padding: 0 7px; border-radius: 10px; color: var(--text-2); font-size: 12.5px;
-  transition: transform 150ms var(--ease-out), color 130ms ease;
+  transition: color 130ms ease;
 }
+.mode-nav button > svg,
+.mode-nav .mode-label { position: relative; z-index: 1; }
 .mode-nav .mode-label {
   max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 650;
   transition: opacity 140ms ease;
@@ -1845,15 +2372,11 @@ onBeforeUnmount(() => {
 .mode-nav button:hover { color: var(--text); }
 button {
   touch-action: manipulation;
-  transition: transform 90ms var(--ease-out), background-color 110ms ease, color 110ms ease, border-color 110ms ease;
+  transition: background-color 110ms ease, color 110ms ease, border-color 110ms ease;
 }
-:where(.round-action, .mode-nav button, .categories button, .attention-strip button, .feature-pane button, .app-tile, .capsule-code-btn, .capsule-ocr-dismiss, .capsule-quick-menu button):active:not(:disabled) {
+.feature-pane button:active:not(:disabled),
+.attention-strip button:active:not(:disabled) {
   transform: scale(.97);
-  transition-duration: 70ms;
-}
-/* 启用 physics.ts 时由内层图标弹簧承担主按压微缩，外框仅轻微沉降避免双重过度缩水。 */
-.island:not(.no-physics) :where(.app-tile, .mode-nav button, .round-action):active:not(:disabled) {
-  transform: scale(.985);
 }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 2; background: var(--success); border-radius: 50%; }
@@ -2134,11 +2657,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-pixel .round-action:hover { background: #5a5280; color: #fff; }
 .variant-pixel .mode-nav .selected {
   background: var(--accent); color: #0f0d1a;
-  transform: translateY(1px); box-shadow: 0 2px 0 #0f0d1a;
+  box-shadow: 0 2px 0 #0f0d1a;
 }
 .variant-pixel .mode-nav .selected svg { color: #0f0d1a; }
 .variant-pixel .mode-nav button:active,
-.variant-pixel .round-action:active { transform: translateY(3px); box-shadow: none; }
+.variant-pixel .round-action:active { box-shadow: none; }
 .variant-pixel .island-content {
   background: #1c221e; border: 2px solid #0f0d1a; padding: 10px;
   box-shadow: inset 0 3px 0 rgba(0, 0, 0, .45);
@@ -2147,12 +2670,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   border-radius: 0; font-family: var(--font-mono); font-size: 12px;
   background: #2b352e; border: 2px solid #0f0d1a; box-shadow: 0 2px 0 #0f0d1a; color: #cbd5e1;
 }
-.variant-pixel .categories .selected { background: #facc15; color: #0f0d1a; border-color: #0f0d1a; box-shadow: 0 1px 0 #0f0d1a; transform: translateY(1px); }
+.variant-pixel .categories .selected { background: #facc15; color: #0f0d1a; border-color: #0f0d1a; box-shadow: 0 1px 0 #0f0d1a; }
 .variant-pixel .app-tile {
   border-radius: 0; background: #2b352e; border: 2px solid #0f0d1a; box-shadow: 0 3px 0 #0f0d1a;
 }
 .variant-pixel .app-tile:hover { background: #36443a; border-color: #0f0d1a; }
-.variant-pixel .app-tile:active { transform: translateY(3px); box-shadow: none; }
+.variant-pixel .app-tile:active { box-shadow: none; }
 .variant-pixel .feature-pane { --r-chip: 0px; --r-tile: 0px; font-family: var(--font-mono); }
 .variant-pixel .feature-pane :deep(.search),
 .variant-pixel .feature-pane :deep(.pause),
@@ -2220,6 +2743,3 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 <!-- 蓝晒图纸、霓虹夜行与软糖黏土三套大胆主题的灵动岛外形 -->
 <style scoped src="./bold-variants.css"></style>
-
-<!-- 6 套独立于外观主题的灵动岛动态效果 -->
-<style scoped src="./motion-variants.css"></style>

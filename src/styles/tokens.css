@@ -43,61 +43,17 @@
   --z-pop: 40;
   --z-modal: 50;
   --z-toast: 60;
+
+  --glass-backdrop: none;
+  --surface-glass: var(--surface);
+  --well-bg: var(--surface-2);
+  --well-shadow: none;
+  --tile-surface: var(--surface-2);
+  --tile-shadow: none;
+  --tile-hover-shadow: none;
+  --island-drop-shadow: inset 0 0 0 1px var(--island-rim, var(--island-outline)), inset 0 1px 0 var(--island-top-sheen);
 }
 
-/* 5 套全局动效参数联动：自动调节开关拉伸、蠕虫延迟、分段滑块、按压回弹与切页浮入 */
-:root[data-motion='glide'] {
-  --stretch: 0.45;
-  --worm-lag: 45ms;
-  --seg-dur: 260ms;
-  --seg-ease: var(--ease-spring-soft);
-  --btn-press-transform: scale(0.97);
-  --btn-release-dur: 220ms;
-  --panel-enter-y: 5px;
-  --panel-enter-dur: 150ms;
-}
-:root[data-motion='bounce'] {
-  --stretch: 1;
-  --worm-lag: 65ms;
-  --seg-dur: 330ms;
-  --seg-ease: var(--ease-spring);
-  --btn-press-transform: scale(1.06, 0.91);
-  --btn-release-dur: 300ms;
-  --panel-enter-y: 8px;
-  --panel-enter-dur: 190ms;
-}
-:root[data-motion='sweep'] {
-  --stretch: 0.85;
-  --worm-lag: 90ms;
-  --seg-dur: 310ms;
-  --seg-ease: var(--ease-spring-soft);
-  --btn-press-transform: scale(0.96);
-  --btn-release-dur: 260ms;
-  --panel-enter-y: 6px;
-  --panel-enter-dur: 170ms;
-}
-:root[data-motion='step'] {
-  --ease-spring: cubic-bezier(0.2, 0.9, 0.25, 1.03);
-  --stretch: 0;
-  --worm-lag: 0ms;
-  --seg-dur: 185ms;
-  --seg-ease: cubic-bezier(0.2, 0.9, 0.25, 1.03);
-  --btn-press-transform: translateY(1.5px) scale(0.98);
-  --btn-release-dur: 140ms;
-  --panel-enter-y: 5px;
-  --panel-enter-dur: 120ms;
-}
-:root[data-motion='flicker'] {
-  --ease-spring: var(--ease-out);
-  --stretch: 0;
-  --worm-lag: 0ms;
-  --seg-dur: 115ms;
-  --seg-ease: var(--ease-out);
-  --btn-press-transform: scale(0.98);
-  --btn-release-dur: 95ms;
-  --panel-enter-y: 0px;
-  --panel-enter-dur: 75ms;
-}
 :root[data-reduced-motion='1'] *,
 :root[data-reduced-motion='1'] *::before,
 :root[data-reduced-motion='1'] *::after {
@@ -122,6 +78,18 @@
   --surface-2: #1d2026;
   --surface-3: #262a33;
 
+  --glass-backdrop: blur(24px) saturate(160%);
+  --surface-glass: linear-gradient(166deg, rgba(38, 43, 55, 0.84) 0%, rgba(20, 23, 30, 0.78) 100%);
+  --well-bg: rgba(9, 11, 16, 0.56);
+  --well-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.52), inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+  --tile-surface: linear-gradient(180deg, rgba(50, 56, 70, 0.82) 0%, rgba(33, 37, 48, 0.74) 100%);
+  --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 3px 8px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.28);
+  --tile-hover-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 18px rgba(0, 0, 0, 0.44),
+    0 2px 5px rgba(0, 0, 0, 0.32);
+  --island-drop-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 22px 48px rgba(0, 0, 0, 0.58), 0 4px 14px rgba(0, 0, 0, 0.42);
+
   --hover: rgba(255, 255, 255, 0.075);
   --active: rgba(255, 255, 255, 0.13);
 
@@ -141,9 +109,10 @@
   --danger-weak: rgba(242, 119, 122, 0.14);
   --success: #5fd28a;
 
-  --pop-bg: rgba(22, 24, 29, 0.98);
-  --pop-border: rgba(255, 255, 255, 0.12);
-  --pop-shadow: 0 24px 64px rgba(0, 0, 0, 0.62), 0 4px 14px rgba(0, 0, 0, 0.45);
+  --pop-bg: linear-gradient(168deg, rgba(35, 39, 50, 0.9) 0%, rgba(20, 23, 30, 0.86) 100%);
+  --pop-border: rgba(255, 255, 255, 0.15);
+  --pop-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 24px 64px rgba(0, 0, 0, 0.64),
+    0 4px 14px rgba(0, 0, 0, 0.45);
 
   --thumb-bg: #282c35;
   --island-rim: rgba(255, 255, 255, 0.15);
@@ -170,6 +139,18 @@
   --surface-2: #f4f6fa;
   --surface-3: #e9edf4;
 
+  --glass-backdrop: blur(26px) saturate(175%);
+  --surface-glass: linear-gradient(166deg, rgba(255, 255, 255, 0.86) 0%, rgba(242, 246, 253, 0.76) 100%);
+  --well-bg: rgba(15, 23, 42, 0.045);
+  --well-shadow: inset 0 1.5px 3px rgba(15, 23, 42, 0.09), inset 0 -1px 0 rgba(255, 255, 255, 0.88);
+  --tile-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(244, 247, 252, 0.88) 100%);
+  --tile-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), inset 0 -1px 0 rgba(15, 23, 42, 0.06),
+    0 3px 8px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --tile-hover-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 8px 18px rgba(15, 23, 42, 0.13),
+    0 2px 5px rgba(15, 23, 42, 0.08);
+  --island-drop-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.96), inset 0 0 0 1px rgba(15, 23, 42, 0.11),
+    0 22px 50px rgba(15, 23, 42, 0.18), 0 4px 14px rgba(15, 23, 42, 0.09);
+
   --hover: rgba(15, 23, 42, 0.055);
   --active: rgba(15, 23, 42, 0.1);
 
@@ -189,9 +170,10 @@
   --danger-weak: rgba(220, 38, 38, 0.1);
   --success: #0d9468;
 
-  --pop-bg: rgba(255, 255, 255, 0.99);
-  --pop-border: rgba(15, 23, 42, 0.11);
-  --pop-shadow: 0 24px 64px rgba(15, 23, 42, 0.18), 0 4px 14px rgba(15, 23, 42, 0.09);
+  --pop-bg: linear-gradient(168deg, rgba(255, 255, 255, 0.9) 0%, rgba(244, 247, 253, 0.84) 100%);
+  --pop-border: rgba(15, 23, 42, 0.12);
+  --pop-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 24px 64px rgba(15, 23, 42, 0.18),
+    0 4px 14px rgba(15, 23, 42, 0.09);
 
   --thumb-bg: #e7ebf2;
   --island-rim: rgba(15, 23, 42, 0.14);

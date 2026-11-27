@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
 import SystemAppPicker from './SystemAppPicker.vue'
+import { captureFlipSnapshot, playFlipSnapshot } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { isDesktop } from '@/lib/desktop/desktop'
 import type { HubApp } from '@/lib/desktop/types'
 import { addAppByTarget, addAppFromPicker, deleteApp, iconFor, importShortcuts, reorderVisibleApps,
@@ -85,8 +88,28 @@ async function changeCategory(id: string, value: string): Promise<void> {
   const ok = await action(() => setAppCategory(id, value), `已移到「${categoryName(value)}」`)
   if (ok && selected.value === null) await nextTick(() => root.value?.querySelector<HTMLInputElement>('#app-search')?.focus())
 }
+async function runAppsFlip(mutate: () => void | Promise<void>): Promise<void> {
+  const snap = captureFlipSnapshot(root.value, '.managed-app', state.ui.islandReducedMotion, 48)
+  await mutate()
+  await nextTick()
+  playFlipSnapshot(snap, root.value, '.managed-app', activeMotionPreset.value.pill, { stagger: 0.01, maxItems: 48 })
+}
+
+watch([filter, query, () => state.apps.map(a => `${a.id}:${a.categoryId}`).join('|')], () => {
+  const snap = captureFlipSnapshot(root.value, '.managed-app', state.ui.islandReducedMotion, 48)
+  if (!snap) return
+  void nextTick(() => {
+    playFlipSnapshot(snap, root.value, '.managed-app', activeMotionPreset.value.pill, { stagger: 0.01, maxItems: 48 })
+  })
+}, { flush: 'pre' })
+
 async function reorder(app: HubApp, target: string | undefined): Promise<void> {
-  if (target && await action(() => reorderVisibleApps(groupIds(app), app.id, target), '组内顺序已更新')) {
+  if (!target) return
+  let ok = false
+  await runAppsFlip(async () => {
+    ok = await action(() => reorderVisibleApps(groupIds(app), app.id, target), '组内顺序已更新')
+  })
+  if (ok) {
     await nextTick(() => root.value?.querySelector<HTMLButtonElement>('.managed-app.selected .app-summary')?.focus({ preventScroll: true }))
   }
 }
@@ -170,28 +193,66 @@ async function removeApp(id: string): Promise<void> {
       <label class="field search-field" for="app-search"><span class="field-label">搜索应用</span><span class="search-control"><Icon name="search" :size="16" /><input id="app-search" v-model="query" class="control" type="search" placeholder="名称、目标或分类" /></span></label>
       <button class="btn" :aria-expanded="managing" aria-controls="category-manager" @click="managing = !managing">管理分类</button>
     </div>
-    <section v-if="adding" id="add-app-options" class="disclosure-body" aria-label="添加应用">
-      <p class="hint">添加到「{{ categoryName(filter ?? 'all') }}」<span v-if="!isDesktop"> · 文件选择与桌面导入在桌面版可用</span></p>
-      <div class="actions"><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('file')">选择文件</button><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('folder')">选择文件夹</button><button class="btn" :disabled="busy || !isDesktop" @click="importApps">导入桌面快捷方式</button>
-        <button ref="systemAppsTrigger" class="btn" :aria-expanded="showSystemApps" :aria-controls="showSystemApps ? 'system-app-picker' : undefined" :disabled="busy || !isDesktop" @click="showSystemApps = !showSystemApps">导入系统应用</button>
-      </div>
-      <SystemAppPicker v-if="showSystemApps" :category-id="filter ?? 'all'" @saving="busy = $event" @saved="systemAppsSaved" @close="closeSystemApps" />
-      <form class="link-form" @submit.prevent="addLink">
-        <label class="field"><span class="field-label">网址</span><input v-model="linkTarget" class="control" type="url" required placeholder="https://example.com" /></label>
-        <label class="field"><span class="field-label">显示名称（可选）</span><input v-model="linkName" class="control" /></label>
-        <button class="btn" :disabled="busy || !linkTarget.trim()">添加网址</button>
-      </form>
-    </section>
-    <section v-if="managing" id="category-manager" class="disclosure-body" aria-label="分类管理">
-      <p class="hint">删除分类会把应用移到「未分类」，不会删除应用。</p>
-      <div v-for="cat in categories" :key="cat.id" class="category-editor">
-        <label class="field"><span class="field-label">分类名称 · {{ cat.name }}</span><input v-model="categoryDrafts[cat.id]" class="control" maxlength="40" :aria-label="`${cat.name} 分类名称`" @keydown.enter.prevent="action(() => saveAppCategory(cat.id, categoryDrafts[cat.id]), '分类名称已保存')" /></label>
-        <button class="btn" :disabled="busy || !categoryDrafts[cat.id]?.trim() || categoryDrafts[cat.id] === cat.name" @click="action(() => saveAppCategory(cat.id, categoryDrafts[cat.id]), '分类名称已保存')">保存</button>
-        <button class="btn" :class="{ 'btn-danger': confirmCategory === cat.id }" :disabled="busy" :aria-label="`${confirmCategory === cat.id ? '确认删除' : '删除'}分类 ${cat.name}`" @click="removeCategory(cat.id)">{{ confirmCategory === cat.id ? '确认删除' : '删除' }}</button>
-        <button v-if="confirmCategory === cat.id" class="btn" @click="confirmCategory = null">取消</button>
-      </div>
-      <form class="category-editor" @submit.prevent="addCategory"><label class="field"><span class="field-label">新分类名称</span><input v-model="newCategory" class="control" maxlength="40" /></label><button class="btn" :disabled="busy || !newCategory.trim()">添加分类</button></form>
-    </section>
+    <GsapPresence
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -6 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <section
+        v-if="adding"
+        id="add-app-options"
+        key="add-app-options"
+        class="disclosure-body"
+        aria-label="添加应用"
+      >
+        <p class="hint">添加到「{{ categoryName(filter ?? 'all') }}」<span v-if="!isDesktop"> · 文件选择与桌面导入在桌面版可用</span></p>
+        <div class="actions"><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('file')">选择文件</button><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('folder')">选择文件夹</button><button class="btn" :disabled="busy || !isDesktop" @click="importApps">导入桌面快捷方式</button>
+          <button ref="systemAppsTrigger" class="btn" :aria-expanded="showSystemApps" :aria-controls="showSystemApps ? 'system-app-picker' : undefined" :disabled="busy || !isDesktop" @click="showSystemApps = !showSystemApps">导入系统应用</button>
+        </div>
+        <GsapPresence
+          :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+          :animate="{ opacity: 1, y: 0 }"
+          :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+          :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+        >
+          <div
+            v-if="showSystemApps"
+            key="system-apps"
+          >
+            <SystemAppPicker :category-id="filter ?? 'all'" @saving="busy = $event" @saved="systemAppsSaved" @close="closeSystemApps" />
+          </div>
+        </GsapPresence>
+        <form class="link-form" @submit.prevent="addLink">
+          <label class="field"><span class="field-label">网址</span><input v-model="linkTarget" class="control" type="url" required placeholder="https://example.com" /></label>
+          <label class="field"><span class="field-label">显示名称（可选）</span><input v-model="linkName" class="control" /></label>
+          <button class="btn" :disabled="busy || !linkTarget.trim()">添加网址</button>
+        </form>
+      </section>
+    </GsapPresence>
+    <GsapPresence
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -6 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <section
+        v-if="managing"
+        id="category-manager"
+        key="category-manager"
+        class="disclosure-body"
+        aria-label="分类管理"
+      >
+        <p class="hint">删除分类会把应用移到「未分类」，不会删除应用。</p>
+        <div v-for="cat in categories" :key="cat.id" class="category-editor">
+          <label class="field"><span class="field-label">分类名称 · {{ cat.name }}</span><input v-model="categoryDrafts[cat.id]" class="control" maxlength="40" :aria-label="`${cat.name} 分类名称`" @keydown.enter.prevent="action(() => saveAppCategory(cat.id, categoryDrafts[cat.id]), '分类名称已保存')" /></label>
+          <button class="btn" :disabled="busy || !categoryDrafts[cat.id]?.trim() || categoryDrafts[cat.id] === cat.name" @click="action(() => saveAppCategory(cat.id, categoryDrafts[cat.id]), '分类名称已保存')">保存</button>
+          <button class="btn" :class="{ 'btn-danger': confirmCategory === cat.id }" :disabled="busy" :aria-label="`${confirmCategory === cat.id ? '确认删除' : '删除'}分类 ${cat.name}`" @click="removeCategory(cat.id)">{{ confirmCategory === cat.id ? '确认删除' : '删除' }}</button>
+          <button v-if="confirmCategory === cat.id" class="btn" @click="confirmCategory = null">取消</button>
+        </div>
+        <form class="category-editor" @submit.prevent="addCategory"><label class="field"><span class="field-label">新分类名称</span><input v-model="newCategory" class="control" maxlength="40" /></label><button class="btn" :disabled="busy || !newCategory.trim()">添加分类</button></form>
+      </section>
+    </GsapPresence>
     <div class="category-filters" role="group" aria-label="应用分类筛选">
       <button v-for="cat in filters" :key="cat.id ?? '__everything'" class="category-filter" :class="{ selected: filter === cat.id, 'drop-target': cat.id !== null && dropTarget === `category:${cat.id}` }"
         :aria-pressed="filter === cat.id" :title="cat.name" @click="selectFilter(cat.id)"
@@ -212,24 +273,36 @@ async function removeApp(id: string): Promise<void> {
             <span class="app-summary-text"><span class="managed-name">{{ app.name }}</span><span class="app-membership">{{ categoryName(categoryKey(app)) }}</span></span>
             <span class="app-status">{{ app.hidden ? '已隐藏' : '显示中' }}<span v-if="app.broken" class="error"> · 目标失效</span></span><Icon name="chevron-down" :size="14" :class="{ flipped: selected === app.id }" />
           </button>
-          <div v-if="selected === app.id" :id="`details-${app.id}`" class="app-inspector">
-            <template v-if="editId !== app.id">
-              <p class="full-app-name">{{ app.name }}</p><p class="app-path">{{ app.target }}</p>
-              <label class="field"><span class="field-label">所属分类</span><select class="control" :value="categoryKey(app)" :disabled="busy" @change="changeCategory(app.id, ($event.target as HTMLSelectElement).value)"><option value="all">未分类</option><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option></select></label>
-              <div class="actions app-actions">
-                <button class="btn" :disabled="busy" @click="action(() => toggleAppHidden(app.id), app.hidden ? '应用已显示' : '应用已隐藏')">{{ app.hidden ? '显示应用' : '隐藏应用' }}</button>
-                <button class="btn" :disabled="busy" @click="startEdit(app)">编辑</button>
-                <button class="btn" :disabled="busy || !neighbor(app, -1)" :aria-label="`上移 ${app.name}`" @click="reorder(app, neighbor(app, -1))">上移</button>
-                <button class="btn" :disabled="busy || !neighbor(app, 1)" :aria-label="`下移 ${app.name}`" @click="reorder(app, neighbor(app, 1))">下移</button>
-                <button class="btn btn-danger" :disabled="busy" @click="removeApp(app.id)">{{ confirmApp === app.id ? '确认移除应用' : '移除' }}</button><button v-if="confirmApp === app.id" class="btn" @click="confirmApp = null">取消</button>
-              </div><p class="hint">排序仅调整当前分类中的可见结果；移除应用不会删除目标文件。</p>
-            </template>
-            <form v-else class="app-edit-form" @submit.prevent="submitEdit" @keydown.escape.stop.prevent="finishEdit">
-              <label class="field" for="app-edit-name"><span class="field-label">显示名称</span><input id="app-edit-name" v-model="editName" class="control" required /></label>
-              <label class="field"><span class="field-label">目标 · 文件、文件夹或网址</span><input v-model="editTarget" class="control" required /></label>
-              <div class="actions"><button class="btn btn-primary" :disabled="busy || !editName.trim() || !editTarget.trim()">{{ busy ? '保存中…' : '保存修改' }}</button><button type="button" class="btn" :disabled="busy" @click="finishEdit">取消</button></div>
-            </form>
-          </div>
+          <GsapPresence
+            :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+            :animate="{ opacity: 1, y: 0 }"
+            :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+            :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+          >
+            <div
+              v-if="selected === app.id"
+              :id="`details-${app.id}`"
+              :key="`details-${app.id}`"
+              class="app-inspector"
+            >
+              <template v-if="editId !== app.id">
+                <p class="full-app-name">{{ app.name }}</p><p class="app-path">{{ app.target }}</p>
+                <label class="field"><span class="field-label">所属分类</span><select class="control" :value="categoryKey(app)" :disabled="busy" @change="changeCategory(app.id, ($event.target as HTMLSelectElement).value)"><option value="all">未分类</option><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option></select></label>
+                <div class="actions app-actions">
+                  <button class="btn" :disabled="busy" @click="action(() => toggleAppHidden(app.id), app.hidden ? '应用已显示' : '应用已隐藏')">{{ app.hidden ? '显示应用' : '隐藏应用' }}</button>
+                  <button class="btn" :disabled="busy" @click="startEdit(app)">编辑</button>
+                  <button class="btn" :disabled="busy || !neighbor(app, -1)" :aria-label="`上移 ${app.name}`" @click="reorder(app, neighbor(app, -1))">上移</button>
+                  <button class="btn" :disabled="busy || !neighbor(app, 1)" :aria-label="`下移 ${app.name}`" @click="reorder(app, neighbor(app, 1))">下移</button>
+                  <button class="btn btn-danger" :disabled="busy" @click="removeApp(app.id)">{{ confirmApp === app.id ? '确认移除应用' : '移除' }}</button><button v-if="confirmApp === app.id" class="btn" @click="confirmApp = null">取消</button>
+                </div><p class="hint">排序仅调整当前分类中的可见结果；移除应用不会删除目标文件。</p>
+              </template>
+              <form v-else class="app-edit-form" @submit.prevent="submitEdit" @keydown.escape.stop.prevent="finishEdit">
+                <label class="field" for="app-edit-name"><span class="field-label">显示名称</span><input id="app-edit-name" v-model="editName" class="control" required /></label>
+                <label class="field"><span class="field-label">目标 · 文件、文件夹或网址</span><input v-model="editTarget" class="control" required /></label>
+                <div class="actions"><button class="btn btn-primary" :disabled="busy || !editName.trim() || !editTarget.trim()">{{ busy ? '保存中…' : '保存修改' }}</button><button type="button" class="btn" :disabled="busy" @click="finishEdit">取消</button></div>
+              </form>
+            </div>
+          </GsapPresence>
         </li>
       </ul>
     </section>

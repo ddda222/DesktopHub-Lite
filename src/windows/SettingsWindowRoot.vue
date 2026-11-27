@@ -6,6 +6,7 @@
  * 所以这里用 shell 标记把遮罩层去掉，只保留窗口内容。
  */
 import { onBeforeUnmount, onMounted } from 'vue'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import SettingsWindow from '@/features/settings/SettingsWindow.vue'
 import { bootstrap, subscribeHostEvents } from '@/store'
 
@@ -22,9 +23,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="settings-root">
-    <SettingsWindow standalone />
-  </div>
+  <HubMotionConfig>
+    <div class="settings-root">
+      <SettingsWindow standalone />
+    </div>
+  </HubMotionConfig>
 </template>
 
 <style scoped>

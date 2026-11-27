@@ -7,9 +7,12 @@
  * 2. 低频工具路径与证书参数收纳进「高级与工具路径」折叠区，按需展开。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import MotionSaveButton from '@/components/MotionSaveButton.vue'
+import MotionSwitch from '@/components/MotionSwitch.vue'
+import { vGsapPulse } from '@/lib/gsapMotion'
 import { invokeHost, isDesktop, listenHost, pickApplicationTarget } from '@/lib/desktop/desktop'
 import { DEFAULT_PACK_SETTINGS, DEFAULT_REVERSE_PORT, type PackSettings } from '@/features/pack/types'
-import { pushToast } from '@/store'
+import { pushToast, state } from '@/store'
 
 const draft = ref<PackSettings>({ ...DEFAULT_PACK_SETTINGS })
 const ignoreFilesText = ref('')
@@ -224,7 +227,13 @@ onBeforeUnmount(() => {
     <h3 class="panel-title">打包与联调</h3>
     <p class="hint">设置云打包路径与默认 ADB 转发端口；仅做真机联调时可不填打包路径。</p>
     <p v-if="loading" class="hint loading-inline" role="status">
-      <span class="bars-loader" aria-hidden="true"><i /><i /><i /></span>
+      <span class="bars-loader" aria-hidden="true">
+        <i
+          v-for="idx in 3"
+          :key="idx"
+          v-gsap-pulse="state.ui.islandReducedMotion ? null : { opacity: [0.22, 0.95], scaleY: [0.6, 1], duration: 0.9, delay: (idx - 1) * 0.2 }"
+        />
+      </span>
       正在读取当前配置…
     </p>
 
@@ -294,18 +303,12 @@ onBeforeUnmount(() => {
           <span class="set-label">打包完成后自动装机</span>
           <span class="set-desc">关闭时只保存 APK 到输出目录，不自动覆盖手机上已安装的应用。</span>
         </span>
-        <button
-          class="switch"
-          type="button"
-          role="switch"
-          aria-label="打包完成后自动装机"
-          :class="{ 'is-on': draft.autoInstall }"
-          :aria-checked="draft.autoInstall"
+        <MotionSwitch
+          :checked="draft.autoInstall"
           :disabled="saving"
-          @click="draft.autoInstall = !draft.autoInstall"
-        >
-          <span class="switch-knob" aria-hidden="true" />
-        </button>
+          label="打包完成后自动装机"
+          @toggle="draft.autoInstall = !draft.autoInstall"
+        />
       </div>
     </div>
 
@@ -414,11 +417,13 @@ onBeforeUnmount(() => {
         >
           打开输出目录
         </button>
-        <button class="btn btn-primary btn-stateful" :data-state="saving ? 'busy' : justSaved ? 'done' : 'idle'" type="button" :disabled="saving || !isDesktop" @click="save">
-          <span class="btn-label">保存打包设置</span>
-          <span class="btn-spinner" aria-hidden="true" />
-          <span class="btn-check" aria-hidden="true">✓</span>
-        </button>
+        <MotionSaveButton
+          label="保存打包设置"
+          :busy="saving"
+          :done="justSaved"
+          :disabled="saving || !isDesktop"
+          @click="save"
+        />
       </div>
     </div>
   </div>

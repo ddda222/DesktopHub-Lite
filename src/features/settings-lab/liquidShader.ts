@@ -523,7 +523,7 @@ const MOTION_INDEX: Record<MotionMode, number> = {
   glide: 0,
   sweep: 1,
   bounce: 2,
-  step: 3,
+  focus: 3,
   flicker: 4
 }
 

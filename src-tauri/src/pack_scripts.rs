@@ -64,12 +64,10 @@ fn script(id: &str, name: &str, env: &str, kind: &str) -> Script {
 }
 
 /// 两个内置模板：本地联调云打包（按当前工作区打包，装机并转发）、远程联调云打包（忽略本地配置修改，只打包）。
+/// 默认预估设为 0（首次运行只展示已用耗时），由真实成功历史自动校准中位数。
 fn seed() -> Vec<Script> {
-    let mut local = script("builtin-local-pack", "本地联调云打包", "local", "pack");
-    local.estimate_sec = 900;
-
-    let mut remote = script("builtin-remote-pack", "远程联调云打包", "remote", "pack");
-    remote.estimate_sec = 900;
+    let local = script("builtin-local-pack", "本地联调云打包", "local", "pack");
+    let remote = script("builtin-remote-pack", "远程联调云打包", "remote", "pack");
 
     vec![local, remote]
 }
@@ -141,7 +139,14 @@ fn normalize_stored(item: &mut Script) -> Result<(), String> {
     if item.estimate_sec > MAX_SECONDS as u32 {
         return Err("预估时长不能超过 7200 秒".into());
     }
-    item.history.retain(|value| value.is_finite() && *value > 0.0);
+    // 清理旧版本预置的 900 秒固定模板值，避免无历史时误导显示「约剩 15:00」。
+    if matches!(item.id.as_str(), "builtin-local-pack" | "builtin-remote-pack")
+        && item.estimate_sec == 900
+        && item.history.is_empty()
+    {
+        item.estimate_sec = 0;
+    }
+    item.history.retain(|value| value.is_finite() && *value > 0.0 && *value <= MAX_SECONDS);
     if item.history.len() > HISTORY_LIMIT {
         let skip = item.history.len() - HISTORY_LIMIT;
         item.history.drain(0..skip);
@@ -169,11 +174,29 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// 估算时长：优先用历史平均，没有历史时用配置的预估值。
+/// 计算有效历史样本的中位数，消除偶发云端排队卡顿导致的均值严重偏斜。
+pub fn median_history(history: &[f64]) -> Option<f64> {
+    let mut valid: Vec<f64> = history
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0 && *value <= MAX_SECONDS)
+        .collect();
+    if valid.is_empty() {
+        return None;
+    }
+    valid.sort_by(f64::total_cmp);
+    let mid = valid.len() / 2;
+    if valid.len() % 2 == 1 {
+        Some(valid[mid])
+    } else {
+        Some((valid[mid - 1] + valid[mid]) * 0.5)
+    }
+}
+
+/// 估算时长：优先用历史成功耗时的中位数，没有历史时才退回用户手动填报的预估值。
 pub fn estimate(item: &Script) -> Option<f64> {
-    if !item.history.is_empty() {
-        let sum: f64 = item.history.iter().sum();
-        return Some(sum / item.history.len() as f64);
+    if let Some(med) = median_history(&item.history) {
+        return Some(med);
     }
     if item.estimate_sec > 0 {
         return Some(item.estimate_sec as f64);
@@ -235,4 +258,32 @@ pub fn delete_pack_script(app: AppHandle, id: String) -> Result<Vec<Script>, Str
     file.scripts.retain(|item| item.id != id);
     write_file(&app, &file)?;
     Ok(file.scripts)
+}
+
+/// 清空指定脚本的历史耗时样本，用于剔除历史异常耗时造成的预估偏差。
+#[tauri::command]
+pub fn reset_pack_script_history(app: AppHandle, id: String) -> Result<Vec<Script>, String> {
+    let mut file = read_file(&app)?;
+    if let Some(item) = file.scripts.iter_mut().find(|item| item.id == id) {
+        item.history.clear();
+        if matches!(item.id.as_str(), "builtin-local-pack" | "builtin-remote-pack") {
+            item.estimate_sec = 0;
+        }
+        write_file(&app, &file)?;
+    }
+    Ok(file.scripts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn median_history_resists_outlier_spikes() {
+        assert_eq!(median_history(&[]), None);
+        assert_eq!(median_history(&[120.0]), Some(120.0));
+        assert_eq!(median_history(&[120.0, 140.0]), Some(130.0));
+        // 单次 18 分钟（1080s）排队异常不应把常规 2 分钟级打包均值拉成 5+ 分钟
+        assert_eq!(median_history(&[115.0, 128.0, 1080.0, 132.0, 125.0]), Some(128.0));
+    }
 }

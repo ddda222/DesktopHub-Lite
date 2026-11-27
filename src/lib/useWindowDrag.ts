@@ -1,4 +1,5 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
+import { gsap } from './gsapMotion'
 import { startBarDrag } from './desktop/desktop'
 
 type DragOptions = {
@@ -13,11 +14,18 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
   let offsetX = 0
   let offsetY = 0
   let blockClick = false
+  let glideTween: gsap.core.Tween | null = null
   let observer: ResizeObserver | undefined
   let session: {
     pointer: number; handle: HTMLElement; startX: number; startY: number
     baseX: number; baseY: number; rect: DOMRect; moved: boolean; native: boolean
+    samples: { x: number; y: number; ts: number }[]
   } | undefined
+
+  function stopGlide(): void {
+    glideTween?.kill()
+    glideTween = null
+  }
 
   function apply(x: number, y: number): void {
     offsetX = x
@@ -36,6 +44,50 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
     if (dx || dy) apply(offsetX + dx, offsetY + dy)
   }
 
+  function runReleaseGlide(samples: { x: number; y: number; ts: number }[]): void {
+    if (options.native() || !element.value || samples.length < 2) {
+      clamp()
+      return
+    }
+    const last = samples[samples.length - 1]
+    const cutoff = last.ts - 100
+    const first = samples.find(item => item.ts >= cutoff) ?? samples[0]
+    const dt = last.ts - first.ts
+    if (dt < 8 || dt > 160) {
+      clamp()
+      return
+    }
+    const vx = ((last.x - first.x) / dt) * 1000
+    const vy = ((last.y - first.y) / dt) * 1000
+    if (Math.hypot(vx, vy) < 90) {
+      clamp()
+      return
+    }
+    const box = element.value.getBoundingClientRect()
+    const minDx = Math.min(0, 8 - box.left)
+    const maxDx = Math.max(0, window.innerWidth - box.width - 8 - box.left)
+    const minDy = Math.min(0, 8 - box.top)
+    const maxDy = Math.max(0, window.innerHeight - box.height - 8 - box.top)
+    const projDx = Math.max(minDx, Math.min(maxDx, vx * 0.14))
+    const projDy = Math.max(minDy, Math.min(maxDy, vy * 0.14))
+    if (Math.hypot(projDx, projDy) < 2) {
+      clamp()
+      return
+    }
+    const proxy = { x: offsetX, y: offsetY }
+    glideTween = gsap.to(proxy, {
+      x: offsetX + projDx,
+      y: offsetY + projDy,
+      duration: 0.34,
+      ease: 'power3.out',
+      onUpdate: () => apply(proxy.x, proxy.y),
+      onComplete: () => {
+        glideTween = null
+        clamp()
+      }
+    })
+  }
+
   function finish(): void {
     const previous = session
     session = undefined
@@ -46,7 +98,8 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
     if (previous?.handle.hasPointerCapture(previous.pointer)) previous.handle.releasePointerCapture(previous.pointer)
     element.value?.classList.remove('window-dragging')
     if (previous) options.onEnd?.()
-    clamp()
+    if (previous && !previous.native && previous.moved) runReleaseGlide(previous.samples)
+    else clamp()
   }
 
   function up(event: PointerEvent): void {
@@ -71,6 +124,9 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
       }
     }
     if (current.native) return
+    const ts = event.timeStamp || performance.now()
+    current.samples.push({ x: event.clientX, y: event.clientY, ts })
+    if (current.samples.length > 8) current.samples.shift()
     const left = Math.min(Math.max(current.rect.left + dx, 8), Math.max(8, window.innerWidth - current.rect.width - 8))
     const top = Math.min(Math.max(current.rect.top + dy, 8), Math.max(8, window.innerHeight - current.rect.height - 8))
     apply(current.baseX + left - current.rect.left, current.baseY + top - current.rect.top)
@@ -82,13 +138,15 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
     // 标题栏里的关闭按钮、输入框等继续执行自己的动作。
     const control = (event.target as Element).closest('button, a, input, select, textarea, [contenteditable="true"]')
     if (control && control !== handle) return
+    stopGlide()
     finish()
     blockClick = false
     event.preventDefault()
+    const ts = event.timeStamp || performance.now()
     session = {
       pointer: event.pointerId, handle, startX: event.clientX, startY: event.clientY,
       baseX: offsetX, baseY: offsetY, rect: element.value.getBoundingClientRect(),
-      moved: false, native: options.native()
+      moved: false, native: options.native(), samples: [{ x: event.clientX, y: event.clientY, ts }]
     }
     handle.setPointerCapture(event.pointerId)
     options.onPress?.()
@@ -106,7 +164,7 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
     return true
   }
 
-  function reset(): void { finish(); apply(0, 0); clamp() }
+  function reset(): void { stopGlide(); finish(); apply(0, 0); clamp() }
 
   onMounted(() => {
     if (options.native()) return
@@ -117,6 +175,7 @@ export function useWindowDrag(element: Ref<HTMLElement | null>, options: DragOpt
   onBeforeUnmount(() => {
     observer?.disconnect()
     window.removeEventListener('resize', clamp)
+    stopGlide()
     finish()
   })
   return { begin, consumeClick, reset }

@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { version as appVersion } from '../../../package.json'
+import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
+import MotionSaveButton from '@/components/MotionSaveButton.vue'
+import MotionSwitch from '@/components/MotionSwitch.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
+import { animateFlipFromState, animateSplitReveal, Flip, gsap, vGsapPress } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import DesktopFeatures from './DesktopFeatures.vue'
 import AppManagement from './AppManagement.vue'
 import MixerSettings from './MixerSettings.vue'
@@ -90,81 +95,61 @@ const currentSectionLabel = computed(
 function pickSection(id: SettingsSection): void {
   state.ui.settingsSection = id
 }
-const navEl = ref<HTMLElement | null>(null)
-const navHorizontal = ref(false)
-const navWormStyle = ref<Record<string, string>>({ opacity: '0' })
-const panelSwitching = ref(false)
-let panelSwitchTimer: number | null = null
-let navWormObserver: ResizeObserver | null = null
-let navWormRaf = 0
-let lastWormStart = -1
 
-function syncNavWorm(animate = true): void {
-  const nav = navEl.value
-  const active = nav?.querySelector<HTMLElement>('.nav-item.is-active')
-  if (!nav || !active) {
-    navWormStyle.value = { opacity: '0' }
-    return
-  }
-  const horizontal = nav.clientWidth > 0 && window.getComputedStyle(nav).flexDirection === 'row'
-  navHorizontal.value = horizontal
-  if (horizontal) {
-    const start = active.offsetLeft
-    const end = Math.max(0, nav.clientWidth - (active.offsetLeft + active.offsetWidth))
-    const forward = lastWormStart >= 0 && start >= lastWormStart
-    lastWormStart = start
-    navWormStyle.value = {
-      opacity: '1',
-      '--worm-left': `${start + 6}px`,
-      '--worm-right': `${end + 6}px`,
-      '--worm-start-delay': animate && forward ? 'var(--worm-lag, 45ms)' : '0ms',
-      '--worm-end-delay': animate && !forward ? 'var(--worm-lag, 45ms)' : '0ms'
-    }
-    return
-  }
-  const top = active.offsetTop
-  const bottom = Math.max(0, nav.clientHeight - (active.offsetTop + active.offsetHeight))
-  const movingDown = lastWormStart >= 0 && top >= lastWormStart
-  lastWormStart = top
-  navWormStyle.value = {
-    opacity: '1',
-    '--worm-top': `${top + 7}px`,
-    '--worm-bottom': `${bottom + 7}px`,
-    '--worm-top-delay': animate && movingDown ? 'var(--worm-lag, 45ms)' : '0ms',
-    '--worm-bottom-delay': animate && !movingDown ? 'var(--worm-lag, 45ms)' : '0ms'
-  }
-}
+const disclosureTransition = computed(() =>
+  state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.popTransition
+)
+const navWormTransition = computed(() =>
+  state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.pill
+)
+const navEl = ref<HTMLElement | null>(null)
+const clearBtnEl = ref<HTMLElement | null>(null)
+
+let sectionTl: gsap.core.Timeline | null = null
 
 watch(() => state.ui.settingsSection, (next, prev) => {
-  if (prev && next !== prev) {
-    panelSwitching.value = true
-    if (panelSwitchTimer !== null) window.clearTimeout(panelSwitchTimer)
-    panelSwitchTimer = window.setTimeout(() => { panelSwitching.value = false; panelSwitchTimer = null }, 220)
-  }
+  const worm = navEl.value?.querySelector<HTMLElement>('.nav-worm')
+  const flipState = worm && !state.ui.islandReducedMotion ? Flip.getState(worm) : null
   void nextTick(() => {
+    const nextWorm = navEl.value?.querySelector<HTMLElement>('.nav-worm')
+    if (flipState && nextWorm) {
+      animateFlipFromState(flipState, nextWorm, navWormTransition.value, { absolute: true })
+    }
     contentEl.value?.scrollTo({ top: 0 })
-    syncNavWorm(true)
+    if (prev && next !== prev && !state.ui.islandReducedMotion) {
+      const panels = contentEl.value?.querySelectorAll<HTMLElement>(':scope > .panel, :scope > .app-management')
+      const activePanel = panels ? Array.from(panels).find((el) => el.offsetParent !== null) : null
+      if (activePanel) {
+        sectionTl?.kill()
+        const preset = activeMotionPreset.value
+        const offsetY = preset.mode === 'flicker' ? 0 : preset.mode === 'bounce' ? 10 : 6
+        const titleEl = activePanel.querySelector<HTMLElement>('.panel-title')
+        const cards = activePanel.querySelectorAll<HTMLElement>('.card, .save-row, .shortcut-fields, .features')
+        const tl = gsap.timeline({
+          onComplete: () => { sectionTl = null }
+        })
+        tl.fromTo(
+          activePanel,
+          { opacity: 0, y: offsetY },
+          { opacity: 1, y: 0, duration: preset.paneTransition.duration, ease: preset.paneTransition.ease, clearProps: 'transform' },
+          0
+        )
+        if (titleEl && preset.mode !== 'flicker') {
+          animateSplitReveal(titleEl, state.ui.islandReducedMotion, { y: 6, stagger: 0.014, duration: 0.2 })
+        }
+        if (cards.length && preset.mode !== 'flicker') {
+          tl.fromTo(
+            cards,
+            { opacity: 0, y: 6 },
+            { opacity: 1, y: 0, duration: 0.22, stagger: 0.032, ease: preset.paneTransition.ease, clearProps: 'transform,opacity' },
+            0.03
+          )
+        }
+        sectionTl = tl
+      }
+    }
   })
-})
-watch(() => [state.settings.theme, state.ui.settingsOpen], () => {
-  void nextTick(() => {
-    cancelAnimationFrame(navWormRaf)
-    navWormRaf = requestAnimationFrame(() => syncNavWorm(false))
-  })
-})
-
-/** 给手动点击或键盘触发的开关打标记，避免初始渲染或切换标签时误播拉伸关键帧。 */
-function markSwitchTouched(event: Event): void {
-  const target = event.target as HTMLElement | null
-  const row = target?.closest('.switch, .switch-row')
-  if (!row) return
-  const switchEl = row.matches('.switch') ? (row as HTMLElement) : row.querySelector<HTMLElement>('.switch')
-  if (switchEl) switchEl.dataset.touched = '1'
-}
-function markSwitchKeyTouched(event: KeyboardEvent): void {
-  if (event.key !== ' ' && event.key !== 'Enter') return
-  markSwitchTouched(event)
-}
+}, { flush: 'pre' })
 
 /* ---------- 剪贴板 ---------- */
 
@@ -250,6 +235,9 @@ function stopClearTimer(): void {
 function onClearClick(): void {
   if (!confirmingClear.value) {
     confirmingClear.value = true
+    if (!state.ui.islandReducedMotion && clearBtnEl.value) {
+      gsap.fromTo(clearBtnEl.value, { x: 0 }, { x: 6, duration: 0.36, ease: 'hubWiggleReject', clearProps: 'transform' })
+    }
     stopClearTimer()
     clearTimer = window.setTimeout(() => {
       confirmingClear.value = false
@@ -395,19 +383,20 @@ function handleKeys(event: KeyboardEvent): void {
 onMounted(() => {
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   windowEl.value?.querySelector<HTMLButtonElement>('.nav-item.is-active')?.focus()
-  void nextTick(() => syncNavWorm(false))
-  if (navEl.value && typeof ResizeObserver !== 'undefined') {
-    navWormObserver = new ResizeObserver(() => syncNavWorm(false))
-    navWormObserver.observe(navEl.value)
+  if (windowEl.value && !state.ui.islandReducedMotion) {
+    const preset = activeMotionPreset.value
+    gsap.fromTo(
+      windowEl.value,
+      { opacity: 0, scale: 0.965, y: 8 },
+      { opacity: 1, scale: 1, y: 0, duration: preset.popTransition.duration, ease: preset.popTransition.ease, clearProps: 'transform,opacity' }
+    )
   }
 })
 onBeforeUnmount(() => {
+  sectionTl?.kill()
   stopClearTimer()
-  if (panelSwitchTimer !== null) window.clearTimeout(panelSwitchTimer)
   if (translationSavedTimer !== null) window.clearTimeout(translationSavedTimer)
   if (shortcutsSavedTimer !== null) window.clearTimeout(shortcutsSavedTimer)
-  cancelAnimationFrame(navWormRaf)
-  navWormObserver?.disconnect()
   returnFocus?.focus({ preventScroll: true })
 })
 </script>
@@ -419,8 +408,6 @@ onBeforeUnmount(() => {
     :class="{ 'is-standalone': props.standalone }"
     tabindex="-1"
     @click.self="closeSettings()"
-    @pointerdown.capture="markSwitchTouched"
-    @keydown.capture="markSwitchKeyTouched"
     @keydown="handleKeys"
   >
     <div ref="windowEl" class="win" role="dialog" :aria-modal="!props.standalone" aria-labelledby="settings-title">
@@ -439,26 +426,27 @@ onBeforeUnmount(() => {
 
       <div class="win-body">
         <nav ref="navEl" class="nav" aria-label="设置分区">
-          <span
-            class="nav-worm"
-            :class="{ 'is-horizontal': navHorizontal }"
-            aria-hidden="true"
-            :style="navWormStyle"
-          />
           <button
             v-for="item in sections"
             :key="item.id"
+            v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
             class="nav-item"
             :class="{ 'is-active': state.ui.settingsSection === item.id }"
             type="button"
             :aria-current="state.ui.settingsSection === item.id ? 'page' : undefined"
             @click="pickSection(item.id)"
           >
+            <span
+              v-if="state.ui.settingsSection === item.id"
+              data-flip-id="settings-nav-worm"
+              class="nav-worm"
+              aria-hidden="true"
+            />
             {{ item.label }}
           </button>
         </nav>
 
-        <section ref="contentEl" class="content scroll-y" :class="{ 'is-switching': panelSwitching }" :aria-label="currentSectionLabel">
+        <section ref="contentEl" class="content scroll-y" :aria-label="currentSectionLabel">
           <AppManagement v-show="state.ui.settingsSection === 'apps'" @dirty-change="appsDraftPending = $event" />
           <MixerSettings v-if="state.ui.settingsSection === 'audio' && state.ui.settingsOpen" />
           <MailSettings v-if="state.ui.settingsSection === 'mail' && state.ui.settingsOpen" />
@@ -476,17 +464,11 @@ onBeforeUnmount(() => {
                   <span class="set-label">暂停记录剪贴板</span>
                   <span class="set-desc">暂停后新的复制内容不再进入历史记录。</span>
                 </span>
-                <button
-                  class="switch"
-                  type="button"
-                  role="switch"
-                  :class="{ 'is-on': state.ui.paused }"
-                  :aria-checked="state.ui.paused"
-                  aria-label="暂停记录剪贴板"
-                  @click="togglePause"
-                >
-                  <span class="switch-knob" aria-hidden="true" />
-                </button>
+                <MotionSwitch
+                  :checked="state.ui.paused"
+                  label="暂停记录剪贴板"
+                  @toggle="togglePause"
+                />
               </div>
             </div>
 
@@ -496,10 +478,12 @@ onBeforeUnmount(() => {
                   <span class="set-label">记录新图片</span>
                   <span class="set-desc">关闭仅影响之后的捕获，已有图片仍可查看和复制。</span>
                 </span>
-                <button class="switch" type="button" role="switch" aria-label="记录新图片"
-                  :class="{ 'is-on': state.clipboardPreferences.captureImages }"
-                  :aria-checked="state.clipboardPreferences.captureImages" :disabled="savingClipboardPreferences"
-                  @click="toggleCaptureImages"><span class="switch-knob" aria-hidden="true" /></button>
+                <MotionSwitch
+                  :checked="state.clipboardPreferences.captureImages"
+                  :disabled="savingClipboardPreferences"
+                  label="记录新图片"
+                  @toggle="toggleCaptureImages"
+                />
               </div>
               <div class="set-row">
                 <label class="set-text" for="history-limit">
@@ -575,6 +559,7 @@ onBeforeUnmount(() => {
                 <span class="set-desc">包括所有收藏，但不会删除常用短语。清空后无法恢复，需要再点一次确认。</span>
               </span>
               <button
+                ref="clearBtnEl"
                 class="btn btn-danger"
                 :class="{ 'is-confirming': confirmingClear }"
                 type="button"
@@ -650,7 +635,7 @@ onBeforeUnmount(() => {
               </label>
             </div>
 
-            <div class="save-row"><p role="status" :class="{ error: translationError }">{{ translationDirty ? '有未保存的修改' : translationFeedback || '更改后点击保存' }}<span v-if="translationDirty && translationError"> · {{ translationFeedback }}</span></p><button class="btn btn-primary btn-stateful" :data-state="translationBusy ? 'busy' : translationSaved ? 'done' : 'idle'" type="button" :disabled="translationBusy || !isDesktop || !translationDraft.baseUrl.trim() || !translationDraft.model.trim()" @click="saveTranslation"><span class="btn-label">保存模型设置</span><span class="btn-spinner" aria-hidden="true" /><span class="btn-check" aria-hidden="true">✓</span></button></div>
+            <div class="save-row"><p role="status" :class="{ error: translationError }">{{ translationDirty ? '有未保存的修改' : translationFeedback || '更改后点击保存' }}<span v-if="translationDirty && translationError"> · {{ translationFeedback }}</span></p><MotionSaveButton label="保存模型设置" :busy="translationBusy" :done="translationSaved" :disabled="translationBusy || !isDesktop || !translationDraft.baseUrl.trim() || !translationDraft.model.trim()" @click="saveTranslation" /></div>
             <div class="card">
               <div class="set-row">
                 <span class="set-text">
@@ -679,46 +664,66 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <div v-if="secretEditing" class="secret-edit">
-                <label class="field"><span class="field-label">新 API 密钥</span>
-                <input
-                  v-model="secretDraft"
-                  class="control"
-                  type="password"
-                  aria-label="API 密钥"
-                  placeholder="粘贴密钥，保存后立即清空"
-                  autocomplete="off"
-                  spellcheck="false"
-                  @keydown.enter.prevent="saveSecret"
-                /></label>
-                <button
-                  class="btn btn-accent btn-stateful"
-                  :data-state="secretBusy ? 'busy' : 'idle'"
-                  type="button"
-                  :disabled="secretDraft.length === 0 || !isDesktop || secretBusy"
-                  @click="saveSecret"
+              <GsapPresence
+                :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+                :animate="{ opacity: 1, y: 0 }"
+                :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+                :transition="disclosureTransition"
+              >
+                <div
+                  v-if="secretEditing"
+                  key="secret-edit"
+                  class="secret-edit"
                 >
-                  <span class="btn-label">保存</span>
-                  <span class="btn-spinner" aria-hidden="true" />
-                  <span class="btn-check" aria-hidden="true">✓</span>
-                </button>
-                <button class="btn" type="button" :disabled="secretBusy" @click="cancelSecret">取消</button>
-              </div>
+                  <label class="field"><span class="field-label">新 API 密钥</span>
+                  <input
+                    v-model="secretDraft"
+                    class="control"
+                    type="password"
+                    aria-label="API 密钥"
+                    placeholder="粘贴密钥，保存后立即清空"
+                    autocomplete="off"
+                    spellcheck="false"
+                    @keydown.enter.prevent="saveSecret"
+                  /></label>
+                  <MotionSaveButton
+                    label="保存"
+                    variant="accent"
+                    :busy="secretBusy"
+                    :disabled="secretDraft.length === 0 || !isDesktop || secretBusy"
+                    @click="saveSecret"
+                  />
+                  <button class="btn" type="button" :disabled="secretBusy" @click="cancelSecret">取消</button>
+                </div>
+              </GsapPresence>
             </div>
           </div>
 
           <!-- 通用 -->
           <div v-show="state.ui.settingsSection === 'general'" class="panel">
             <h3 class="panel-title">通用</h3>
-            <div v-if="dataStoragePrompt" class="general-quick-banner" role="region" aria-label="数据迁移快捷引导">
-              <div class="general-quick-copy">
-                <strong>{{ dataStoragePrompt.title }}</strong>
-                <span class="hint">{{ dataStoragePrompt.detail }}</span>
+            <GsapPresence
+              :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+              :animate="{ opacity: 1, y: 0 }"
+              :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+              :transition="disclosureTransition"
+            >
+              <div
+                v-if="dataStoragePrompt"
+                key="quick-banner"
+                class="general-quick-banner"
+                role="region"
+                aria-label="数据迁移快捷引导"
+              >
+                <div class="general-quick-copy">
+                  <strong>{{ dataStoragePrompt.title }}</strong>
+                  <span class="hint">{{ dataStoragePrompt.detail }}</span>
+                </div>
+                <button class="btn btn-primary" type="button" @click="jumpToDataMigration">
+                  {{ dataStoragePrompt.buttonLabel }}
+                </button>
               </div>
-              <button class="btn btn-primary" type="button" @click="jumpToDataMigration">
-                {{ dataStoragePrompt.buttonLabel }}
-              </button>
-            </div>
+            </GsapPresence>
             <DesktopFeatures @dirty-change="islandDraftPending = $event">
               <h4 class="sub-title">显示主题 <span class="save-mode">即时生效</span></h4>
               <div class="card">
@@ -761,7 +766,7 @@ onBeforeUnmount(() => {
               <label class="field"><span class="field-label">剪贴板</span><input v-model="shortcutDraft.clipboard" class="control" /></label>
               <label class="field"><span class="field-label">翻译</span><input v-model="shortcutDraft.translation" class="control" /></label>
               <label class="field"><span class="field-label">截图识字</span><input v-model="shortcutDraft.ocr" class="control" /></label>
-              <div class="save-row"><p role="status" :class="{ error: shortcutsError }">{{ shortcutsDirty ? '有未保存的修改' : shortcutsFeedback || '更改后点击保存' }}<span v-if="shortcutsDirty && shortcutsError"> · {{ shortcutsFeedback }}</span></p><button class="btn btn-primary btn-stateful" :data-state="shortcutsBusy ? 'busy' : shortcutsSaved ? 'done' : 'idle'" :disabled="shortcutsBusy || !isDesktop" @click="applyShortcuts"><span class="btn-label">保存快捷键</span><span class="btn-spinner" aria-hidden="true" /><span class="btn-check" aria-hidden="true">✓</span></button></div>
+              <div class="save-row"><p role="status" :class="{ error: shortcutsError }">{{ shortcutsDirty ? '有未保存的修改' : shortcutsFeedback || '更改后点击保存' }}<span v-if="shortcutsDirty && shortcutsError"> · {{ shortcutsFeedback }}</span></p><MotionSaveButton label="保存快捷键" :busy="shortcutsBusy" :done="shortcutsSaved" :disabled="shortcutsBusy || !isDesktop" @click="applyShortcuts" /></div>
               <p class="hint">联动提示：除全局快捷键外，使用系统 Win+Shift+S 截完图后，灵动岛胶囊也会自动浮现「识字」一键按钮。</p>
               <p v-for="error in state.shortcuts.errors" :key="error" class="hint">{{ error }}</p>
             </div>

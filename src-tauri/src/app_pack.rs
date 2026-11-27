@@ -739,23 +739,90 @@ fn hbuilder_running() -> bool {
         .unwrap_or(false)
 }
 
+/// 将 HBuilderX 主窗口无感最小化至后台，减少打包时主窗弹出干扰；
+/// Windows 下官方 CLI 仍需依赖 HBuilderX.exe 进程通道，无法做到零 GUI 进程纯无头运行。
+#[cfg(windows)]
+fn minimize_hbuilder_windows() {
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+        ShowWindowAsync, SW_SHOWMINNOACTIVE,
+    };
+
+    unsafe extern "system" fn enum_cb(hwnd: HWND, _lparam: LPARAM) -> BOOL {
+        if !unsafe { IsWindowVisible(hwnd) }.as_bool() || unsafe { IsIconic(hwnd) }.as_bool() {
+            return BOOL(1);
+        }
+        let mut matched = false;
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        if pid != 0 {
+            if let Ok(handle) = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+                let mut buf = [0u16; 260];
+                let mut len = buf.len() as u32;
+                let ok = unsafe {
+                    QueryFullProcessImageNameW(
+                        handle,
+                        PROCESS_NAME_WIN32,
+                        windows::core::PWSTR(buf.as_mut_ptr()),
+                        &mut len,
+                    )
+                };
+                let _ = unsafe { CloseHandle(handle) };
+                if ok.is_ok() {
+                    let exe = String::from_utf16_lossy(&buf[..len as usize]).to_ascii_lowercase();
+                    if exe.ends_with("\\hbuilderx.exe") || exe.ends_with("/hbuilderx.exe") {
+                        matched = true;
+                    }
+                }
+            }
+        }
+        if !matched {
+            let mut title = [0u16; 128];
+            let title_len = unsafe { GetWindowTextW(hwnd, &mut title) };
+            if title_len > 0 {
+                let text = String::from_utf16_lossy(&title[..title_len as usize]);
+                if text.contains("HBuilderX") {
+                    matched = true;
+                }
+            }
+        }
+        if matched {
+            let _ = unsafe { ShowWindowAsync(hwnd, SW_SHOWMINNOACTIVE) };
+        }
+        BOOL(1)
+    }
+
+    let _ = unsafe { EnumWindows(Some(enum_cb), LPARAM(0)) };
+}
+
+#[cfg(not(windows))]
+fn minimize_hbuilder_windows() {}
+
 #[cfg(not(windows))]
 fn hbuilder_running() -> bool {
     false
 }
 
-/// 打包输出里的稳定进度节点；HBuilderX 升级后文案变化时这里要跟着改。
+/// 打包输出里的稳定进度节点：收敛为简明动词，便于灵动岛单行核心态展示。
 fn pack_progress(line: &str) -> Option<&'static str> {
-    const STEPS: [(&str, &str); 9] = [
-        ("检查云端打包状态", "检查云端打包状态…"),
-        ("检查打包资源", "检查打包资源…"),
-        ("开始编译", "编译打包资源…"),
-        ("正在编译打包资源", "编译打包资源…"),
-        ("压缩打包资源", "压缩打包资源…"),
-        ("向云端发送打包请求", "已提交云端，等待排队…"),
-        ("队列中", "云端排队中…"),
-        ("正在云端打包", "云端打包中…"),
-        ("打包成功", "云端打包完成"),
+    const STEPS: [(&str, &str); 11] = [
+        ("检查云端打包状态", "准备配置"),
+        ("检查打包资源", "在编译"),
+        ("开始编译", "在编译"),
+        ("正在编译打包资源", "在编译"),
+        ("压缩打包资源", "在上传"),
+        ("正在上传", "在上传"),
+        ("上传打包资源", "在上传"),
+        ("向云端发送打包请求", "在上传"),
+        ("队列中", "在等待"),
+        ("正在云端打包", "在打包"),
+        ("打包成功", "完成"),
     ];
     STEPS
         .iter()
@@ -888,12 +955,12 @@ impl Ctx {
                     handle.restore("已提交云端排队，已自动还原本地修改");
                 }
             }
-            // 只翻固定节点；没有匹配的行走通用文案，秒数交给界面自己算，
-            // 否则消息会在两次输出之间停在一个旧数字上。
-            let label = pack_progress(line).map(str::to_string).unwrap_or_else(|| "云端打包中…".to_string());
-            if label != last {
-                last = label.clone();
-                task_runner::set_message(&log_handle, &label);
+            // 只在识别到明确阶段切换时刷新灵动岛状态，未匹配到的编译杂音日志不覆盖当前动词。
+            if let Some(label) = pack_progress(line) {
+                if label != last {
+                    last = label.to_string();
+                    task_runner::set_message(&log_handle, label);
+                }
             }
         };
         let cancel = self.cancel.clone();
@@ -964,7 +1031,7 @@ pub async fn run_pipeline(
         if ctx.cancelled() {
             return Err(exec::CaptureError::Cancelled);
         }
-        ctx.stage("切换远程配置（忽略本地更改）…");
+        ctx.stage("准备配置");
         let app_handle = app.clone();
         let project_clone = project.clone();
         let files = config.remote_ignore_files.clone();
@@ -987,15 +1054,19 @@ pub async fn run_pipeline(
         None
     };
 
-    // 2. HBuilderX 4.87 的 CLI 必须依附已启动的程序，且没有无头模式。
+    // 2. HBuilderX 4.87 Windows CLI 必须依附主程序进程，无法做到纯无头运行；唤醒后立即自动最小化至后台。
     if !hbuilder_running() {
-        ctx.stage("启动 HBuilderX…");
+        ctx.stage("唤醒引擎");
+        let headless_note = "[打包] Windows 下 HBuilderX CLI 需依附主程序 IPC 通道，无法完全无头；已唤醒并自动最小化到后台（子进程全禁用弹窗）";
+        crate::log_info!("{headless_note}");
+        task_runner::log_line(app, headless_note);
         let output = ctx.run(&cli, vec!["open".into()], OPEN_TIMEOUT).await?;
         if output.code != 0 {
             crate::log_warn!("cli open 返回 {}：{}", output.code, output.text.trim());
         }
+        minimize_hbuilder_windows();
     }
-    ctx.stage("等待 HBuilderX 就绪…");
+    ctx.stage("唤醒引擎");
     let mut ready = false;
     let wait_start = std::time::Instant::now();
     while !ready {
@@ -1015,6 +1086,7 @@ pub async fn run_pipeline(
             );
         } else {
             crate::log_info!("[打包] CLI 就绪：{version}（用时 {:?}）", attempt.elapsed());
+            minimize_hbuilder_windows();
         }
         if !ready {
             if wait_start.elapsed() > Duration::from_secs(60) {
@@ -1031,7 +1103,7 @@ pub async fn run_pipeline(
     }
 
     // 3. 让 HBuilderX 认识这个项目；已导入时这步只相当于打开，失败不阻断后续判断。
-    ctx.stage("打开项目…");
+    ctx.stage("准备配置");
     let opened = ctx
         .run(
             &cli,
@@ -1044,7 +1116,7 @@ pub async fn run_pipeline(
     }
 
     // 4. 云打包：阻塞到 CLI 自己结束（进入云端排队节点时回调会立即还原本地修改）。
-    ctx.stage("提交云端打包…");
+    ctx.stage("在编译");
     let pack_type = {
         let kind = config.pack_type.trim();
         if kind.is_empty() { "3".to_string() } else { kind.to_string() }
@@ -1086,7 +1158,7 @@ pub async fn run_pipeline(
     if ctx.cancelled() {
         return Err(exec::CaptureError::Cancelled);
     }
-    ctx.stage("下载 APK…");
+    ctx.stage("在下载");
     let directory = PathBuf::from(output_dir_text);
     std::fs::create_dir_all(&directory).map_err(|error| {
         exec::CaptureError::Failed(format!("无法创建输出目录 {}：{error}", directory.display()))
@@ -1129,7 +1201,7 @@ pub async fn run_pipeline(
     if ctx.cancelled() {
         return Err(exec::CaptureError::Cancelled);
     }
-    ctx.stage("检查手机连接…");
+    ctx.stage("在安装");
     let adb_path = adb::resolve(&config.adb);
     let wanted = config.device.clone();
     let device_res = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
@@ -1151,7 +1223,7 @@ pub async fn run_pipeline(
         }
     };
 
-    ctx.stage("安装到手机…");
+    ctx.stage("在安装");
     let adb_path = adb::resolve(&config.adb);
     let installed = ctx
         .run(
@@ -1177,7 +1249,7 @@ pub async fn run_pipeline(
 
     if env == "local" {
         let port = config.effective_reverse_port();
-        ctx.stage(&format!("建立端口转发 :{port}…"));
+        ctx.stage("在安装");
         let adb_path = adb::resolve(&config.adb);
         let serial = device.clone();
         let rev_res = tauri::async_runtime::spawn_blocking(move || adb::reverse(&adb_path, &serial, port))
@@ -1330,5 +1402,15 @@ export const GOV_API_BASE = 'http://localhost:11034';
         let dir = Path::new(".");
         assert!(apk_name(dir, "local").contains("-local-"));
         assert!(apk_name(dir, "remote").contains("-remote-"));
+    }
+
+    #[test]
+    fn pack_progress_normalizes_concise_stage_verbs() {
+        assert_eq!(pack_progress("正在编译打包资源..."), Some("在编译"));
+        assert_eq!(pack_progress("压缩打包资源..."), Some("在上传"));
+        assert_eq!(pack_progress("队列中，预计 18 分钟"), Some("在等待"));
+        assert_eq!(pack_progress("正在云端打包..."), Some("在打包"));
+        assert_eq!(pack_progress("打包成功，下载地址：https://example.com/a.apk"), Some("完成"));
+        assert_eq!(pack_progress("webpack compiled 12 modules"), None);
     }
 }

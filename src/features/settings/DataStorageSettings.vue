@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { state } from '@/store'
 
@@ -574,75 +576,103 @@ watch(() => state.ui.settingsOpen, open => {
     </div>
 
     <!-- 切换数据目录两步确认预览（置于候选列表上方，触发后自动滚入视口） -->
-    <div v-if="switchPreview" ref="previewBox" class="migration-preview" role="region" aria-label="切换数据目录预览">
-      <h5 ref="previewHeading" tabindex="-1">确认切换共享数据目录</h5>
-      <p class="hint">目标目录：<code>{{ switchPreview.targetDir }}</code></p>
-      <p class="summary-line">
-        当前目录：应用 <b>{{ switchPreview.currentSummary.appCount }}</b> · 剪贴板 <b>{{ switchPreview.currentSummary.clipCount }}</b> · 短语 <b>{{ switchPreview.currentSummary.snippetCount }}</b>
-        <br />
-        {{ switchPreview.targetHasData
-          ? `目标已有数据：应用 ${switchPreview.targetSummary.appCount} · 剪贴板 ${switchPreview.targetSummary.clipCount} · 短语 ${switchPreview.targetSummary.snippetCount}`
-          : '目标目录目前为空' }}
-      </p>
-      <p v-if="switchHasCorruption" class="hint error" role="alert">
-        检测到损坏的配置文件（{{ [...switchPreview.currentSummary.corruptedFiles, ...switchPreview.targetSummary.corruptedFiles].join('、') }}），已禁止盲目覆盖或切换。
-      </p>
-      <p v-else-if="switchPreview.targetHasData" class="hint">
-        目标目录中已有真实数据，请选择处理方式（选择覆盖前会自动先备份目标原有文件）：
-      </p>
-      <p v-else class="hint">
-        将把当前目录下的全部配置、剪贴板、图片、短语与邮箱记录完整复制过去（原目录文件会保留不动）。
-      </p>
-      <p v-if="blocked && !switchHasCorruption" class="hint">当前灵动岛或应用管理有未保存修改，迁移并重启后这些草稿不会保留。</p>
-      <div class="actions">
-        <button
-          v-if="switchPreview.targetHasData"
-          class="btn btn-primary"
-          type="button"
-          :disabled="Boolean(busy) || switchPreview.targetSummary.corruptedFiles.length > 0"
-          @click="confirmSwitch('use_existing')"
-        >
-          {{ busy === 'apply' ? '处理中…' : '直接使用目标已有数据（不覆盖）' }}
-        </button>
-        <button
-          class="btn"
-          :class="{ 'btn-primary': !switchPreview.targetHasData }"
-          type="button"
-          :disabled="Boolean(busy) || switchHasCorruption"
-          @click="confirmSwitch('copy_current')"
-        >
-          {{ busy === 'apply' ? '正在复制迁移…' : switchPreview.targetHasData ? '备份目标后，用当前数据覆盖' : '复制当前数据并切换' }}
-        </button>
-        <button class="btn" type="button" :disabled="Boolean(busy)" @click="clearPreviews">取消</button>
+    <GsapPresence
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -6 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <div
+        v-if="switchPreview"
+        ref="previewBox"
+        key="switch-preview"
+        class="migration-preview"
+        role="region"
+        aria-label="切换数据目录预览"
+      >
+        <h5 ref="previewHeading" tabindex="-1">确认切换共享数据目录</h5>
+        <p class="hint">目标目录：<code>{{ switchPreview.targetDir }}</code></p>
+        <p class="summary-line">
+          当前目录：应用 <b>{{ switchPreview.currentSummary.appCount }}</b> · 剪贴板 <b>{{ switchPreview.currentSummary.clipCount }}</b> · 短语 <b>{{ switchPreview.currentSummary.snippetCount }}</b>
+          <br />
+          {{ switchPreview.targetHasData
+            ? `目标已有数据：应用 ${switchPreview.targetSummary.appCount} · 剪贴板 ${switchPreview.targetSummary.clipCount} · 短语 ${switchPreview.targetSummary.snippetCount}`
+            : '目标目录目前为空' }}
+        </p>
+        <p v-if="switchHasCorruption" class="hint error" role="alert">
+          检测到损坏的配置文件（{{ [...switchPreview.currentSummary.corruptedFiles, ...switchPreview.targetSummary.corruptedFiles].join('、') }}），已禁止盲目覆盖或切换。
+        </p>
+        <p v-else-if="switchPreview.targetHasData" class="hint">
+          目标目录中已有真实数据，请选择处理方式（选择覆盖前会自动先备份目标原有文件）：
+        </p>
+        <p v-else class="hint">
+          将把当前目录下的全部配置、剪贴板、图片、短语与邮箱记录完整复制过去（原目录文件会保留不动）。
+        </p>
+        <p v-if="blocked && !switchHasCorruption" class="hint">当前灵动岛或应用管理有未保存修改，迁移并重启后这些草稿不会保留。</p>
+        <div class="actions">
+          <button
+            v-if="switchPreview.targetHasData"
+            class="btn btn-primary"
+            type="button"
+            :disabled="Boolean(busy) || switchPreview.targetSummary.corruptedFiles.length > 0"
+            @click="confirmSwitch('use_existing')"
+          >
+            {{ busy === 'apply' ? '处理中…' : '直接使用目标已有数据（不覆盖）' }}
+          </button>
+          <button
+            class="btn"
+            :class="{ 'btn-primary': !switchPreview.targetHasData }"
+            type="button"
+            :disabled="Boolean(busy) || switchHasCorruption"
+            @click="confirmSwitch('copy_current')"
+          >
+            {{ busy === 'apply' ? '正在复制迁移…' : switchPreview.targetHasData ? '备份目标后，用当前数据覆盖' : '复制当前数据并切换' }}
+          </button>
+          <button class="btn" type="button" :disabled="Boolean(busy)" @click="clearPreviews">取消</button>
+        </div>
       </div>
-    </div>
+    </GsapPresence>
 
     <!-- 从旧版本完整导入两步确认预览 -->
-    <div v-if="importPreview" ref="previewBox" class="migration-preview" role="region" aria-label="旧版数据导入预览">
-      <h5 ref="previewHeading" tabindex="-1">确认从旧版目录完整导入</h5>
-      <p class="hint">来源目录：<code>{{ importPreview.sourceDir }}</code></p>
-      <p class="summary-line">
-        应用 <b>{{ importPreview.sourceSummary.appCount }}</b>（分类 {{ importPreview.sourceSummary.categoryCount }}）· 剪贴板 <b>{{ importPreview.sourceSummary.clipCount }}</b>（图 {{ importPreview.sourceSummary.clipImageCount }}）· 短语 <b>{{ importPreview.sourceSummary.snippetCount }}</b> · 邮箱 <b>{{ importPreview.sourceSummary.mailAccountCount }}</b> · 中转 <b>{{ importPreview.sourceSummary.shelfCount }}</b> · 调音台 {{ importPreview.sourceSummary.audioProfileCount }} · 翻译模型：{{ importPreview.sourceSummary.hasTranslationConfig ? '有' : '无' }} · 外观与快捷键：{{ importPreview.sourceSummary.hasUiPreferences || importPreview.sourceSummary.hasShortcuts ? '有' : '无' }}
-      </p>
-      <p v-if="importHasCorruption" class="hint error" role="alert">
-        来源目录存在损坏的配置文件（{{ importPreview.sourceSummary.corruptedFiles.join('、') }}），已停止导入以避免污染当前数据。
-      </p>
-      <p v-else class="hint">
-        导入前会自动将当前目录原有数据完整备份到 <code>migration-backups/</code>；翻译密钥与邮箱授权码保存在 Windows 凭据管理器中会自动延续。
-      </p>
-      <p v-if="blocked && !importHasCorruption" class="hint">当前灵动岛或应用管理有未保存修改，导入并重启后这些草稿不会保留。</p>
-      <div class="actions">
-        <button
-          class="btn btn-primary"
-          type="button"
-          :disabled="Boolean(busy) || importHasCorruption"
-          @click="confirmImport"
-        >
-          {{ busy === 'apply' ? '正在备份并导入…' : '备份当前并导入全部数据' }}
-        </button>
-        <button class="btn" type="button" :disabled="Boolean(busy)" @click="clearPreviews">取消</button>
+    <GsapPresence
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -6 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <div
+        v-if="importPreview"
+        ref="previewBox"
+        key="import-preview"
+        class="migration-preview"
+        role="region"
+        aria-label="旧版数据导入预览"
+      >
+        <h5 ref="previewHeading" tabindex="-1">确认从旧版目录完整导入</h5>
+        <p class="hint">来源目录：<code>{{ importPreview.sourceDir }}</code></p>
+        <p class="summary-line">
+          应用 <b>{{ importPreview.sourceSummary.appCount }}</b>（分类 {{ importPreview.sourceSummary.categoryCount }}）· 剪贴板 <b>{{ importPreview.sourceSummary.clipCount }}</b>（图 {{ importPreview.sourceSummary.clipImageCount }}）· 短语 <b>{{ importPreview.sourceSummary.snippetCount }}</b> · 邮箱 <b>{{ importPreview.sourceSummary.mailAccountCount }}</b> · 中转 <b>{{ importPreview.sourceSummary.shelfCount }}</b> · 调音台 {{ importPreview.sourceSummary.audioProfileCount }} · 翻译模型：{{ importPreview.sourceSummary.hasTranslationConfig ? '有' : '无' }} · 外观与快捷键：{{ importPreview.sourceSummary.hasUiPreferences || importPreview.sourceSummary.hasShortcuts ? '有' : '无' }}
+        </p>
+        <p v-if="importHasCorruption" class="hint error" role="alert">
+          来源目录存在损坏的配置文件（{{ importPreview.sourceSummary.corruptedFiles.join('、') }}），已停止导入以避免污染当前数据。
+        </p>
+        <p v-else class="hint">
+          导入前会自动将当前目录原有数据完整备份到 <code>migration-backups/</code>；翻译密钥与邮箱授权码保存在 Windows 凭据管理器中会自动延续。
+        </p>
+        <p v-if="blocked && !importHasCorruption" class="hint">当前灵动岛或应用管理有未保存修改，导入并重启后这些草稿不会保留。</p>
+        <div class="actions">
+          <button
+            class="btn btn-primary"
+            type="button"
+            :disabled="Boolean(busy) || importHasCorruption"
+            @click="confirmImport"
+          >
+            {{ busy === 'apply' ? '正在备份并导入…' : '备份当前并导入全部数据' }}
+          </button>
+          <button class="btn" type="button" :disabled="Boolean(busy)" @click="clearPreviews">取消</button>
+        </div>
       </div>
-    </div>
+    </GsapPresence>
 
     <!-- 完成迁移后的重启引导 -->
     <div v-if="hasPendingRestart" class="restart-banner" role="status" aria-live="polite">

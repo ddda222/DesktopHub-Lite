@@ -7,21 +7,21 @@ type Effect = {
   x: Spring; y: Spring; hover: Spring; press: Spring
 }
 
-const controls = '.capsule, .app-tile, .mode-nav button, .round-action'
+const controls = '.capsule, .app-tile'
 const spring = (): Spring => ({ value: 0, velocity: 0, target: 0 })
 const bound = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value))
 
-type MotionPhysicsProfile = { damping: number; omega: number; pressScale: number }
-// 5 套手感的按压物理参数：丝滑、果冻、粘液、刻度、极速各有区分
+type MotionPhysicsProfile = { damping: number; omega: number }
+// 5 套手感的磁吸随动与 3D 微倾物理参数：与 motion-v 按钮外框缩放互补，避免双重缩放冲突。
 const MOTION_PROFILES: Record<string, MotionPhysicsProfile> = {
-  glide: { damping: 30, omega: 6, pressScale: 0.045 },
-  bounce: { damping: 20, omega: 6.5, pressScale: 0.065 },
-  sweep: { damping: 27, omega: 6, pressScale: 0.05 },
-  step: { damping: 36, omega: 5, pressScale: 0.035 },
-  flicker: { damping: 38, omega: 7.5, pressScale: 0.03 }
+  glide: { damping: 30, omega: 6 },
+  bounce: { damping: 20, omega: 6.5 },
+  sweep: { damping: 27, omega: 6 },
+  focus: { damping: 32, omega: 6.8 },
+  flicker: { damping: 38, omega: 7.5 }
 }
 
-export function advanceSpring(axis: Spring, seconds: number, damping = 28, omega = 6): boolean {
+function advanceSpring(axis: Spring, seconds: number, damping = 28, omega = 6): boolean {
   const offset = axis.value - axis.target
   const decay = Math.exp(-damping * seconds)
   const cos = Math.cos(omega * seconds), sin = Math.sin(omega * seconds)
@@ -96,13 +96,11 @@ export function createIslandPhysics(panel: HTMLElement) {
       const tx = x.value
       const ty = y.value
       const tilt = effect.card
-        ? 'perspective(480px) rotateX(' + (-ty * 1.8).toFixed(2) + 'deg) rotateY(' + (tx * 1.6).toFixed(2) + 'deg) '
+        ? 'perspective(480px) rotateX(' + (-ty * 2.2).toFixed(2) + 'deg) rotateY(' + (tx * 2.0).toFixed(2) + 'deg) '
         : ''
-      const scale = 1 + hover.value * 0.03 * (1 - depth.value) - depth.value * profile.pressScale
       visual.style.transform =
         'translate3d(' + tx.toFixed(2) + 'px,' + ty.toFixed(2) + 'px,0) ' +
         tilt +
-        'scale(' + scale.toFixed(3) + ')' +
         effect.restTransform
       moving ||= mx || my || mh || mp
     }
@@ -117,7 +115,7 @@ export function createIslandPhysics(panel: HTMLElement) {
   function select(event: PointerEvent) {
     const control = event.target instanceof Element ? event.target.closest<HTMLButtonElement>(controls) : null
     const valid = control && panel.contains(control) && !control.disabled && !control.closest('[inert]')
-    const selector = control?.matches('.capsule') ? (panel.classList.contains('expanded') && !control.classList.contains('has-feedback') ? '.grip' : '.capsule-text') : ':scope > svg, :scope > img, :scope > .fallback'
+    const selector = control?.matches('.capsule') ? (panel.classList.contains('expanded') && !control.classList.contains('has-feedback') ? '.grip' : '.capsule-label') : ':scope > svg, :scope > img, :scope > .fallback'
     const visual = valid ? control.querySelector<Visual>(selector) : null
     if (current && visual === current.visual) return current
     if (current) releaseEffect(current)

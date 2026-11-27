@@ -39,7 +39,7 @@ onMounted(() => {
   let trim = true
   let pointer: { clientX: number; clientY: number } | null = null
   let pressPending = false
-  let targetX = .31, targetY = 1, targetEnergy = .15
+  let targetX = .31, targetY = 1, targetEnergy = .34
   let lightX = targetX, lightY = targetY, energy = targetEnergy
   let tone = Number(props.lightSurface)
   let originX = .5, originY = 1
@@ -58,7 +58,11 @@ onMounted(() => {
     trim = true
     pressPending = false
     pointer = null
-    targetEnergy = energy = .15
+    targetEnergy = energy = .34
+    if (gl && !gl.isContextLost()) {
+      gl.clearColor(0, 0, 0, 0)
+      gl.clear(gl.COLOR_BUFFER_BIT)
+    }
   }
 
   function draw(now: number): void {
@@ -124,7 +128,7 @@ onMounted(() => {
     pressPending = true
     follow(event)
   }
-  const leave = () => { targetEnergy = .15; pointer = null; pressPending = false; schedule() }
+  const leave = () => { targetEnergy = .34; pointer = null; pressPending = false; schedule() }
   const restore = () => {
     if (disposed) return
     pass = createGlassPass(gl)
@@ -198,7 +202,7 @@ onBeforeUnmount(() => dispose?.())
 <style scoped>
 .glass-light {
   position: absolute;
-  z-index: 2;
+  z-index: 4;
   inset: 0;
   display: block;
   width: 100%;

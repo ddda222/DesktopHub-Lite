@@ -785,9 +785,9 @@ export class Reactive3DEngine {
       const overshoot = e > 0.1 && e < 0.99 ? Math.sin(e * Math.PI) * 0.28 : 0
       wingX = (1.1 + overshoot) * e
       wingY = (0.76 + overshoot * 1.35) * e
-    } else if (this.state.motion === 'step') {
-      const crisp = Math.min(1, e * 1.35)
-      wingX = 1.16 * crisp
+    } else if (this.state.motion === 'focus') {
+      const crisp = 1 - Math.pow(1 - e, 3)
+      wingX = 1.08 * crisp
       wingY = 0.72 * crisp
     } else if (this.state.motion === 'flicker') {
       const snap = Math.min(1, e * 1.45)

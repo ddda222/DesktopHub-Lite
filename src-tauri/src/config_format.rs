@@ -248,7 +248,7 @@ mod tests {
             let mut backup=sample(); backup.preferences.theme=theme.into();
             let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert!(restored.applications.apps[0].broken.is_none()); assert_eq!(restored.preferences.theme,theme);
         }
-        for motion in ["glide", "sweep", "bounce", "step", "flicker", "unroll"] {
+        for motion in ["glide", "sweep", "bounce", "focus", "flicker", "step", "unroll"] {
             let mut backup=sample(); backup.preferences.motion=motion.into();
             let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert_eq!(restored.preferences.motion,motion);
         }

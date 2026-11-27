@@ -3,8 +3,23 @@
  * 溢出网格：分类里放不下的应用必须可发现，不能直接裁掉。
  * 桌面版渲染在独立的 pop 窗口里，浏览器样稿里内联渲染。
  */
+import { onMounted, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
+import { gsap, vGsapHover, vGsapPress } from '@/lib/gsapMotion'
+import { activeMotionPreset } from '@/lib/motionPresets'
 import { categoryName, closePanel, iconFor, launchApp, state, visibleApps } from '@/store'
+
+const menuEl = ref<HTMLElement | null>(null)
+
+onMounted(() => {
+  if (!menuEl.value || state.ui.islandReducedMotion) return
+  const spec = activeMotionPreset.value.popTransition
+  gsap.fromTo(
+    menuEl.value,
+    { opacity: 0, y: 6, scale: 0.98 },
+    { opacity: 1, y: 0, scale: 1, duration: spec.duration, ease: spec.ease, clearProps: 'transform' }
+  )
+})
 
 async function launch(id: string): Promise<void> {
   const app = visibleApps.value.find((item) => item.id === id)
@@ -14,12 +29,19 @@ async function launch(id: string): Promise<void> {
 </script>
 
 <template>
-  <div class="menu menu-overflow" role="dialog" aria-label="全部应用">
+  <div
+    ref="menuEl"
+    class="menu menu-overflow"
+    role="dialog"
+    aria-label="全部应用"
+  >
     <div class="menu-title">{{ categoryName }} · 全部 {{ visibleApps.length }} 个应用</div>
     <div class="ov-grid scroll-y">
       <button
         v-for="app in visibleApps"
         :key="app.id"
+        v-gsap-hover="state.ui.islandReducedMotion ? undefined : activeMotionPreset.tileHover"
+        v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.tileTap"
         class="ov-item"
         type="button"
         :title="app.name"
@@ -55,7 +77,6 @@ async function launch(id: string): Promise<void> {
   border: 1px solid var(--pop-border);
   border-radius: var(--r-card);
   box-shadow: var(--pop-shadow);
-  animation: pop-in var(--dur) var(--ease);
 }
 
 .menu-title {
@@ -153,16 +174,5 @@ async function launch(id: string): Promise<void> {
   padding: 18px 0 12px;
   font-size: var(--text-sm);
   color: var(--text-3);
-}
-
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 </style>

@@ -91,11 +91,14 @@ export function kindLabel(kind: ScriptKind): string {
   return kind === 'pack' ? '云打包' : '短命令'
 }
 
-/** 估算时长：有历史取平均，否则用预估；都没有时返回 null（界面显示「首次运行」）。 */
+/** 估算时长：有历史取中位数（抵抗偶发云端排队尖峰），否则用手动预估；都没有时返回 null（仅显示已用耗时）。 */
 export function estimateSeconds(script: PackScript): number | null {
-  if (script.history.length) {
-    const sum = script.history.reduce((total, value) => total + value, 0)
-    return sum / script.history.length
+  const valid = script.history
+    .filter(value => Number.isFinite(value) && value > 0 && value <= 7200)
+    .sort((a, b) => a - b)
+  if (valid.length) {
+    const mid = Math.floor(valid.length / 2)
+    return valid.length % 2 === 1 ? valid[mid] : (valid[mid - 1] + valid[mid]) * 0.5
   }
   return script.estimateSec > 0 ? script.estimateSec : null
 }

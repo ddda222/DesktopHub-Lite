@@ -5,6 +5,7 @@
  * 界面将触发区域尺寸回报给 Rust，收起时窗口限制为顶部 140×14 热区。
  */
 import { onBeforeUnmount, onMounted } from 'vue'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import { subscribeHostEvents } from '@/store'
 
@@ -27,9 +28,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="bar-root">
-    <IslandEntry />
-  </div>
+  <HubMotionConfig>
+    <div class="bar-root">
+      <IslandEntry />
+    </div>
+  </HubMotionConfig>
 </template>
 
 <style scoped>

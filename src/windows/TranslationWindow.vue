@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import { listenHost } from '@/lib/desktop/desktop'
 import { cancelTranslation, subscribeHostEvents } from '@/store'
@@ -18,7 +19,9 @@ onBeforeUnmount(() => { disposed = true; listeners.forEach(stop => stop()) })
 </script>
 
 <template>
-  <main class="translation-window scroll-y"><TranslationPanel standalone /></main>
+  <HubMotionConfig>
+    <main class="translation-window scroll-y"><TranslationPanel standalone /></main>
+  </HubMotionConfig>
 </template>
 
 <style scoped>

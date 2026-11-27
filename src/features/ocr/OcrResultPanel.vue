@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
+import { vGsapPress } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import {
   closeOcrPanel,
   copyOcrText,
@@ -78,53 +81,81 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
-    <div v-if="state.ocr.status === 'loading'" class="ocr-state-box" role="status">
-      <p>正在本地离线识别文字，请稍候…</p>
-    </div>
-
-    <div v-else-if="state.ocr.status === 'error'" class="ocr-state-box is-error" role="alert">
-      <p>{{ state.ocr.error || '未能识别出文字' }}</p>
-      <div class="ocr-actions">
-        <button class="ocr-btn ocr-btn-primary" type="button" @click="startScreenOcr()">
-          重新截图
-        </button>
+    <GsapPresence
+      mode="out-in"
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: 4 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <div
+        v-if="state.ocr.status === 'loading'"
+        key="ocr-loading"
+        class="ocr-state-box"
+        role="status"
+      >
+        <p>正在本地离线识别文字，请稍候…</p>
       </div>
-    </div>
 
-    <template v-else-if="state.ocr.status === 'done'">
-      <textarea
-        v-model="draftText"
-        class="ocr-textarea"
-        rows="7"
-        spellcheck="false"
-        aria-label="识别出的文字内容"
-        placeholder="识别结果将显示在这里，可编辑或局部选中复制"
-      />
-      <div class="ocr-actions">
-        <button
-          class="ocr-btn ocr-btn-primary"
-          type="button"
-          :disabled="!draftText.trim()"
-          @click="handleCopy"
-        >
-          <Icon :name="copied ? 'check' : 'copy'" :size="14" />
-          {{ copied ? '已复制' : '复制全文' }}
-        </button>
-        <button
-          class="ocr-btn"
-          type="button"
-          :disabled="!draftText.trim()"
-          @click="handleTranslate"
-        >
-          <Icon name="translate" :size="14" />
-          送去翻译
-        </button>
-        <button class="ocr-btn" type="button" @click="startScreenOcr()">
-          <Icon name="scan-text" :size="14" />
-          重新截图
-        </button>
+      <div
+        v-else-if="state.ocr.status === 'error'"
+        key="ocr-error"
+        class="ocr-state-box is-error"
+        role="alert"
+      >
+        <p>{{ state.ocr.error || '未能识别出文字' }}</p>
+        <div class="ocr-actions">
+          <button class="ocr-btn ocr-btn-primary" type="button" @click="startScreenOcr()">
+            重新截图
+          </button>
+        </div>
       </div>
-    </template>
+
+      <div
+        v-else-if="state.ocr.status === 'done'"
+        key="ocr-done"
+      >
+        <textarea
+          v-model="draftText"
+          class="ocr-textarea"
+          rows="7"
+          spellcheck="false"
+          aria-label="识别出的文字内容"
+          placeholder="识别结果将显示在这里，可编辑或局部选中复制"
+        />
+        <div class="ocr-actions">
+          <button
+            v-gsap-press="!draftText.trim() || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+            class="ocr-btn ocr-btn-primary"
+            type="button"
+            :disabled="!draftText.trim()"
+            @click="handleCopy"
+          >
+            <Icon :name="copied ? 'check' : 'copy'" :size="14" />
+            {{ copied ? '已复制' : '复制全文' }}
+          </button>
+          <button
+            v-gsap-press="!draftText.trim() || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+            class="ocr-btn"
+            type="button"
+            :disabled="!draftText.trim()"
+            @click="handleTranslate"
+          >
+            <Icon name="translate" :size="14" />
+            送去翻译
+          </button>
+          <button
+            v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+            class="ocr-btn"
+            type="button"
+            @click="startScreenOcr()"
+          >
+            <Icon name="scan-text" :size="14" />
+            重新截图
+          </button>
+        </div>
+      </div>
+    </GsapPresence>
   </section>
 </template>
 
@@ -134,14 +165,6 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 10px;
   color: var(--text);
-  transform-origin: top center;
-  transition: opacity 170ms var(--ease-out), transform 190ms var(--ease-out);
-}
-@starting-style {
-  .ocr-panel {
-    opacity: 0;
-    transform: translate3d(0, 6px, 0) scale(.985);
-  }
 }
 .ocr-head {
   display: flex;

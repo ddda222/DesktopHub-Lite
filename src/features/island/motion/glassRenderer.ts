@@ -35,28 +35,21 @@ float bell(float distance, float width) {
 void main() {
   vec2 uv = gl_FragCoord.xy / bufferSize;
   vec2 point = uv * size;
-  vec2 box = abs(point - .5*size) - .5*size + corner + .6;
-  float sdf = length(max(box, 0.)) + min(max(box.x, box.y), 0.) - corner;
-  float depth = -sdf;
-  float band = mix(5.5, 11., smoothstep(42., 125., size.y));
-  if (depth < -1. || depth > band) { gl_FragColor = vec4(0.); return; }
-  float coverage = smoothstep(-.75,.35,depth) * (1.-smoothstep(.65*band,band,depth));
-  float reach = clamp(min(size.x,size.y)*.42,48.,142.);
-  float proximity = bell(length(point-light*size),reach) * energy;
-  float angle = atan(uv.x-.5,uv.y-.5);
-  float wake = ripple < 1. ? bell(length(point-origin*size)-ripple*250.,12.)*(1.-ripple)*smoothstep(0.,.06,ripple) : 0.;
-  float focus = min(1.,proximity+wake*.65);
-  float rim = bell(depth-.95,.72);
-  float ribbon = 0.;
-  if (full>.5) {
-    float curvature = sin(angle*2.-3.8+light.x*1.7);
-    float ridge = 1.6 + (1.+curvature)*.65 + focus*.55;
-    ribbon = bell(depth-ridge,.78) * .3;
-  }
-  float halo = bell(depth,band*.46);
-  float alpha = coverage * min(.86,(rim*.62+ribbon+halo*.26)*focus+rim*.08);
-  vec3 reflection = mix(tintBase, tintRim, rim);
-  gl_FragColor = vec4(reflection,alpha);
+  vec2 box = abs(point - .5*size) - .5*size + corner + .15;
+  float boxSdf = length(max(box, 0.)) + min(max(box.x, box.y), 0.) - corner;
+  float depth = -boxSdf;
+  // 严格贴合外框边缘线（<= 2.2px），只点亮轮廓边缘本身，不向面板内部产生任何内光晕。
+  float band = 2.2;
+  if (depth < -.5 || depth > band) { gl_FragColor = vec4(0.); return; }
+  float coverage = smoothstep(-.45, .15, depth) * (1. - smoothstep(1.15, band, depth));
+  float reach = clamp(min(size.x, size.y) * .48, 56., 160.);
+  float proximity = bell(length(point - light * size), reach) * energy;
+  float wake = ripple < 1. ? bell(length(point - origin * size) - ripple * 260., 12.) * (1. - ripple) * smoothstep(0., .06, ripple) : 0.;
+  float focus = min(1., proximity + wake * .65);
+  float rim = bell(depth - .65, .52);
+  float alpha = coverage * min(.92, rim * (.26 + .68 * focus));
+  vec3 reflection = mix(tintBase, tintRim, rim * .85);
+  gl_FragColor = vec4(reflection, alpha);
 }`
 
 function shader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {
@@ -112,8 +105,8 @@ export function createGlassPass(gl: WebGLRenderingContext) {
       gl.uniform2f(location.origin, frame.rippleX, frame.rippleY)
       gl.uniform1f(location.ripple, frame.rippleAge)
       gl.uniform1f(location.full, Number(frame.full))
-      const defaultBase: [number, number, number] = frame.tone > .5 ? [.22, .38, .66] : [.52, .73, .98]
-      const defaultRim: [number, number, number] = frame.tone > .5 ? [.44, .58, .82] : [.91, .95, 1]
+      const defaultBase: [number, number, number] = frame.tone > .5 ? [.48, .74, 1.] : [.44, .76, 1.]
+      const defaultRim: [number, number, number] = frame.tone > .5 ? [.98, .99, 1.] : [.94, .98, 1.]
       const base = frame.tintBase ?? defaultBase
       const rim = frame.tintRim ?? defaultRim
       gl.uniform3f(location.tintBase, base[0], base[1], base[2])

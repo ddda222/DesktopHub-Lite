@@ -1393,6 +1393,7 @@ pub fn run() {
             pack_scripts::list_pack_scripts,
             pack_scripts::save_pack_script,
             pack_scripts::delete_pack_script,
+            pack_scripts::reset_pack_script_history,
             task_runner::task_state,
             task_runner::task_log,
             task_runner::start_pack_task,

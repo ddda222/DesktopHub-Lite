@@ -66,7 +66,7 @@ impl IslandAppearance {
     }
 
     pub fn valid_motion_mode(mode: &str) -> bool {
-        matches!(mode, "glide" | "sweep" | "bounce" | "step" | "flicker" | "unroll")
+        matches!(mode, "glide" | "sweep" | "bounce" | "focus" | "flicker" | "step" | "unroll")
     }
 
     pub fn has_any_telemetry_metric(&self) -> bool {

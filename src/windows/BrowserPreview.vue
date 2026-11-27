@@ -1,13 +1,18 @@
 <script setup lang="ts">
 /** 当前灵动岛的浏览器预览，只使用既有合成数据与 MockHost。 */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import GsapShowcase from '@/components/GsapShowcase.vue'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
 import type { MailNotice } from '@/features/mail/mail'
 import SettingsWindow from '@/features/settings/SettingsWindow.vue'
 import ImagePreviewWindow from './ImagePreviewWindow.vue'
 import { browserImagePreview } from '@/mock/image-preview'
+import { startBrowserPackSimulation, stopBrowserPackSimulation } from '@/features/pack/useTaskRunner'
 import { closeSettings, isDarkTheme, setMotion, setTheme, state } from '@/store'
 import { THEME_LABELS, THEME_MODES } from '@/lib/themes'
 import { MOTION_LABELS, MOTION_MODES, normalizeMotionMode, type MotionMode } from '@/lib/motions'
@@ -59,6 +64,7 @@ watch([scene, () => state.ui.islandAppearance.avoidFullscreen], () => {
 })
 
 function clearTask(): void {
+  stopBrowserPackSimulation(true)
   state.ui.translationPending = 0
   state.translation.status = 'idle'
   state.ui.paused = false
@@ -67,6 +73,16 @@ function clearTask(): void {
   telemetryDemoSample.value = null
   demoMailNotices.value = []
   feedback.value = { kind: '', sequence: feedback.value.sequence + 1 }
+}
+
+function packDemo(mode: 'pack' | 'error'): void {
+  clearTask(); closeShelfPreview(); closeSettings()
+  keepOpen.value = false; scene.value = 'normal'
+  state.ui.islandExpanded = false
+  startBrowserPackSimulation(mode)
+  demoNote.value = mode === 'error'
+    ? '已触发「打包出错」全链路演示：观察 07 轨道、进度环、约剩倒计时与约 5.4 秒后的报错条（点击报错条直达打包日志）。'
+    : '已触发「模拟打包」全链路演示：观察 07 轨道巡航、MorphSVG 进度环、实时 INFO 日志、约剩倒计时与完成分钟时长。'
 }
 function mailCodeDemo(): void {
   clearTask(); closeShelfPreview(); closeSettings()
@@ -150,7 +166,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
 </script>
 
 <template>
-  <div class="preview" :class="{ plain, dark: isDarkTheme() }">
+  <HubMotionConfig>
+    <div class="preview" :class="{ plain, dark: isDarkTheme() }">
     <header class="preview-tools">
       <span>DesktopHub <small>实底高对比预览</small></span>
       <div class="preview-options">
@@ -169,6 +186,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
     <div class="preview-workbench">
     <main class="preview-stage">
       <IslandEntry :preview-feedback="feedback" :preview-keep-open="keepOpen" :preview-telemetry="telemetryDemoSample" :preview-mail="demoMailNotices" />
+      <GsapShowcase />
     </main>
     <aside class="preview-lab" aria-label="效果测试">
       <header><div><span class="lab-eyebrow">交互演示</span><h1>点一下，看效果</h1></div><button type="button" class="reset-demo" @click="resetDemo">重置演示</button></header>
@@ -178,6 +196,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
         <button type="button" :aria-pressed="state.ui.translationPending > 0" @click="capsuleDemo('working')">翻译中</button>
         <button type="button" @click="capsuleDemo('translated')">翻译完成</button>
         <button type="button" @click="capsuleDemo('translation-error')">翻译失败</button>
+        <button type="button" @click="packDemo('pack')">模拟打包</button>
+        <button type="button" @click="packDemo('error')">打包出错</button>
         <button type="button" @click="capsuleDemo('copied')">已复制</button>
         <button type="button" :aria-pressed="state.ui.paused" @click="capsuleDemo('paused')">{{ state.ui.paused ? '恢复记录' : '暂停记录' }}</button>
         <button type="button" @click="capsuleDemo('')">结束任务</button>
@@ -203,9 +223,25 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
       <ImagePreviewWindow v-if="browserImagePreview" :demo-content="browserImagePreview" @close="closeImageDemo" @resize="resizeImageDemo" />
     </dialog>
     <div class="toasts" role="status" aria-live="polite">
-      <div v-for="toast in state.toasts" :key="toast.id" class="toast"><Icon :name="toast.kind === 'success' ? 'check' : 'info'" :size="16" /><span>{{ toast.text }}</span></div>
+      <GsapPresence
+        group
+        tag="div"
+        :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: 10, scale: 0.96 }"
+        :animate="{ opacity: 1, y: 0, scale: 1 }"
+        :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.96 }"
+        :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+      >
+        <div
+          v-for="toast in state.toasts"
+          :key="toast.id"
+          class="toast"
+        >
+          <Icon :name="toast.kind === 'success' ? 'check' : 'info'" :size="16" /><span>{{ toast.text }}</span>
+        </div>
+      </GsapPresence>
     </div>
   </div>
+  </HubMotionConfig>
 </template>
 
 <style scoped>
@@ -222,18 +258,18 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
 .preview-options label { display: flex; align-items: center; gap: 6px; }
 select { font: inherit; color: inherit; background: transparent; border: 0; }
 select option { color: #252b3c; }
-.preview-stage { display: flex; justify-content: center; align-items: flex-start; padding: 20px 0 60px; min-height: 560px; }
+.preview-stage { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 20px 0 60px; min-height: 560px; }
 .preview-workbench { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 24px; padding: 0 28px; }
 .preview-stage { grid-column: 2; grid-row: 1; min-width: 0; }
-.preview-lab { grid-column: 1; grid-row: 1; align-self: start; margin-top: 20px; padding: 18px; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--surface); color: var(--text); box-shadow: 0 10px 36px rgb(0 0 0 / .08); }
+.preview-lab { grid-column: 1; grid-row: 1; align-self: start; margin-top: 20px; padding: 18px; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--surface-glass); backdrop-filter: var(--glass-backdrop); color: var(--text); box-shadow: var(--island-drop-shadow); }
 .preview-lab header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .lab-eyebrow { font-size: 10px; color: var(--text-2); letter-spacing: 1px; }
 .preview-lab h1 { font-size: 16px; line-height: 1.5; margin: 4px 0 16px; }
 .preview-lab fieldset { min-width: 0; padding: 0; border: 0; margin: 0 0 16px; }
 .preview-lab legend { padding: 0; margin-bottom: 8px; font-size: 12px; color: var(--text-2); }
 .demo-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.demo-buttons button { min-height: 32px; border-radius: 9px; padding: 6px; font-size: 12px; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); }
-.demo-buttons button:hover { background: var(--hover); }
+.demo-buttons button { min-height: 32px; border-radius: 9px; padding: 6px; font-size: 12px; color: var(--text); background: var(--tile-surface); border: 1px solid var(--line); box-shadow: var(--tile-shadow); transition: box-shadow 140ms ease, border-color 140ms ease; }
+.demo-buttons button:hover { background: var(--tile-surface); border-color: var(--line-strong); box-shadow: var(--tile-hover-shadow); }
 .demo-buttons button[aria-pressed='true'] { background: var(--accent-weak); border-color: var(--accent); }
 .demo-buttons button:disabled { color: var(--text-3); cursor: default; border-style: dashed; }
 .preview-lab button:focus-visible, .preview-lab input:focus-visible, .preview-options button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

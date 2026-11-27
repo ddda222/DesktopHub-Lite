@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import MotionSaveButton from '@/components/MotionSaveButton.vue'
+import MotionSwitch from '@/components/MotionSwitch.vue'
+import { Draggable, gsap } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { defaultIslandAppearance, invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { pushToast, state } from '@/store'
 
@@ -124,7 +129,88 @@ function loadGeneralStatus(): void {
     .then(result => { if (!updateBusy.value && result) update.value = result })
     .catch(() => {})
 }
-onMounted(loadGeneralStatus)
+const anchorTrackEl = ref<HTMLElement | null>(null)
+const anchorPuckEl = ref<HTMLElement | null>(null)
+let anchorDraggable: Draggable | null = null
+
+function anchorToIndex(pos: string): number {
+  return pos === 'left' ? 0 : pos === 'right' ? 2 : 1
+}
+
+function indexToAnchor(idx: number): 'left' | 'center' | 'right' {
+  return idx <= 0 ? 'left' : idx >= 2 ? 'right' : 'center'
+}
+
+function positionAnchorPuck(pos: string, animate = true): void {
+  const track = anchorTrackEl.value
+  const puck = anchorPuckEl.value
+  if (!track || !puck) return
+  const maxX = Math.max(0, track.clientWidth - puck.offsetWidth - 8)
+  const targetX = pos === 'left' ? 0 : pos === 'right' ? maxX : Math.round(maxX / 2)
+  if (!animate || state.ui.islandReducedMotion) {
+    gsap.set(puck, { x: targetX })
+  } else {
+    const spec = activeMotionPreset.value.pill
+    gsap.to(puck, { x: targetX, duration: spec.duration, ease: spec.ease, overwrite: 'auto' })
+  }
+}
+
+function selectAnchorSlot(pos: 'left' | 'center' | 'right'): void {
+  anchor.value = pos
+  positionAnchorPuck(pos, true)
+}
+
+function setupAnchorRail(): void {
+  const track = anchorTrackEl.value
+  const puck = anchorPuckEl.value
+  if (!track || !puck) return
+  anchorDraggable?.kill()
+  const maxX = Math.max(0, track.clientWidth - puck.offsetWidth - 8)
+  positionAnchorPuck(anchor.value, false)
+  anchorDraggable = Draggable.create(puck, {
+    type: 'x',
+    bounds: { minX: 0, maxX },
+    inertia: true,
+    edgeResistance: 0.65,
+    snap: {
+      x: (endVal: number) => {
+        const m = Math.max(0, track.clientWidth - puck.offsetWidth - 8)
+        const pts = [0, Math.round(m / 2), m]
+        return pts.reduce((best, p) => (Math.abs(p - endVal) < Math.abs(best - endVal) ? p : best), pts[0])
+      }
+    },
+    onThrowComplete() {
+      const m = Math.max(1, track.clientWidth - puck.offsetWidth - 8)
+      const ratio = this.x / m
+      const next = indexToAnchor(ratio < 0.3 ? 0 : ratio > 0.7 ? 2 : 1)
+      anchor.value = next
+    },
+    onDragEnd() {
+      if (!this.tween) {
+        const m = Math.max(1, track.clientWidth - puck.offsetWidth - 8)
+        const ratio = this.x / m
+        const next = indexToAnchor(ratio < 0.3 ? 0 : ratio > 0.7 ? 2 : 1)
+        anchor.value = next
+        positionAnchorPuck(next, true)
+      }
+    }
+  })[0] ?? null
+}
+
+watch(anchor, (val) => {
+  if (!anchorDraggable?.isDragging && !anchorDraggable?.isThrowing) {
+    positionAnchorPuck(val, true)
+  }
+})
+
+onMounted(() => {
+  loadGeneralStatus()
+  setupAnchorRail()
+})
+onBeforeUnmount(() => {
+  anchorDraggable?.kill()
+  anchorDraggable = null
+})
 watch(() => state.ui.settingsOpen, open => {
   if (!open) return
   appearance.value = { ...defaultIslandAppearance(), ...state.ui.islandAppearance }
@@ -143,14 +229,33 @@ watch(() => state.ui.settingsOpen, open => {
     <div class="actions">
       <button v-if="dirty" type="button" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button>
       <button type="button" class="btn" :disabled="saving" @click="restore">恢复默认值</button>
-      <button type="button" class="btn btn-primary btn-stateful" :data-state="saving ? 'busy' : justSaved ? 'done' : 'idle'" :disabled="saving || !validSettings || !isDesktop" @click="save"><span class="btn-label">应用设置</span><span class="btn-spinner" aria-hidden="true" /><span class="btn-check" aria-hidden="true">✓</span></button>
+      <MotionSaveButton label="应用设置" :busy="saving" :done="justSaved" :disabled="saving || !validSettings || !isDesktop" @click="save" />
     </div>
   </div>
   <slot />
   <section class="features" aria-label="灵动岛与系统">
     <h4 class="sub-title">灵动岛 <span class="save-mode">手动应用</span></h4>
     <div class="field-grid">
-      <label class="field"><span class="field-label">停靠位置</span><select v-model="anchor" class="control"><option value="left">左上</option><option value="center">顶部居中</option><option value="right">右上</option></select></label>
+      <div class="field field-wide">
+        <span class="field-label">停靠位置 <small class="field-hint">支持点击槽位或甩动胶囊磁吸停靠</small></span>
+        <div ref="anchorTrackEl" class="anchor-rail" role="radiogroup" aria-label="停靠位置">
+          <button
+            v-for="slot in ([['left', '左上'], ['center', '顶部居中'], ['right', '右上']] as const)"
+            :key="slot[0]"
+            type="button"
+            class="anchor-slot"
+            role="radio"
+            :aria-checked="anchor === slot[0]"
+            :class="{ 'is-active': anchor === slot[0] }"
+            @click="selectAnchorSlot(slot[0])"
+          >
+            <span>{{ slot[1] }}</span>
+          </button>
+          <span ref="anchorPuckEl" class="anchor-puck" aria-hidden="true">
+            <i />{{ anchorToIndex(anchor) === 0 ? '左上' : anchorToIndex(anchor) === 2 ? '右上' : '居中' }}
+          </span>
+        </div>
+      </div>
       <label class="field"><span class="field-label">显示大小 <output>{{ appearance.scale }}%</output></span><input v-model.number="appearance.scale" class="size-slider" type="range" min="75" max="125" step="5" aria-label="灵动岛显示大小" :aria-valuetext="`${appearance.scale}%`" /></label>
       <label class="field field-wide">
         <span class="field-label">胶囊微读数</span>
@@ -161,31 +266,38 @@ watch(() => state.ui.settingsOpen, open => {
         </select>
       </label>
     </div>
-    <div v-if="appearance.telemetryMode !== 'off'" class="telemetry-config">
-      <div class="seg" role="group" aria-label="微读数指标">
-        <label class="seg-item" :class="{ 'is-on': appearance.telemetryNet }"><input v-model="appearance.telemetryNet" class="sr-only" type="checkbox" />实时网速</label>
-        <label class="seg-item" :class="{ 'is-on': appearance.telemetryCpu }"><input v-model="appearance.telemetryCpu" class="sr-only" type="checkbox" />处理器占用</label>
-        <label class="seg-item" :class="{ 'is-on': appearance.telemetryMemory }"><input v-model="appearance.telemetryMemory" class="sr-only" type="checkbox" />内存占用</label>
+    <GsapPresence
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+      :animate="{ opacity: 1, y: 0 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+      :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+    >
+      <div
+        v-if="appearance.telemetryMode !== 'off'"
+        key="telemetry-config"
+        class="telemetry-config"
+      >
+        <div class="seg" role="group" aria-label="微读数指标">
+          <label class="seg-item" :class="{ 'is-on': appearance.telemetryNet }"><input v-model="appearance.telemetryNet" class="sr-only" type="checkbox" />实时网速</label>
+          <label class="seg-item" :class="{ 'is-on': appearance.telemetryCpu }"><input v-model="appearance.telemetryCpu" class="sr-only" type="checkbox" />处理器占用</label>
+          <label class="seg-item" :class="{ 'is-on': appearance.telemetryMemory }"><input v-model="appearance.telemetryMemory" class="sr-only" type="checkbox" />内存占用</label>
+        </div>
+        <p class="hint telemetry-hint">{{ appearance.telemetryMode === 'smart'
+          ? '平时保持简洁时间；当网速 ≥ 64 KB/s、处理器 ≥ 35% 或内存 ≥ 80% 时自动切为读数，回落后保持 3 秒平滑收回。仅统计活动物理以太网与 Wi-Fi。'
+          : '胶囊收起时常驻显示所选指标；最大化或全屏收为细线时自动休眠停止采集。' }}</p>
       </div>
-      <p class="hint telemetry-hint">{{ appearance.telemetryMode === 'smart'
-        ? '平时保持简洁时间；当网速 ≥ 64 KB/s、处理器 ≥ 35% 或内存 ≥ 80% 时自动切为读数，回落后保持 3 秒平滑收回。仅统计活动物理以太网与 Wi-Fi。'
-        : '胶囊收起时常驻显示所选指标；最大化或全屏收为细线时自动休眠停止采集。' }}</p>
-    </div>
+    </GsapPresence>
     <div class="feature-options">
       <div class="set-row">
         <span class="set-text">
           <span class="set-label">应用网格显示名称</span>
           <span class="set-desc">关闭后仅显示紧凑应用图标，悬停图标时查看完整名称。</span>
         </span>
-        <button
-          class="switch"
-          type="button"
-          role="switch"
-          aria-label="应用网格显示名称"
-          :class="{ 'is-on': appearance.showAppNames }"
-          :aria-checked="appearance.showAppNames"
-          @click="appearance.showAppNames = !appearance.showAppNames; if (!isDesktop) state.ui.islandAppearance.showAppNames = appearance.showAppNames"
-        ><span class="switch-knob" aria-hidden="true" /></button>
+        <MotionSwitch
+          :checked="appearance.showAppNames"
+          label="应用网格显示名称"
+          @toggle="appearance.showAppNames = !appearance.showAppNames; if (!isDesktop) state.ui.islandAppearance.showAppNames = appearance.showAppNames"
+        />
       </div>
       <label class="set-row switch-row">
         <span class="set-text">
@@ -193,7 +305,7 @@ watch(() => state.ui.settingsOpen, open => {
           <span class="set-desc">沿边缘巡光，展开时向两侧分流，正文保持实底。</span>
         </span>
         <input v-model="appearance.webgl" class="sr-only" type="checkbox" />
-        <span class="switch" :class="{ 'is-on': appearance.webgl }" aria-hidden="true"><span class="switch-knob" /></span>
+        <MotionSwitch :checked="appearance.webgl" as-decorative />
       </label>
       <label class="set-row switch-row">
         <span class="set-text">
@@ -201,7 +313,7 @@ watch(() => state.ui.settingsOpen, open => {
           <span class="set-desc">停用动态光效，保留清晰边框。</span>
         </span>
         <input v-model="reducedMotion" class="sr-only" type="checkbox" />
-        <span class="switch" :class="{ 'is-on': reducedMotion }" aria-hidden="true"><span class="switch-knob" /></span>
+        <MotionSwitch :checked="reducedMotion" as-decorative />
       </label>
       <label class="set-row switch-row">
         <span class="set-text">
@@ -209,7 +321,7 @@ watch(() => state.ui.settingsOpen, open => {
           <span class="set-desc">悬停驻留或点击展开，移开后自动收回。</span>
         </span>
         <input v-model="appearance.avoidFullscreen" class="sr-only" type="checkbox" />
-        <span class="switch" :class="{ 'is-on': appearance.avoidFullscreen }" aria-hidden="true"><span class="switch-knob" /></span>
+        <MotionSwitch :checked="appearance.avoidFullscreen" as-decorative />
       </label>
       <label class="set-row switch-row">
         <span class="set-text">
@@ -217,7 +329,7 @@ watch(() => state.ui.settingsOpen, open => {
           <span class="set-desc">仅隐藏灵动岛，本机屏幕仍可见，共享前请实测。</span>
         </span>
         <input v-model="appearance.hideFromCapture" class="sr-only" type="checkbox" :disabled="saving" aria-describedby="capture-scope" />
-        <span class="switch" :class="{ 'is-on': appearance.hideFromCapture }" aria-hidden="true"><span class="switch-knob" /></span>
+        <MotionSwitch :checked="appearance.hideFromCapture" :disabled="saving" as-decorative />
       </label>
     </div>
     <p v-if="appearance.hideFromCapture" class="inline-feedback" role="status">远程操作时，你自己也可能看不到灵动岛。可从托盘打开设置，取消勾选并应用以恢复。</p>
@@ -234,7 +346,7 @@ watch(() => state.ui.settingsOpen, open => {
           <span class="set-desc">不自动下载或重启，点击「应用设置」后生效。</span>
         </span>
         <input v-model="appearance.autoCheckUpdates" class="sr-only" type="checkbox" />
-        <span class="switch" :class="{ 'is-on': appearance.autoCheckUpdates }" aria-hidden="true"><span class="switch-knob" /></span>
+        <MotionSwitch :checked="appearance.autoCheckUpdates" as-decorative />
       </label>
       <p id="capture-scope" class="hint">捕获隐藏仅作用于胶囊、细线和展开面板；设置、独立翻译和钉图窗口仍可见。依赖 Windows 10 2004 及以上的支持，不保证所有采集方式生效。</p>
       <p class="hint">边缘光效使用 WebGL；系统减少动画或高对比度时停用光效。浅深色主题均保持正文不透明。</p>
@@ -245,12 +357,22 @@ watch(() => state.ui.settingsOpen, open => {
     <h4 class="sub-title">提醒与启动 <span class="save-mode">即时生效</span></h4>
     <div class="set-row">
       <span class="set-text"><span class="set-label">微信普通提醒</span><span class="set-desc" role="status">{{ isDesktop ? wechatStatus : '桌面版可用' }}。只接收关注提醒，不读取聊天内容。</span></span>
-      <button class="switch" :class="{ 'is-on': state.ui.wechatEnabled }" role="switch" aria-label="接收微信普通提醒" :aria-checked="state.ui.wechatEnabled" :disabled="wechatBusy || !isDesktop" @click="toggleWechat"><span class="switch-knob" /></button>
+      <MotionSwitch
+        :checked="state.ui.wechatEnabled"
+        :disabled="wechatBusy || !isDesktop"
+        label="接收微信普通提醒"
+        @toggle="toggleWechat"
+      />
     </div>
     <button v-if="state.ui.wechatAttention" class="btn" :disabled="!isDesktop" @click="invokeHost('clear_wechat_attention').catch(error => pushToast(String(error), 'error'))">清除待关注</button>
     <div class="set-row">
       <span class="set-text"><span class="set-label">Windows 登录时启动</span><span class="set-desc">{{ isDesktop ? '仅修改当前用户的启动项。' : '桌面版可用。' }}</span></span>
-      <button class="switch" :class="{ 'is-on': startup?.enabled }" role="switch" aria-label="Windows 登录时启动" :aria-checked="startup?.enabled ?? false" :disabled="!startup || startup.conflict || startupBusy || !isDesktop" @click="toggleStartup"><span class="switch-knob" /></button>
+      <MotionSwitch
+        :checked="Boolean(startup?.enabled)"
+        :disabled="!startup || startup.conflict || startupBusy || !isDesktop"
+        label="Windows 登录时启动"
+        @toggle="toggleStartup"
+      />
     </div>
     <p v-if="startupError || startup?.conflict" class="inline-feedback error" role="status">{{ startupError || '发现其他有效路径的同名启动项，未覆盖或移除。' }}</p>
     <p v-else-if="startup?.stale" class="inline-feedback" role="status">原自启路径已失效，开启右侧开关即可更新为当前程序。</p>
@@ -266,6 +388,53 @@ watch(() => state.ui.settingsOpen, open => {
 
 <style scoped>
 .settings-ui .general-actions { position: sticky; top: 0; z-index: 1; margin: 8px 0 16px; padding: 12px 0; background: var(--surface); border-bottom: 1px solid var(--line); }
+.field-hint { margin-left: 6px; font-size: 10.5px; font-weight: 400; color: var(--text-3); }
+.anchor-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  height: 40px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--recess-bg, var(--surface-2));
+  border: 1px solid var(--line);
+  box-shadow: var(--recess-shadow, none);
+  overflow: hidden;
+}
+.anchor-slot {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  font-size: 11.5px;
+  color: var(--text-3);
+  border-radius: 8px;
+  transition: color 140ms ease;
+}
+.anchor-slot.is-active { color: transparent; }
+.anchor-puck {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: calc((100% - 8px) / 3);
+  height: 30px;
+  border-radius: 9px;
+  background: var(--tile-surface, var(--surface));
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--tile-shadow, 0 2px 6px rgb(0 0 0 / .14));
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.anchor-puck i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .telemetry-config { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .telemetry-hint { margin: 2px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import MotionSwitch from '@/components/MotionSwitch.vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import type { AudioDevice, AudioSnapshot, MixerVisibility } from '@/lib/desktop/types'
 import { state } from '@/store'
@@ -104,9 +105,12 @@ onBeforeUnmount(() => { disposed = true; clearInterval(timer) })
             <span v-if="row.sameName" class="set-desc">{{ row.id }}</span>
             <span v-if="row.missing" class="set-desc">{{ group.key === 'devices' ? '当前未检测到' : '当前没有声音会话' }}</span>
           </span>
-          <button class="switch" type="button" role="switch" :class="{ 'is-on': row.visible }"
-            :aria-label="`显示${group.label}：${row.name}${row.sameName ? ' ' + row.id : ''}`" :aria-checked="row.visible"
-            :disabled="saving" @click="setVisible(group.key, row, !row.visible)"><span class="switch-knob" aria-hidden="true" /></button>
+          <MotionSwitch
+            :checked="row.visible"
+            :disabled="saving"
+            :label="`显示${group.label}：${row.name}${row.sameName ? ' ' + row.id : ''}`"
+            @toggle="setVisible(group.key, row, !row.visible)"
+          />
         </div>
         <p v-if="snapshot && !group.rows.length" class="hint">{{ group.empty }}</p>
       </div>

@@ -9,8 +9,12 @@
  * 换行后量出的宽度又更窄，会陷进「越量越小、文字被裁」的循环。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { dismissToast, onToast, resizeToast } from '@/lib/desktop/desktop'
+import { state } from '@/store'
 
 interface ToastPayload {
   message: string
@@ -21,9 +25,14 @@ interface ToastPayload {
 const TOAST_WIDTH = 360
 
 const payload = ref<ToastPayload | null>(null)
+const toastSeq = ref(0)
 const boxEl = ref<HTMLElement | null>(null)
 let unsubscribe: (() => void) | null = null
 let hideTimer: number | null = null
+
+const toastTransition = computed(() =>
+  state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.popTransition
+)
 
 const iconName = computed(() => {
   if (payload.value?.kind === 'error') return 'info'
@@ -40,6 +49,7 @@ function clearTimer(): void {
 
 async function show(next: ToastPayload): Promise<void> {
   payload.value = next
+  toastSeq.value += 1
   clearTimer()
   // 等 DOM 更新后量出真实高度；宽度固定，避免换行与测量互相影响。
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
@@ -67,10 +77,27 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="payload" ref="boxEl" class="toast" :class="`is-${payload.kind}`" role="status">
-    <Icon :name="iconName" :size="14" />
-    <span>{{ payload.message }}</span>
-  </div>
+  <HubMotionConfig>
+    <GsapPresence
+      mode="out-in"
+      :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: 10, scale: 0.96 }"
+      :animate="{ opacity: 1, y: 0, scale: 1 }"
+      :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.96 }"
+      :transition="toastTransition"
+    >
+      <div
+        v-if="payload"
+        :key="toastSeq"
+        ref="boxEl"
+        class="toast"
+        :class="`is-${payload.kind}`"
+        role="status"
+      >
+        <Icon :name="iconName" :size="14" />
+        <span>{{ payload.message }}</span>
+      </div>
+    </GsapPresence>
+  </HubMotionConfig>
 </template>
 
 <style scoped>

@@ -7,7 +7,10 @@
  * - 结果来自 MockHost，界面必须标「样稿模拟结果」，不能让人以为真实翻译成功。
  * - 密钥正文永不读取、永不显示。
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import { gsap, vGsapPress, vGsapPulse } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
 import {
@@ -21,6 +24,7 @@ import {
 } from '@/store'
 
 const props = defineProps<{ standalone?: boolean }>()
+const swapIconEl = ref<HTMLElement | null>(null)
 function dismiss(): void {
   if (props.standalone) {
     cancelTranslation()
@@ -29,6 +33,11 @@ function dismiss(): void {
 }
 
 const sourceLanguage = computed(() => state.translation.direction === 'auto' ? 'auto' : state.translation.direction === 'en-zh' ? 'en' : 'zh')
+watch(sourceLanguage, (lang) => {
+  if (!swapIconEl.value) return
+  const spec = state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.pill
+  gsap.to(swapIconEl.value, { rotation: lang === 'en' ? 180 : 0, duration: spec.duration, ease: spec.ease })
+})
 const targetLanguage = computed(() => state.translation.direction === 'auto' ? 'auto' : state.translation.direction === 'en-zh' ? 'zh' : 'en')
 function chooseLanguage(event: Event, source: boolean) {
   const language = (event.target as HTMLSelectElement).value
@@ -147,8 +156,20 @@ function onPanelKeydown(event: KeyboardEvent): void {
           <select aria-label="原文语言" :value="sourceLanguage" @change="chooseLanguage($event, true)">
             <option value="zh">中文</option><option value="en">英语</option><option value="auto">自动检测</option>
           </select>
-          <button class="swap" type="button" title="交换翻译方向" aria-label="交换翻译方向" @click="swapLanguages">
-            <Icon name="swap" :size="16" :class="{ reversed: sourceLanguage === 'en' }" />
+          <button
+            v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+            class="swap"
+            type="button"
+            title="交换翻译方向"
+            aria-label="交换翻译方向"
+            @click="swapLanguages"
+          >
+            <span
+              ref="swapIconEl"
+              class="swap-icon"
+            >
+              <Icon name="swap" :size="16" />
+            </span>
           </button>
           <select aria-label="译文语言" :value="targetLanguage" @change="chooseLanguage($event, false)">
             <option v-if="targetLanguage === 'auto'" value="auto" disabled>自动匹配</option>
@@ -188,46 +209,72 @@ function onPanelKeydown(event: KeyboardEvent): void {
 
       <!-- 提交 -->
       <div class="actions">
-        <button class="primary" type="button" :disabled="isLoading" @click="onSubmit">
+        <button
+          v-gsap-press="isLoading || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+          class="primary"
+          type="button"
+          :disabled="isLoading"
+          @click="onSubmit"
+        >
           <span v-if="isLoading" class="pulse" aria-hidden="true">
-            <i class="pulse-dot" />
-            <i class="pulse-dot" />
-            <i class="pulse-dot" />
+            <i
+              v-for="idx in 3"
+              :key="idx"
+              v-gsap-pulse="state.ui.islandReducedMotion ? null : { opacity: [0.3, 1], scale: [0.9, 1.15], duration: 1.05, delay: (idx - 1) * 0.14 }"
+              class="pulse-dot"
+            />
           </span>
           {{ isLoading ? '翻译中…' : '翻译' }}
         </button>
         <span class="hint">Ctrl / ⌘ + Enter 提交</span>
       </div>
 
-      <div v-if="status !== 'idle'" class="result">
-        <div class="result-head">
-          <span class="label">译文</span>
-          <span
-            v-if="status === 'done' && !isDesktop"
-            class="badge"
-            title="译文由 MockHost 生成，只用于检查排版与状态，不是真实翻译"
-          >
-            样稿模拟结果
-          </span>
-          <span class="head-spacer" />
-          <button v-if="status === 'done'" class="ghost copy" type="button" @click="onCopy">
-            <Icon name="copy" :size="13" />复制译文
-          </button>
-        </div>
-
-        <div class="result-body">
-          <p v-if="status === 'loading'" class="placeholder">正在翻译，请稍候…</p>
-          <div v-else-if="status === 'error'" class="error">
-            <p class="error-text">{{ state.translation.error }}</p>
-            <button class="ghost" type="button" @click="onRetry">重试</button>
+      <GsapPresence
+        :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: 6 }"
+        :animate="{ opacity: 1, y: 0 }"
+        :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: 4 }"
+        :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+      >
+        <div
+          v-if="status !== 'idle'"
+          key="translation-result"
+          class="result"
+        >
+          <div class="result-head">
+            <span class="label">译文</span>
+            <span
+              v-if="status === 'done' && !isDesktop"
+              class="badge"
+              title="译文由 MockHost 生成，只用于检查排版与状态，不是真实翻译"
+            >
+              样稿模拟结果
+            </span>
+            <span class="head-spacer" />
+            <button
+              v-if="status === 'done'"
+              v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+              class="ghost copy"
+              type="button"
+              @click="onCopy"
+            >
+              <Icon name="copy" :size="13" />复制译文
+            </button>
           </div>
-          <p v-else class="result-text model-response" tabindex="0" aria-label="译文内容">{{ resultText }}</p>
-        </div>
 
-        <footer v-if="status === 'done'" class="result-foot">
-          <span class="meta" :title="resultMeta">{{ resultMeta }}</span>
-        </footer>
-      </div>
+          <div class="result-body">
+            <p v-if="status === 'loading'" class="placeholder">正在翻译，请稍候…</p>
+            <div v-else-if="status === 'error'" class="error">
+              <p class="error-text">{{ state.translation.error }}</p>
+              <button class="ghost" type="button" @click="onRetry">重试</button>
+            </div>
+            <p v-else class="result-text model-response" tabindex="0" aria-label="译文内容">{{ resultText }}</p>
+          </div>
+
+          <footer v-if="status === 'done'" class="result-foot">
+            <span class="meta" :title="resultMeta">{{ resultMeta }}</span>
+          </footer>
+        </div>
+      </GsapPresence>
     </div>
 
     <p class="sr-only" aria-live="polite">{{ liveStatus }}</p>
@@ -345,12 +392,9 @@ function onPanelKeydown(event: KeyboardEvent): void {
 .languages select { width: 6.8em; padding-inline: 6px; font-weight: 600; }
 .languages select option { color: var(--text); background: var(--surface); }
 .swap { width: 30px; display: grid; place-items: center; color: var(--accent); touch-action: manipulation; }
+.swap-icon { display: grid; place-items: center; }
 .languages :is(select, .swap):hover { background: var(--hover); }
 .languages :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.swap .reversed { transform: rotate(180deg); }
-@media (prefers-reduced-motion: no-preference) {
-  .swap svg { transition: transform var(--dur) var(--ease); }
-}
 
 /* 原文 */
 .source {
@@ -563,32 +607,6 @@ function onPanelKeydown(event: KeyboardEvent): void {
   height: 3px;
   background: currentColor;
   border-radius: 50%;
-  animation: dot-pulse 1.2s ease-in-out infinite;
-}
-
-.pulse-dot:nth-child(2) {
-  animation-delay: 120ms;
-}
-
-.pulse-dot:nth-child(3) {
-  animation-delay: 240ms;
-}
-
-@keyframes dot-pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pulse-dot {
-    opacity: 0.7;
-    animation-name: none;
-  }
 }
 
 /* 结果 */

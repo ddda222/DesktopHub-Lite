@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Window } from '@tauri-apps/api/window'
 import { LogicalSize } from '@tauri-apps/api/dpi'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
 import { invokeHost, isDesktop, onUiState, readUiState, windowLabel, type UiState } from '@/lib/desktop/desktop'
 import { state } from '@/store'
@@ -131,7 +132,8 @@ function keydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <main class="image-preview-window" :class="{ pinned }" aria-label="独立图片预览" @keydown="keydown">
+  <HubMotionConfig>
+    <main class="image-preview-window" :class="{ pinned }" aria-label="独立图片预览" @keydown="keydown">
     <header ref="header" class="viewer-header" @pointerdown="drag">
       <span class="image-mark"><Icon name="image" :size="20" /></span>
       <div class="image-heading"><h1 :title="preview?.name">{{ preview?.name ?? '图片预览' }}</h1><p>{{ dimensions }}</p></div>
@@ -160,6 +162,7 @@ function keydown(event: KeyboardEvent): void {
       </div>
     </footer>
   </main>
+  </HubMotionConfig>
 </template>
 
 <style scoped>

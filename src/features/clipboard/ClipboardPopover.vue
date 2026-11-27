@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import GsapPresence from '@/components/GsapPresence.vue'
+import { animateFlipFromState, captureFlipSnapshot, Flip, gsap, playFlipSnapshot, vGsapPress } from '@/lib/gsapMotion'
+import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
@@ -51,6 +54,47 @@ const snippetAccountEl = ref<HTMLInputElement | null>(null)
 const snippetBodyEl = ref<HTMLTextAreaElement | null>(null)
 
 const isHistoryView = computed(() => state.ui.clipboardView === 'history')
+const modeBarEl = ref<HTMLElement | null>(null)
+watch(
+  isHistoryView,
+  () => {
+    const prev = modeBarEl.value?.querySelector<HTMLElement>('.mode-seg-pill')
+    if (!prev || state.ui.islandReducedMotion) return
+    const flipState = Flip.getState(prev)
+    void nextTick(() => {
+      const next = modeBarEl.value?.querySelector<HTMLElement>('.mode-seg-pill')
+      if (next) animateFlipFromState(flipState, next, activeMotionPreset.value.pill, { absolute: true })
+    })
+  },
+  { flush: 'pre' }
+)
+watch(
+  () => filteredClips.value.map(item => item.id).join('|'),
+  () => {
+    const snap = captureFlipSnapshot(listEl.value, '.row', state.ui.islandReducedMotion, 36)
+    if (!snap) return
+    void nextTick(() => playFlipSnapshot(snap, listEl.value, '.row', activeMotionPreset.value.pill, { stagger: 0.01, maxItems: 36 }))
+  },
+  { flush: 'pre' }
+)
+
+watch(
+  () => filteredSnippets.value.map(item => `${item.id}:${item.pinned ? 1 : 0}`).join('|'),
+  () => {
+    const snap = captureFlipSnapshot(snippetListEl.value, '.snippet-row', state.ui.islandReducedMotion, 36)
+    if (!snap) return
+    void nextTick(() => playFlipSnapshot(snap, snippetListEl.value, '.snippet-row', activeMotionPreset.value.pill, { stagger: 0.012, maxItems: 36 }))
+  },
+  { flush: 'pre' }
+)
+
+function pulseSnippetPin(snippet: SnippetItem, event: MouseEvent): void {
+  if (!snippet.pinned && !state.ui.islandReducedMotion) {
+    const icon = (event.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>('.pin-icon-wrap')
+    if (icon) gsap.fromTo(icon, { scale: 1 }, { scale: 1.26, duration: 0.14, yoyo: true, repeat: 1, ease: 'power2.out', clearProps: 'transform' })
+  }
+  void onTogglePin(snippet)
+}
 const detailClip = computed(() => (isHistoryView.value ? activeClip.value : null))
 const { explanation, start: explainError, submit: submitExplanation, close: closeExplanation } = useErrorExplanation()
 const emit = defineEmits<{ 'reading-explanation': [active: boolean] }>()
@@ -857,7 +901,7 @@ function openDetectedUrl(url: string): void {
     @keydown="onKeydown"
   >
     <!-- 顶部双模式切换栏（详情与短语编辑态隐藏） -->
-    <div v-if="!detailClip && !editingSnippet" class="mode-bar">
+    <div v-if="!detailClip && !editingSnippet" ref="modeBarEl" class="mode-bar">
       <div class="seg mode-seg" role="tablist" aria-label="剪贴板功能切换">
         <button
           class="seg-btn"
@@ -867,7 +911,13 @@ function openDetectedUrl(url: string): void {
           :class="{ 'is-active': isHistoryView }"
           @click="switchView('history')"
         >
-          <span>历史记录</span>
+          <span
+            v-if="isHistoryView"
+            data-flip-id="clip-mode-pill"
+            class="mode-seg-pill"
+            aria-hidden="true"
+          />
+          <span class="seg-label">历史记录</span>
           <span class="seg-count">{{ state.clips.length }}</span>
         </button>
         <button
@@ -878,7 +928,13 @@ function openDetectedUrl(url: string): void {
           :class="{ 'is-active': !isHistoryView }"
           @click="switchView('snippets')"
         >
-          <span>常用短语</span>
+          <span
+            v-if="!isHistoryView"
+            data-flip-id="clip-mode-pill"
+            class="mode-seg-pill"
+            aria-hidden="true"
+          />
+          <span class="seg-label">常用短语</span>
           <span class="seg-count">{{ state.snippets.length }}</span>
         </button>
       </div>
@@ -971,36 +1027,56 @@ function openDetectedUrl(url: string): void {
         </div>
       </div>
 
-      <div
-        v-if="!detailClip && selecting"
-        class="management selection-actions"
-        role="group"
-        aria-label="批量选择操作"
+      <GsapPresence
+        :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+        :animate="{ opacity: 1, y: 0 }"
+        :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+        :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
       >
-        <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
-        <button class="chip" type="button" @click="stopSelecting">取消选择</button>
-        <button
-          class="chip"
-          type="button"
-          :disabled="!selectedIds.size"
-          @click="prepareDeletion([...selectedIds])"
+        <div
+          v-if="!detailClip && selecting"
+          key="selection-actions"
+          class="management selection-actions"
+          role="group"
+          aria-label="批量选择操作"
         >
-          删除已选（{{ selectedIds.size }}）
-        </button>
-      </div>
+          <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
+          <button class="chip" type="button" @click="stopSelecting">取消选择</button>
+          <button
+            class="chip"
+            type="button"
+            :disabled="!selectedIds.size"
+            @click="prepareDeletion([...selectedIds])"
+          >
+            删除已选（{{ selectedIds.size }}）
+          </button>
+        </div>
+      </GsapPresence>
 
-      <div v-if="deletePrompt" class="management" role="alert">
-        <span>
-          删除 {{ deletePrompt.ids.length }} 条记录
-          <span v-if="deletePrompt.favorites">（含 {{ deletePrompt.favorites }} 条收藏）</span>？
-        </span>
-        <button class="chip" type="button" :disabled="deleting" @click="confirmDeletion">
-          确认删除
-        </button>
-        <button class="chip" type="button" :disabled="deleting" @click="deletePrompt = null">
-          取消
-        </button>
-      </div>
+      <GsapPresence
+        :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
+        :animate="{ opacity: 1, y: 0 }"
+        :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }"
+        :transition="state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.popTransition"
+      >
+        <div
+          v-if="deletePrompt"
+          key="delete-prompt"
+          class="management"
+          role="alert"
+        >
+          <span>
+            删除 {{ deletePrompt.ids.length }} 条记录
+            <span v-if="deletePrompt.favorites">（含 {{ deletePrompt.favorites }} 条收藏）</span>？
+          </span>
+          <button class="chip" type="button" :disabled="deleting" @click="confirmDeletion">
+            确认删除
+          </button>
+          <button class="chip" type="button" :disabled="deleting" @click="deletePrompt = null">
+            取消
+          </button>
+        </div>
+      </GsapPresence>
 
       <section v-if="detailClip && explanation" class="detail explanation" aria-label="AI 解读">
         <div class="detail-head">
@@ -1741,14 +1817,17 @@ function openDetectedUrl(url: string): void {
 
             <div class="row-actions">
               <button
+                v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
                 class="icon-btn"
                 type="button"
                 :class="{ 'is-pinned-btn': snippet.pinned }"
                 :title="snippet.pinned ? '取消置顶' : '置顶短语'"
                 :aria-label="`${snippet.pinned ? '取消置顶' : '置顶'}：${snippet.title}`"
-                @click.stop="onTogglePin(snippet)"
+                @click.stop="pulseSnippetPin(snippet, $event)"
               >
-                <Icon name="pin" :size="14" />
+                <span class="pin-icon-wrap">
+                  <Icon name="pin" :size="14" />
+                </span>
               </button>
               <button
                 class="icon-btn"
@@ -1839,18 +1918,6 @@ function openDetectedUrl(url: string): void {
   box-shadow: var(--pop-shadow);
   color: var(--text);
   overflow: hidden;
-  animation: pop-in var(--dur) var(--ease);
-}
-
-@keyframes pop-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .pop button:focus-visible,
@@ -1869,13 +1936,15 @@ function openDetectedUrl(url: string): void {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 2px;
-  padding: 2px;
-  background: var(--surface-2);
+  padding: 3px;
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
   border: 1px solid var(--line);
-  border-radius: var(--r-chip);
+  border-radius: calc(var(--r-chip) + 2px);
 }
 
 .seg-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1886,7 +1955,24 @@ function openDetectedUrl(url: string): void {
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--text-2);
-  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+.mode-seg-pill {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: calc(var(--r-chip) - 2px);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+  border: 1px solid var(--line);
+  pointer-events: none;
+}
+
+.seg-label,
+.seg-count {
+  position: relative;
+  z-index: 1;
 }
 
 .seg-btn:hover {
@@ -1894,10 +1980,8 @@ function openDetectedUrl(url: string): void {
 }
 
 .seg-btn.is-active {
-  background: var(--surface-3);
   color: var(--text);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 .seg-count {
@@ -1932,10 +2016,11 @@ function openDetectedUrl(url: string): void {
   gap: 6px;
   height: 30px;
   padding: 0 8px;
-  background: var(--surface-2);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
   border: 1px solid var(--line);
   border-radius: var(--r-chip);
-  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
 
 .search:hover {
@@ -2358,17 +2443,9 @@ function openDetectedUrl(url: string): void {
 .icon-btn.is-pinned-btn {
   color: var(--accent);
 }
-.icon-btn.is-pinned-btn svg {
-  animation: bookmark-pop 340ms var(--ease-spring);
-}
-:root[data-motion='flicker'] .icon-btn.is-pinned-btn svg,
-:root[data-motion='step'] .icon-btn.is-pinned-btn svg {
-  animation: none;
-}
-@keyframes bookmark-pop {
-  0% { transform: scale(1); }
-  42% { transform: scale(1.22); }
-  100% { transform: scale(1); }
+.pin-icon-wrap {
+  display: grid;
+  place-items: center;
 }
 
 .icon-btn.is-danger:hover {

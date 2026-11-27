@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { version as appVersion } from '../../package.json'
+import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import LiquidGlassCanvas from '@/features/settings-lab/LiquidGlassCanvas.vue'
@@ -82,7 +83,7 @@ const motionCurves: Record<MotionMode, string> = {
   glide: 'M 2 18 C 18 18, 26 3, 78 3',
   bounce: 'M 2 18 C 16 18, 26 1, 44 2 C 56 3, 64 7, 78 3',
   sweep: 'M 2 18 L 24 18 C 36 18, 42 3, 78 3',
-  step: 'M 2 18 C 10 18, 12 3, 28 3 L 78 3',
+  focus: 'M 2 18 C 14 18, 20 2, 42 3 L 78 3',
   flicker: 'M 2 18 L 14 3 L 78 3'
 }
 
@@ -386,7 +387,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="studio-deck" :class="{ 'is-light-scene': isLightScene }">
+  <HubMotionConfig>
+    <div class="studio-deck" :class="{ 'is-light-scene': isLightScene }">
     <!-- 底层：全屏 WebGL GLSL 3D 液态玻璃与光影流体 -->
     <LiquidGlassCanvas ref="liquidRef" :scene-state="liquidState" />
 
@@ -743,6 +745,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  </HubMotionConfig>
 </template>
 
 <style scoped>
