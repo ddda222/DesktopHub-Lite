@@ -34,16 +34,6 @@ import {
   type SettingsSection,
   type UiState
 } from '@/lib/desktop/desktop'
-import {
-  apps as mockApps,
-  categories as mockCategories,
-  clips as mockClips,
-  defaultTranslationSettings as mockTranslationSettings,
-  groups as mockGroups,
-  mockSnippetPasswords,
-  snippetGroups as mockSnippetGroups,
-  snippets as mockSnippets
-} from '@/mock/data'
 import type {
   AppConfig,
   Category,
@@ -269,18 +259,19 @@ const mockPasswordVault = new Map<string, string>()
 
 export async function bootstrap(): Promise<void> {
   if (!isDesktop) {
-    // 浏览器样稿：用合成数据，并明确标注不是真实数据。
-    state.apps = mockApps.map((app) => ({ ...app }))
-    state.categories = mockCategories.map((cat) => ({ ...cat }))
-    state.clips = mockClips.map((clip) => ({ ...clip }))
-    state.groups = [...mockGroups]
-    state.snippets = mockSnippets.map((item) => ({ ...item }))
-    state.snippetGroups = [...mockSnippetGroups]
+    // 浏览器样稿：按需加载合成数据，避免正式桌面包携带演示代码；并明确标注不是真实数据。
+    const mock = await import('@/mock/data')
+    state.apps = mock.apps.map((app) => ({ ...app }))
+    state.categories = mock.categories.map((cat) => ({ ...cat }))
+    state.clips = mock.clips.map((clip) => ({ ...clip }))
+    state.groups = [...mock.groups]
+    state.snippets = mock.snippets.map((item) => ({ ...item }))
+    state.snippetGroups = [...mock.snippetGroups]
     mockPasswordVault.clear()
-    for (const [id, pw] of Object.entries(mockSnippetPasswords)) {
+    for (const [id, pw] of Object.entries(mock.mockSnippetPasswords)) {
       mockPasswordVault.set(id, pw)
     }
-    state.translationSettings = { ...mockTranslationSettings }
+    state.translationSettings = { ...mock.defaultTranslationSettings }
     state.ready = true
     return
   }

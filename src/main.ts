@@ -9,60 +9,53 @@
  * 浏览器里没有这些窗口，`windowLabel` 是 'browser'，退回单页样稿。
  */
 import { createApp, type Component } from 'vue'
-import BrowserPreview from './windows/BrowserPreview.vue'
-import StyleLab from './windows/StyleLab.vue'
-import InteractiveSettingsLab from './windows/InteractiveSettingsLab.vue'
-import BarWindow from './windows/BarWindow.vue'
-import PopWindow from './windows/PopWindow.vue'
-import SettingsWindowRoot from './windows/SettingsWindowRoot.vue'
-import TranslationWindow from './windows/TranslationWindow.vue'
-import CaptureOverlay from './windows/CaptureOverlay.vue'
-import ImagePreviewWindow from './windows/ImagePreviewWindow.vue'
-import ToastWindow from './windows/ToastWindow.vue'
 import { isDesktop, windowLabel, resolveWindowLabel } from '@/lib/desktop/desktop'
 import * as store from './store'
-import './styles/tokens.css'
-import './styles/base.css'
-import './styles/midnight.css'
-import './styles/structural-themes.css'
-import './styles/bold-themes.css'
 
-function pickRoot(): { root: Component; shell: string } {
+type RootLoader = () => Promise<{ default: Component }>
+
+function pickRoot(): { load: RootLoader; shell: string } {
   if (!isDesktop) {
     const preview = new URLSearchParams(location.search).get('preview')
-    if (preview === 'styles') return { root: StyleLab, shell: 'browser' }
-    if (preview === 'settings-lab') return { root: InteractiveSettingsLab, shell: 'browser' }
-    if (preview === 'capture') return { root: CaptureOverlay, shell: 'capture' }
-    return { root: BrowserPreview, shell: 'browser' }
+    if (preview === 'styles') return { load: () => import('./windows/StyleLab.vue'), shell: 'browser' }
+    if (preview === 'settings-lab') return { load: () => import('./windows/InteractiveSettingsLab.vue'), shell: 'browser' }
+    if (preview === 'capture') return { load: () => import('./windows/CaptureOverlay.vue'), shell: 'capture' }
+    return { load: () => import('./windows/BrowserPreview.vue'), shell: 'browser' }
   }
-  if (windowLabel.startsWith('image-preview-')) return { root: ImagePreviewWindow, shell: 'image-preview' }
+  if (windowLabel.startsWith('image-preview-')) return { load: () => import('./windows/ImagePreviewWindow.vue'), shell: 'image-preview' }
   switch (windowLabel) {
     case 'bar':
-      return { root: BarWindow, shell: 'bar' }
+      return { load: () => import('./windows/BarWindow.vue'), shell: 'bar' }
     case 'pop':
-      return { root: PopWindow, shell: 'pop' }
+      return { load: () => import('./windows/PopWindow.vue'), shell: 'pop' }
     case 'settings':
-      return { root: SettingsWindowRoot, shell: 'settings' }
+      return { load: () => import('./windows/SettingsWindowRoot.vue'), shell: 'settings' }
     case 'translation':
-      return { root: TranslationWindow, shell: 'translation' }
+      return { load: () => import('./windows/TranslationWindow.vue'), shell: 'translation' }
     case 'capture':
-      return { root: CaptureOverlay, shell: 'capture' }
+      return { load: () => import('./windows/CaptureOverlay.vue'), shell: 'capture' }
     case 'toast':
-      return { root: ToastWindow, shell: 'toast' }
+      return { load: () => import('./windows/ToastWindow.vue'), shell: 'toast' }
     default:
-      return { root: BrowserPreview, shell: 'browser' }
+      return { load: () => import('./windows/BrowserPreview.vue'), shell: 'browser' }
   }
 }
 
 async function mountWindow(): Promise<void> {
   await resolveWindowLabel()
-  const { root, shell } = pickRoot()
+  const { load, shell } = pickRoot()
   document.documentElement.dataset.shell = shell
   if (isDesktop) document.documentElement.dataset.theme = 'dark'
+  // 先拉取根组件再拉取全局主题样式：主题里的 `:root[data-theme] *` 等规则
+  // 与组件 scoped 样式特异性相同，必须排在后面才能保持原有覆盖关系。
+  const loading = load().then(async (module) => {
+    await import('./styles/global')
+    return module.default
+  })
   try {
     if (shell !== 'image-preview' && shell !== 'capture') await store.bootstrap()
   } finally {
-    createApp(root).mount('#app')
+    createApp(await loading).mount('#app')
   }
 }
 void mountWindow().catch(error => {
