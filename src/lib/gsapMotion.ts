@@ -64,6 +64,7 @@ interface InteractiveBindingState {
   hover?: GsapPose
   pressed: boolean
   hovered: boolean
+  tween: gsap.core.Tween | null
   onPointerDown: () => void
   onPointerUp: () => void
   onPointerEnter: () => void
@@ -106,7 +107,8 @@ function applyInteractiveTarget(el: HTMLElement, state: InteractiveBindingState)
   } else {
     Object.assign(vars, { scale: 1, scaleX: 1, scaleY: 1, y: 0 })
   }
-  gsap.to(el, vars)
+  state.tween?.kill()
+  state.tween = gsap.to(el, vars)
 }
 
 function ensureInteractive(el: HTMLElement): InteractiveBindingState {
@@ -115,6 +117,7 @@ function ensureInteractive(el: HTMLElement): InteractiveBindingState {
     entry = {
       pressed: false,
       hovered: false,
+      tween: null,
       onPointerDown: () => {
         if (!entry?.pose || isDisabled(el)) return
         entry.pressed = true
@@ -151,6 +154,8 @@ function ensureInteractive(el: HTMLElement): InteractiveBindingState {
 function cleanupInteractiveIfUnused(el: HTMLElement): void {
   const entry = interactiveMap.get(el)
   if (!entry || entry.pose || entry.hover) return
+  entry.tween?.kill()
+  entry.tween = null
   el.removeEventListener('pointerdown', entry.onPointerDown)
   el.removeEventListener('pointerup', entry.onPointerUp)
   el.removeEventListener('pointercancel', entry.onPointerUp)
@@ -174,12 +179,13 @@ export const vGsapPress: Directive<HTMLElement, GsapPose | undefined> = {
     }
   },
   unmounted(el) {
+    // 仅销毁指令自身的按压补间，绝不调用 killTweensOf(el)，避免打断 GsapPresence @leave 退场动画。
     const entry = interactiveMap.get(el)
     if (entry) {
+      entry.pressed = false
       entry.pose = undefined
       cleanupInteractiveIfUnused(el)
     }
-    gsap.killTweensOf(el)
   }
 }
 
@@ -200,10 +206,10 @@ export const vGsapHover: Directive<HTMLElement, GsapPose | undefined> = {
   unmounted(el) {
     const entry = interactiveMap.get(el)
     if (entry) {
+      entry.hovered = false
       entry.hover = undefined
       cleanupInteractiveIfUnused(el)
     }
-    gsap.killTweensOf(el)
   }
 }
 

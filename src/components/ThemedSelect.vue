@@ -1,3 +1,31 @@
+<script lang="ts">
+export interface SelectOption {
+  value: string | number
+  label: string
+  disabled?: boolean
+}
+
+interface ActiveSelectEntry {
+  close: () => void
+  containsTrigger: (root?: Element | null) => boolean
+}
+
+// 跨组件共享当前展开下拉框的单例引用，便于灵动岛防误收起与全局 Esc 优先级控制。
+let activeSelect: ActiveSelectEntry | null = null
+
+export function hasOpenThemedSelect(within?: Element | null): boolean {
+  if (!activeSelect) return false
+  return within ? activeSelect.containsTrigger(within) : true
+}
+
+export function closeAnyOpenThemedSelect(within?: Element | null): boolean {
+  if (!activeSelect) return false
+  if (within && !activeSelect.containsTrigger(within)) return false
+  activeSelect.close()
+  return true
+}
+</script>
+
 <script setup lang="ts">
 /**
  * 跟随主题视觉令牌与器物轮廓风格的自定义下拉选择器。
@@ -8,14 +36,6 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Icon from '@/components/Icon.vue'
 import { gsap } from '@/lib/gsapMotion'
-
-export interface SelectOption {
-  value: string | number
-  label: string
-  disabled?: boolean
-}
-
-let closeActiveSelect: (() => void) | null = null
 
 const props = withDefaults(defineProps<{
   modelValue: string | number
@@ -71,17 +91,27 @@ function updatePosition(): void {
   const rect = trigger.getBoundingClientRect()
   const vw = window.innerWidth
   const vh = window.innerHeight
+  const islandSurface = trigger.closest<HTMLElement>('.island')
+  const clampToIsland = !!islandSurface && islandSurface.clientHeight >= 140
+  const boundsRect = clampToIsland ? islandSurface.getBoundingClientRect() : null
   const gap = 5
-  const pad = 8
-  const spaceBelow = vh - rect.bottom - gap - pad
-  const spaceAbove = rect.top - gap - pad
-  const showTop = spaceBelow < 160 && spaceAbove > spaceBelow
+  const pad = clampToIsland ? 6 : 8
+  const minLeft = boundsRect ? boundsRect.left + pad : pad
+  const maxRight = boundsRect ? boundsRect.right - pad : vw - pad
+  const topBound = boundsRect ? boundsRect.top + pad : pad
+  const bottomBound = boundsRect ? boundsRect.bottom - pad : vh - pad
+
+  const spaceBelow = bottomBound - rect.bottom - gap
+  const spaceAbove = rect.top - gap - topBound
+  const flipThreshold = clampToIsland ? 132 : 160
+  const showTop = spaceBelow < flipThreshold && spaceAbove > spaceBelow
   placement.value = showTop ? 'top' : 'bottom'
 
-  const maxAvail = Math.max(96, Math.min(240, showTop ? spaceAbove : spaceBelow))
+  const maxAvail = Math.max(84, Math.min(clampToIsland ? 210 : 240, showTop ? spaceAbove : spaceBelow))
+  const availW = Math.max(96, maxRight - minLeft)
   const minW = props.size === 'xs' ? Math.max(rect.width, 96) : Math.max(rect.width, 148)
-  const width = Math.min(vw - pad * 2, minW)
-  const left = Math.max(pad, Math.min(rect.left, vw - width - pad))
+  const width = Math.min(availW, minW)
+  const left = Math.max(minLeft, Math.min(rect.left, maxRight - width))
 
   if (showTop) {
     menuStyle.value = {
@@ -100,17 +130,23 @@ function updatePosition(): void {
   }
 }
 
+const activeEntry: ActiveSelectEntry = {
+  close,
+  containsTrigger: (root?: Element | null) => !!(root && triggerEl.value && root.contains(triggerEl.value))
+}
+
 function close(): void {
   if (!open.value) return
   open.value = false
-  if (closeActiveSelect === close) closeActiveSelect = null
+  if (activeSelect === activeEntry) activeSelect = null
   detachGlobalListeners()
+  window.dispatchEvent(new CustomEvent('hub:themed-select-closed', { detail: { trigger: triggerEl.value } }))
 }
 
 function openMenu(): void {
   if (props.disabled || open.value) return
-  closeActiveSelect?.()
-  closeActiveSelect = close
+  if (activeSelect && activeSelect !== activeEntry) activeSelect.close()
+  activeSelect = activeEntry
   const curIdx = props.options.findIndex(opt => opt.value === props.modelValue && !opt.disabled)
   highlightedIndex.value = curIdx >= 0 ? curIdx : (enabledIndices()[0] ?? -1)
   updatePosition()
@@ -193,6 +229,7 @@ function onTriggerKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && open.value) {
     event.preventDefault()
     event.stopPropagation()
+    event.stopImmediatePropagation()
     close()
     triggerEl.value?.focus({ preventScroll: true })
   }
@@ -219,6 +256,7 @@ function handleGlobalEscape(event: KeyboardEvent): void {
   if (event.key === 'Escape' && open.value) {
     event.preventDefault()
     event.stopPropagation()
+    event.stopImmediatePropagation()
     close()
     triggerEl.value?.focus({ preventScroll: true })
   }
@@ -226,7 +264,7 @@ function handleGlobalEscape(event: KeyboardEvent): void {
 
 function attachGlobalListeners(): void {
   document.addEventListener('pointerdown', handleOutsidePointer, true)
-  document.addEventListener('keydown', handleGlobalEscape, true)
+  window.addEventListener('keydown', handleGlobalEscape, true)
   window.addEventListener('scroll', handleGlobalScroll, true)
   window.addEventListener('resize', close)
   window.addEventListener('blur', handleWindowBlur)
@@ -234,7 +272,7 @@ function attachGlobalListeners(): void {
 
 function detachGlobalListeners(): void {
   document.removeEventListener('pointerdown', handleOutsidePointer, true)
-  document.removeEventListener('keydown', handleGlobalEscape, true)
+  window.removeEventListener('keydown', handleGlobalEscape, true)
   window.removeEventListener('scroll', handleGlobalScroll, true)
   window.removeEventListener('resize', close)
   window.removeEventListener('blur', handleWindowBlur)

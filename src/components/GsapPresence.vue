@@ -104,6 +104,10 @@ function onLeave(el: Element, done: () => void): void {
     onComplete: done
   })
 }
+
+function onCancel(el: Element): void {
+  gsap.killTweensOf(el)
+}
 </script>
 
 <template>
@@ -114,6 +118,8 @@ function onLeave(el: Element, done: () => void): void {
     :appear="appear"
     @enter="onEnter"
     @leave="onLeave"
+    @enter-cancelled="onCancel"
+    @leave-cancelled="onCancel"
   >
     <slot />
   </TransitionGroup>
@@ -124,6 +130,8 @@ function onLeave(el: Element, done: () => void): void {
     :appear="appear"
     @enter="onEnter"
     @leave="onLeave"
+    @enter-cancelled="onCancel"
+    @leave-cancelled="onCancel"
   >
     <slot />
   </Transition>

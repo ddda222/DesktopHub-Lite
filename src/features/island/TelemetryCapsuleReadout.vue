@@ -217,7 +217,7 @@ onBeforeUnmount(() => {
 .telemetry-readout-wrap {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-variant-numeric: tabular-nums;
 }
 .tel-sep {
@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
 .tel-seg {
   display: inline-flex;
   align-items: center;
-  gap: 3.5px;
+  gap: 4.5px;
   --tel-color: var(--accent);
 }
 .tel-seg.level-warm {

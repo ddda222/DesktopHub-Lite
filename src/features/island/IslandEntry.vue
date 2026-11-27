@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GsapPresence from '@/components/GsapPresence.vue'
+import { closeAnyOpenThemedSelect, hasOpenThemedSelect } from '@/components/ThemedSelect.vue'
 import CapsuleMorphGlyph from './CapsuleMorphGlyph.vue'
 import CapsuleOrbitTrack from './motion/CapsuleOrbitTrack.vue'
 import { animateFlipFromState, animateScrambleText, captureFlipSnapshot, Flip, gsap, playFlipSnapshot, vGsapHover, vGsapPress } from '@/lib/gsapMotion'
@@ -399,9 +400,13 @@ const pillTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION 
 const paneTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION : motionPreset.value.paneTransition))
 const contentRevealTransition = computed(() => {
   if (motionReduced.value) return INSTANT_TRANSITION
-  return expanded.value
-    ? motionPreset.value.contentRevealTransition
-    : { duration: 0.075, delay: 0, ease: 'power3.out' }
+  if (expanded.value) return motionPreset.value.contentRevealTransition
+  if (motionMode.value === 'flicker') return { duration: 0.035, delay: 0, ease: 'none' }
+  return {
+    duration: Math.min(0.18, Math.max(0.12, (collapseMs.value / 1000) * 0.52)),
+    delay: 0,
+    ease: 'power2.out'
+  }
 })
 const contentHiddenPose = computed(() => {
   const preset = motionPreset.value
@@ -447,9 +452,9 @@ const visibleWidth = computed(() => {
   if (expanded.value) return expandedWidth.value - 24
   if (suppressed.value) return tuckedWidth.value
   const badgeExtra = showQuickOcr.value
-    ? 116 * scale.value
+    ? 128 * scale.value
     : showQuickCode.value
-      ? 112 * scale.value
+      ? 132 * scale.value
       : capsuleBadges.value.reduce((acc, item) => acc + (item.text.length > 2 ? 48 : 34) * scale.value, 0)
   // 快捷操作条 5 个按钮时的宽度下限。
   const menuFloor = quickMenuOpen.value ? 412 * scale.value : 0
@@ -465,7 +470,7 @@ const visibleWidth = computed(() => {
     }
     const [base, floor] = table[variant.value][Math.min(2, Math.max(0, count - 1))]
     const visualCount = Number(telemetryPrefs.value.telemetryCpu) + Number(telemetryPrefs.value.telemetryMemory)
-    const stylePerMetric = telemetryStyle.value === 'bar' ? 30 : telemetryStyle.value === 'ring' ? 18 : telemetryStyle.value === 'pulse' ? 20 : 0
+    const stylePerMetric = telemetryStyle.value === 'bar' ? 34 : telemetryStyle.value === 'ring' ? 18 : telemetryStyle.value === 'pulse' ? 20 : 0
     const styleExtra = visualCount * stylePerMetric * scale.value
     return Math.min(availableWidth.value - 24, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra + styleExtra)))
   }
@@ -475,10 +480,11 @@ const visibleWidth = computed(() => {
   else if (variant.value === 'mecha' || variant.value === 'pixel') baseWidth = (idle ? 176 : 208) * scale.value
   else if (variant.value === 'blueprint' || variant.value === 'neon') baseWidth = (idle ? 184 : 216) * scale.value
   if (runTask.value.stage === 'running') {
-    baseWidth = Math.max(baseWidth, 276 * scale.value)
+    const runningFloor = (variant.value === 'standard' ? 276 : variant.value === 'telemetry' ? 294 : 332) * scale.value
+    baseWidth = Math.max(baseWidth, runningFloor)
   }
   if (showPackStrip.value) {
-    baseWidth = Math.max(baseWidth, 356 * scale.value)
+    baseWidth = Math.max(baseWidth, 392 * scale.value)
   }
   return Math.min(availableWidth.value - 24, Math.max(menuFloor, Math.round(baseWidth + badgeExtra)))
 })
@@ -601,6 +607,7 @@ let geometryTimer: ReturnType<typeof setTimeout> | undefined
 let observer: ResizeObserver | undefined
 let contentObserver: ResizeObserver | undefined
 let frame = 0
+let measureFrame = 0
 let sending = false
 let disposed = false
 let queued: { width: number; height: number; regions: BarRegion[] } | undefined
@@ -898,6 +905,7 @@ function startDismissSnapBack(_initialVelocityPxPerSec: number): void {
 }
 
 function collapseNow(clearPin = true): void {
+  closeAnyOpenThemedSelect(element.value)
   clearDismissVisual()
   if (clearPin) pinned.value = false
   const active = document.activeElement
@@ -907,6 +915,7 @@ function collapseNow(clearPin = true): void {
 }
 
 function handleWindowBlur(): void {
+  closeAnyOpenThemedSelect(element.value)
   if (quickMenuOpen.value) quickMenuOpen.value = false
   const allowed = shouldAutoCollapseOnWindowBlur({
     expanded: expanded.value,
@@ -926,7 +935,7 @@ function handlePreviewOutsidePointerDown(event: PointerEvent): void {
   if (isDesktop || !expanded.value) return
   const target = event.target instanceof Element ? event.target : null
   if (!target) return
-  if (target.closest('.island-hit-area, .preview-tools, .preview-lab, dialog')) return
+  if (target.closest('.island-hit-area, .themed-select-menu, .preview-tools, .preview-lab, dialog')) return
   handleWindowBlur()
 }
 
@@ -1105,6 +1114,7 @@ function enter(): void {
 
 function editing(): boolean {
   if (approval.value || keepTaskOpen.value || pinned.value) return true
+  if (hasOpenThemedSelect(element.value)) return true
   if (!isDesktop && props.previewKeepOpen) return true
   const active = document.activeElement
   return composing.value || pressed.value || receivingFiles.value || shelf.busy || !!shelf.previewItem ||
@@ -1112,6 +1122,20 @@ function editing(): boolean {
       (active instanceof HTMLTextAreaElement || active instanceof HTMLSelectElement ||
        active.isContentEditable ||
        (active instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'range', 'submit'].includes(active.type))))
+}
+
+function handleThemedSelectClosed(event: Event): void {
+  const detail = (event as CustomEvent<{ trigger?: HTMLElement | null }>).detail
+  if (!detail?.trigger || !element.value?.contains(detail.trigger)) return
+  void nextTick(() => {
+    if (disposed || !expanded.value) return
+    if (element.value?.matches(':hover')) {
+      hovering.value = true
+      clearTimeout(leaveTimer)
+    } else if (!editing()) {
+      leave()
+    }
+  })
 }
 
 function leave(): void {
@@ -1147,6 +1171,7 @@ watch(hostExpanded, value => {
   reenterAfterClose = false
   cancelHoverClose()
   if (!value) {
+    closeAnyOpenThemedSelect(element.value)
     clearDismissVisual()
     mailSelected.value = false
     cancelHover()
@@ -1523,9 +1548,9 @@ watch(expanded, (open) => {
   if (co) {
     contentTween = gsap.to(co, {
       opacity: 0,
-      y: hidden.y ?? 0,
-      scaleX: hidden.scaleX ?? 1,
-      scaleY: hidden.scaleY ?? 1,
+      y: -8,
+      scaleX: 0.97,
+      scaleY: 0.97,
       filter: hidden.filter ?? 'blur(0px)',
       duration: Math.max(0.001, spec.duration),
       ease: spec.ease
@@ -1643,10 +1668,17 @@ onMounted(() => {
     document.addEventListener('pointerdown', handlePreviewOutsidePointerDown)
   }
   observer = new ResizeObserver(queueGeometry)
-  contentObserver = new ResizeObserver(measureContent)
+  contentObserver = new ResizeObserver(() => {
+    if (measureFrame || disposed) return
+    measureFrame = requestAnimationFrame(() => {
+      measureFrame = 0
+      measureContent()
+    })
+  })
   if (viewport.value) observer.observe(viewport.value)
   if (content.value) contentObserver.observe(content.value)
   if (chrome.value) contentObserver.observe(chrome.value)
+  window.addEventListener('hub:themed-select-closed', handleThemedSelectClosed)
   window.addEventListener('pointerup', handlePointerUp)
   window.addEventListener('pointercancel', handlePointerUp)
   systemDark.addEventListener('change', updateTheme)
@@ -1666,6 +1698,7 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   contentObserver?.disconnect()
   cancelAnimationFrame(frame)
+  cancelAnimationFrame(measureFrame)
   cancelHover()
   clearTimeout(leaveTimer)
   clearTimeout(clockTimer)
@@ -1686,6 +1719,7 @@ onBeforeUnmount(() => {
   clearTimeout(closeTimer)
   clearTimeout(geometryTimer)
   clearTimeout(pageSwitchTimer)
+  window.removeEventListener('hub:themed-select-closed', handleThemedSelectClosed)
   window.removeEventListener('pointerup', handlePointerUp)
   window.removeEventListener('pointercancel', handlePointerUp)
   systemDark.removeEventListener('change', updateTheme)
@@ -2078,11 +2112,13 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 1px var(--island-rim, var(--island-outline)), inset 0 1px 0 var(--island-top-sheen);
 }
 .island {
-  position: absolute; top: var(--surface-inset); left: 0; right: 0; margin-inline: auto; transform-origin: 50% 0;
+  position: absolute; top: var(--surface-inset); left: -320px; right: -320px; margin-inline: auto; transform-origin: 50% 0;
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   box-shadow: inset 0 1px 0 var(--island-top-sheen);
   transition: top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
+.island-viewport.anchor-left > .island-hit-area > .island { left: 0; right: auto; margin-inline: 0; transform-origin: 0 0; }
+.island-viewport.anchor-right > .island-hit-area > .island { left: auto; right: 0; margin-inline: 0; transform-origin: 100% 0; }
 .island.dismiss-dragging { transition: none !important; }
 .island.expanded { border-radius: 18px; }
 .island.tucked { border-radius: 5px; box-shadow: none; }
@@ -2092,14 +2128,14 @@ onBeforeUnmount(() => {
 .capsule-bar {
   position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; width: 100%;
 }
-.capsule-bar.has-quick-code { justify-content: space-between; padding: 0 5px 0 8px; gap: 6px; }
+.capsule-bar.has-quick-code { justify-content: space-between; padding: 0 7px 0 8px; gap: 6px; }
 .capsule {
   position: relative; z-index: 3; display: flex; align-items: center; justify-content: center;
   height: 24px; width: min(260px, calc(100% - 32px)); margin: 0 auto; white-space: nowrap; font-size: 12px;
   cursor: grab; touch-action: none; user-select: none;
   transition: height var(--geometry-time) var(--height-ease, var(--geometry-ease)), opacity 110ms ease-out 40ms;
 }
-.capsule-bar.has-quick-code .capsule { flex: 1; width: auto; margin: 0; justify-content: flex-start; min-width: 0; }
+.capsule-bar.has-quick-code .capsule { flex: 1; width: auto; margin: 0; justify-content: flex-start; min-width: 0; overflow: hidden; }
 .capsule:active { transform: none; }
 .window-dragging .capsule { cursor: grabbing; }
 .island:not(.expanded) .capsule { height: var(--capsule-height); width: 100%; }
@@ -2219,7 +2255,12 @@ onBeforeUnmount(() => {
 .page-switching .feature-pane { scrollbar-color: transparent transparent; }
 .moving .island-chrome,
 .moving .island-content { will-change: transform, opacity; }
-.island-chrome { display: flow-root; }
+.island-chrome {
+  display: flow-root;
+  width: calc(var(--content-width) - 2 * var(--content-gutter));
+  max-width: 100%;
+  margin-inline: auto;
+}
 /* 工具栏随外壳分配可用宽度，正文维持最终列宽，开合途中不会反复换行。 */
 .island-content {
   position: relative; left: 50%; translate: -50% 0;
@@ -2361,8 +2402,11 @@ onBeforeUnmount(() => {
 }
 .mode-nav button.selected { gap: 5px; padding: 0 10px; color: var(--text); font-weight: 600; }
 .mode-nav button.selected .mode-label { max-width: 64px; opacity: 1; }
-.narrow .mode-nav button.selected { gap: 0; padding: 0 7px; }
+.narrow .mode-nav { height: 34px; padding: 2px; gap: 2px; }
+.narrow .mode-nav button,
+.narrow .mode-nav button.selected { height: 28px; min-width: 28px; padding: 0 5px; gap: 0; }
 .narrow .mode-nav button.selected .mode-label { max-width: 0; opacity: 0; }
+.narrow .round-action { width: 25px; height: 25px; }
 .mode-nav .selected svg { color: var(--accent); }
 .mode-nav button:hover { color: var(--text); }
 button {
@@ -2411,6 +2455,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .narrow .expanded-content { --content-gutter: 14px; }
 .narrow .categories { gap: 2px; }
 .narrow .categories button { padding: 5px 10px; }
+.narrow .feature-pane :deep(.filter-bar .chip) { padding: 0 6px; font-size: 11px; }
 
 /* 星舰仪表主题：三态专属轮廓圆角、遥测状态灯、扫描光束与方正秩序控件 */
 @keyframes telemetryPulse {
@@ -2560,6 +2605,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-mecha .feature-pane :deep(.textarea),
 .variant-mecha .feature-pane :deep(.row) { border-radius: 3px; }
 .variant-mecha .feature-pane :deep(.row:hover) { box-shadow: inset 3px 0 0 rgba(245, 158, 11, .55); }
+.variant-mecha .feature-pane :deep(.seg-btn.is-active) { background: transparent; color: #111318; box-shadow: none; }
+.variant-mecha .feature-pane :deep(.seg-btn.is-active .mode-seg-pill) {
+  border-radius: 2px; background: var(--accent); border-color: var(--accent); box-shadow: none;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+.variant-mecha .feature-pane :deep(.seg-btn.is-active .seg-count) { background: rgba(17, 19, 24, .22); color: #111318; }
 
 /* ==================== 像素掌机（variant-pixel：锯齿外壳、双层液晶内屏与 3D 厚底按键） ==================== */
 .island.variant-pixel {
@@ -2624,7 +2675,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   border-radius: 0; border: 2px solid #0f0d1a; background: #252e27; box-shadow: inset 0 2px 0 rgba(0, 0, 0, .35);
 }
 .variant-pixel .feature-pane :deep(.seg-btn.is-active) {
-  background: var(--accent); color: #0f0d1a; box-shadow: none;
+  background: transparent; color: #0f0d1a; border-color: transparent; box-shadow: none;
+}
+.variant-pixel .feature-pane :deep(.seg-btn.is-active .mode-seg-pill) {
+  border-radius: 0; background: var(--accent); border: 2px solid #0f0d1a; box-shadow: none;
 }
 .variant-pixel .feature-pane :deep(.seg-btn.is-active .seg-count) {
   background: #0f0d1a; color: #facc15; border-radius: 0;
@@ -2635,7 +2689,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-pixel .feature-pane :deep(.row.is-active) {
   background: var(--accent); color: #0f0d1a; box-shadow: none;
 }
-.variant-pixel .feature-pane :deep(.row.is-active *) { color: #0f0d1a; }
+.variant-pixel .feature-pane :deep(.row.is-active .row-title),
+.variant-pixel .feature-pane :deep(.row.is-active .row-meta-text),
+.variant-pixel .feature-pane :deep(.row.is-active .snippet-title-text) { color: #0f0d1a; }
+.variant-pixel .feature-pane :deep(.row.is-active .thumb) { background: #0f0d1a; color: #a3e635; border-color: #0f0d1a; }
+.variant-pixel .feature-pane :deep(.row.is-active .index-kbd),
+.variant-pixel .feature-pane :deep(.row.is-active .smart-tag) { background: #0f0d1a; color: #facc15; border-color: #0f0d1a; opacity: 1; }
+.variant-pixel .feature-pane :deep(.row.is-active .row-actions .chip) {
+  background: #0f0d1a; color: #facc15; border: 1.5px solid #0f0d1a;
+}
+.variant-pixel .feature-pane :deep(.row.is-active .row-actions .chip:disabled) {
+  background: #1c221e; color: #cbd5e1; border-color: #0f0d1a;
+}
+.variant-pixel .feature-pane :deep(.row.is-active .row-actions .icon-btn) { color: #0f0d1a; }
+.variant-pixel .feature-pane :deep(.row.is-active .row-actions .icon-btn:hover) { background: rgba(15, 13, 26, .16); color: #0f0d1a; }
 
 .dismiss-handle {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 4;

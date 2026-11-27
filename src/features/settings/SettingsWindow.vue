@@ -6,7 +6,7 @@ import Icon from '@/components/Icon.vue'
 import MotionSaveButton from '@/components/MotionSaveButton.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
-import ThemedSelect from '@/components/ThemedSelect.vue'
+import ThemedSelect, { hasOpenThemedSelect } from '@/components/ThemedSelect.vue'
 import { animateFlipFromState, Flip, gsap, vGsapPress } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import DesktopFeatures from './DesktopFeatures.vue'
@@ -369,7 +369,12 @@ const contentEl = ref<HTMLElement | null>(null)
 let returnFocus: HTMLElement | null = null
 function handleKeys(event: KeyboardEvent): void {
   if (event.isComposing) return
-  if (event.key === 'Escape') { event.stopPropagation(); closeSettings(); return }
+  if (event.key === 'Escape') {
+    if (hasOpenThemedSelect()) return
+    event.stopPropagation()
+    closeSettings()
+    return
+  }
   if (event.key !== 'Tab') return
   const nodes = Array.from(windowEl.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? []).filter(node => node.getClientRects().length)
   const first = nodes[0], last = nodes.at(-1)

@@ -88,10 +88,21 @@ function restore(): void {
 }
 
 async function save(): Promise<void> {
-  if (saving.value || !isDesktop || !validSettings.value) return
+  if (saving.value || !validSettings.value) return
   saving.value = true
   const submitted = signature()
   try {
+    if (!isDesktop) {
+      await Promise.resolve()
+      state.ui.islandAppearance = { ...appearance.value }
+      state.ui.islandAnchor = anchor.value
+      state.ui.islandHoverMs = hoverMs.value
+      state.ui.islandLeaveMs = leaveMs.value
+      state.ui.islandReducedMotion = reducedMotion.value
+      applied.value = submitted; failed.value = false; feedback.value = '预览设置已应用（仅当前会话）'
+      pushToast('灵动岛预览设置已应用', 'success')
+      return
+    }
     await invokeHost('save_island_appearance', {
       appearance: { ...appearance.value }, anchor: anchor.value,
       hoverMs: hoverMs.value, leaveMs: leaveMs.value, reducedMotion: reducedMotion.value
@@ -258,11 +269,11 @@ watch(() => state.ui.settingsOpen, open => {
 <template>
   <div ref="stickySentinelEl" class="sticky-sentinel" aria-hidden="true" />
   <div class="save-row general-actions" :class="{ 'is-stuck': actionBarStuck }" role="group" aria-label="灵动岛设置操作">
-    <p role="status" :class="{ error: failed }">{{ dirty ? '灵动岛设置有尚未应用的修改' : feedback || '灵动岛设置' }}<span v-if="dirty && failed"> · {{ feedback }}</span><span v-if="!isDesktop"> · 桌面版可应用</span></p>
+    <p role="status" :class="{ error: failed }">{{ dirty ? '灵动岛设置有尚未应用的修改' : feedback || '灵动岛设置' }}<span v-if="dirty && failed"> · {{ feedback }}</span><span v-if="!isDesktop"> · 预览态仅当前会话生效</span></p>
     <div class="actions">
       <button v-if="dirty" type="button" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button>
       <button type="button" class="btn" :disabled="saving" @click="restore">恢复默认值</button>
-      <MotionSaveButton label="应用设置" :busy="saving" :done="justSaved" :disabled="saving || !validSettings || !isDesktop" @click="save" />
+      <MotionSaveButton label="应用设置" :busy="saving" :done="justSaved" :disabled="saving || !validSettings" @click="save" />
     </div>
   </div>
   <slot />

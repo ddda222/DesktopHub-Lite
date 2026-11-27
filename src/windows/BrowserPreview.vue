@@ -5,7 +5,7 @@ import GsapPresence from '@/components/GsapPresence.vue'
 import GsapShowcase from '@/components/GsapShowcase.vue'
 import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
-import ThemedSelect from '@/components/ThemedSelect.vue'
+import ThemedSelect, { hasOpenThemedSelect } from '@/components/ThemedSelect.vue'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
@@ -171,7 +171,10 @@ async function resetDemo(): Promise<void> {
 }
 
 function keydown(event: KeyboardEvent): void {
-  if (event.key === 'Escape' && !event.isComposing && state.ui.settingsOpen) closeSettings()
+  if (event.key === 'Escape' && !event.isComposing && state.ui.settingsOpen) {
+    if (hasOpenThemedSelect()) return
+    closeSettings()
+  }
 }
 onMounted(() => window.addEventListener('keydown', keydown))
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserImagePreview.value = null })
@@ -184,7 +187,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
       <span>DesktopHub <small>实底高对比预览</small></span>
       <div class="preview-options">
         <a href="?preview=settings-lab" style="color: #fff; background: linear-gradient(135deg, #2563eb, #06b6d4); padding: 5px 13px; border-radius: 99px; font-weight: 700; text-decoration: none">✨ 液态玻璃设置空间 ↗</a>
-        <a href="?preview=styles" style="color: inherit; font-weight: 600">十款样式实验室 ↗</a>
+        <a href="?preview=styles" style="color: inherit; font-weight: 600">形态交互实验室 ↗</a>
         <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button v-for="mode in previewThemes" :key="mode" type="button" :aria-pressed="state.settings.theme === mode" @click="setTheme(mode)">{{ THEME_LABELS[mode] }}</button>
         <div class="preview-select-item"><span>动效</span><ThemedSelect size="xs" :model-value="normalizeMotionMode(state.ui.islandAppearance.motion)" :options="previewMotionOptions" aria-label="动态效果" @change="val => selectPreviewMotion(String(val) as MotionMode)" /></div>
@@ -264,9 +267,10 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
 .preview-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 28px; }
 .preview-tools > span { font-size: 14px; font-weight: 600; }
 .preview-tools small { margin-left: 10px; font-size: 12px; font-weight: 400; opacity: .65; }
-.preview-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; }
-.preview-options button { padding: 5px 10px; border-radius: 16px; }
-.preview-options button[aria-pressed='true'] { background: rgba(255,255,255,.3); }
+.preview-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.preview-options button { padding: 5px 10px; border-radius: 16px; border: 1px solid transparent; transition: background 140ms ease, color 140ms ease, border-color 140ms ease; }
+.preview-options button:hover { background: var(--hover); border-color: var(--line); }
+.preview-options button[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; box-shadow: 0 2px 8px var(--accent-weak); }
 .preview-options label, .preview-select-item { display: flex; align-items: center; gap: 6px; }
 .preview-stage { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 20px 0 60px; min-height: 560px; }
 .preview-workbench { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 24px; padding: 0 28px; }

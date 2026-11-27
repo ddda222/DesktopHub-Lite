@@ -437,7 +437,7 @@ onBeforeUnmount(() => {
 
           <div class="deck-card">
             <div class="deck-card-head">
-              <span class="deck-card-title">10 套光学材质</span>
+              <span class="deck-card-title">{{ THEME_MODES.length }} 套光学材质</span>
               <span class="deck-card-sub">{{ themeMaterials[state.settings.theme].desc }}</span>
             </div>
             <div class="theme-matrix">

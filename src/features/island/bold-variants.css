@@ -146,10 +146,20 @@
   box-shadow: 0 0 0 1px rgba(253, 224, 71, .4);
 }
 .variant-blueprint .feature-pane :deep(.seg-btn.is-active) {
-  background: #fde047;
+  background: transparent;
   color: #092241;
+  border-color: transparent;
+  box-shadow: none;
+}
+.variant-blueprint .feature-pane :deep(.seg-btn.is-active .mode-seg-pill) {
+  border-radius: 1px;
+  background: #fde047;
   border: 1px solid #fef08a;
   box-shadow: none;
+}
+.variant-blueprint .feature-pane :deep(.seg-btn.is-active .seg-count) {
+  background: rgba(9, 34, 65, .2);
+  color: #092241;
 }
 .variant-blueprint .feature-pane :deep(.row) {
   border-radius: 1px;
@@ -302,9 +312,15 @@
   box-shadow: 0 0 12px rgba(0, 240, 255, .35), inset 0 0 0 1px rgba(0, 240, 255, .35);
 }
 .variant-neon .feature-pane :deep(.seg-btn.is-active) {
-  background: linear-gradient(90deg, rgba(255, 43, 214, .32), rgba(0, 240, 255, .26));
+  background: transparent;
   color: #ffffff;
-  box-shadow: inset 0 0 0 1px #00f0ff, 0 0 10px rgba(255, 43, 214, .35);
+  border-color: transparent;
+  box-shadow: none;
+}
+.variant-neon .feature-pane :deep(.seg-btn.is-active .mode-seg-pill) {
+  background: linear-gradient(90deg, rgba(255, 43, 214, .42), rgba(0, 240, 255, .32));
+  border-color: #00f0ff;
+  box-shadow: inset 0 0 0 1px rgba(0, 240, 255, .45), 0 0 10px rgba(255, 43, 214, .35);
 }
 .variant-neon .feature-pane :deep(.row) {
   border-radius: 9px;
