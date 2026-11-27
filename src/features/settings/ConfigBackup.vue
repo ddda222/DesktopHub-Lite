@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { state } from '@/store'
-import { isThemeMode, THEME_LABELS } from '@/lib/themes'
+import { isThemeMode, normalizeThemeMode, THEME_LABELS } from '@/lib/themes'
 import { isMotionMode, LEGACY_MOTION_MAP, MOTION_LABELS, normalizeMotionMode } from '@/lib/motions'
 
 const props = defineProps<{ blocked: boolean }>()
@@ -17,7 +17,7 @@ const importButton = ref<HTMLButtonElement | null>(null)
 let sequence = 0
 let demoSignature = ''
 const signature = () => JSON.stringify([state.apps, state.categories, state.settings.theme, state.ui.islandAppearance])
-const displayValue = (value: string) => (isThemeMode(value) ? THEME_LABELS[value] : (isMotionMode(value) || value in LEGACY_MOTION_MAP) ? MOTION_LABELS[normalizeMotionMode(value)] : ({ left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', true: '开启', false: '关闭', all: '全部' } as Record<string, string>)[value]) ?? value
+const displayValue = (value: string) => (isThemeMode(value) ? THEME_LABELS[value] : value === 'liquid' ? '深色（原液态琉璃）' : value === 'scroll' ? '浅色（原海棠书卷）' : value === 'clay' ? '浅色（原软糖黏土）' : (isMotionMode(value) || value in LEGACY_MOTION_MAP) ? MOTION_LABELS[normalizeMotionMode(value)] : ({ left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', text: '跳字精简', bar: '能量微条', ring: '双环仪表', pulse: '律动格栅', true: '开启', false: '关闭', all: '全部' } as Record<string, string>)[value]) ?? value
 
 async function discard(token: string): Promise<void> {
   if (isDesktop) await invokeHost('cancel_configuration_import', { token })
@@ -75,7 +75,7 @@ async function apply(): Promise<void> {
     } else {
       if (demoSignature !== signature()) throw new Error('预览后配置已变化，请重新预览')
       const nextTheme = preview.value.changes.preferences[0]?.after ?? ''
-      state.settings.theme = isThemeMode(nextTheme) ? nextTheme : 'light'
+      state.settings.theme = isThemeMode(nextTheme) ? nextTheme : normalizeThemeMode(nextTheme)
       feedback.value = '演示完成：仅切换当前网页主题，未写入本机配置或创建备份。'
     }
     preview.value = null

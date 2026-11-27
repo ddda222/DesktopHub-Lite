@@ -13,6 +13,7 @@ import { listen as tauriListen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AppConfig, MixerVisibility } from '@/lib/desktop/types'
 import type { MotionMode } from '@/lib/motions'
+import type { TelemetryStyle } from '@/features/island/telemetryReadout'
 
 /** 是否运行在 Tauri 桌面外壳里；false 表示浏览器里的交互样稿。 */
 export const isDesktop: boolean =
@@ -46,6 +47,7 @@ export interface IslandAppearance {
   webgl: boolean
   hideFromCapture: boolean
   telemetryMode: 'off' | 'smart' | 'always'
+  telemetryStyle: TelemetryStyle
   telemetryNet: boolean
   telemetryCpu: boolean
   telemetryMemory: boolean
@@ -64,6 +66,7 @@ export function defaultIslandAppearance(): IslandAppearance {
     webgl: true,
     hideFromCapture: false,
     telemetryMode: 'smart',
+    telemetryStyle: 'bar',
     telemetryNet: true,
     telemetryCpu: true,
     telemetryMemory: true,

@@ -3,6 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GsapPresence from '@/components/GsapPresence.vue'
 import MotionSaveButton from '@/components/MotionSaveButton.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
+import SegmentedControl from '@/components/SegmentedControl.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
+import { normalizeTelemetryStyle, type TelemetryStyle } from '@/features/island/telemetryReadout'
 import { Draggable, gsap } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { defaultIslandAppearance, invokeHost, isDesktop } from '@/lib/desktop/desktop'
@@ -65,8 +68,15 @@ const validTiming = computed(() => Number.isInteger(hoverMs.value) && appearance
   Number.isInteger(leaveMs.value) && leaveMs.value >= 100 && leaveMs.value <= 4000)
 const validTelemetry = computed(() =>
   ['off', 'smart', 'always'].includes(appearance.value.telemetryMode) &&
+  ['text', 'bar', 'ring', 'pulse'].includes(normalizeTelemetryStyle(appearance.value.telemetryStyle)) &&
   (appearance.value.telemetryMode === 'off' || appearance.value.telemetryNet || appearance.value.telemetryCpu || appearance.value.telemetryMemory)
 )
+const telemetryStyleOptions: { value: TelemetryStyle; label: string }[] = [
+  { value: 'bar', label: '能量微条' },
+  { value: 'ring', label: '双环仪表' },
+  { value: 'pulse', label: '律动格栅' },
+  { value: 'text', label: '跳字精简' }
+]
 const validSettings = computed(() => validTiming.value && validTelemetry.value)
 
 function restore(): void {
@@ -131,7 +141,16 @@ function loadGeneralStatus(): void {
 }
 const anchorTrackEl = ref<HTMLElement | null>(null)
 const anchorPuckEl = ref<HTMLElement | null>(null)
+const stickySentinelEl = ref<HTMLElement | null>(null)
+const actionBarStuck = ref(false)
+let stickyObserver: IntersectionObserver | null = null
 let anchorDraggable: Draggable | null = null
+
+const telemetryModeOptions = [
+  { value: 'smart', label: '智能浮现（流量或高占用时显示）' },
+  { value: 'always', label: '常驻显示（替代时间）' },
+  { value: 'off', label: '关闭' }
+] as const
 
 function anchorToIndex(pos: string): number {
   return pos === 'left' ? 0 : pos === 'right' ? 2 : 1
@@ -206,10 +225,23 @@ watch(anchor, (val) => {
 onMounted(() => {
   loadGeneralStatus()
   setupAnchorRail()
+  if (stickySentinelEl.value && typeof IntersectionObserver !== 'undefined') {
+    const scrollRoot = stickySentinelEl.value.closest('.content')
+    stickyObserver = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry) actionBarStuck.value = !entry.isIntersecting
+      },
+      { root: scrollRoot, threshold: 0 }
+    )
+    stickyObserver.observe(stickySentinelEl.value)
+  }
 })
 onBeforeUnmount(() => {
   anchorDraggable?.kill()
   anchorDraggable = null
+  stickyObserver?.disconnect()
+  stickyObserver = null
 })
 watch(() => state.ui.settingsOpen, open => {
   if (!open) return
@@ -224,7 +256,8 @@ watch(() => state.ui.settingsOpen, open => {
 </script>
 
 <template>
-  <div class="save-row general-actions" role="group" aria-label="灵动岛设置操作">
+  <div ref="stickySentinelEl" class="sticky-sentinel" aria-hidden="true" />
+  <div class="save-row general-actions" :class="{ 'is-stuck': actionBarStuck }" role="group" aria-label="灵动岛设置操作">
     <p role="status" :class="{ error: failed }">{{ dirty ? '灵动岛设置有尚未应用的修改' : feedback || '灵动岛设置' }}<span v-if="dirty && failed"> · {{ feedback }}</span><span v-if="!isDesktop"> · 桌面版可应用</span></p>
     <div class="actions">
       <button v-if="dirty" type="button" class="btn" :disabled="saving" @click="discardDraft">撤销修改</button>
@@ -257,14 +290,14 @@ watch(() => state.ui.settingsOpen, open => {
         </div>
       </div>
       <label class="field"><span class="field-label">显示大小 <output>{{ appearance.scale }}%</output></span><input v-model.number="appearance.scale" class="size-slider" type="range" min="75" max="125" step="5" aria-label="灵动岛显示大小" :aria-valuetext="`${appearance.scale}%`" /></label>
-      <label class="field field-wide">
+      <div class="field field-wide">
         <span class="field-label">胶囊微读数</span>
-        <select v-model="appearance.telemetryMode" class="control" aria-label="胶囊微读数显示模式">
-          <option value="smart">智能浮现（流量或高占用时显示）</option>
-          <option value="always">常驻显示（替代时间）</option>
-          <option value="off">关闭</option>
-        </select>
-      </label>
+        <ThemedSelect
+          v-model="appearance.telemetryMode"
+          :options="telemetryModeOptions"
+          aria-label="胶囊微读数显示模式"
+        />
+      </div>
     </div>
     <GsapPresence
       :initial="state.ui.islandReducedMotion ? false : { opacity: 0, y: -4 }"
@@ -281,6 +314,16 @@ watch(() => state.ui.settingsOpen, open => {
           <label class="seg-item" :class="{ 'is-on': appearance.telemetryNet }"><input v-model="appearance.telemetryNet" class="sr-only" type="checkbox" />实时网速</label>
           <label class="seg-item" :class="{ 'is-on': appearance.telemetryCpu }"><input v-model="appearance.telemetryCpu" class="sr-only" type="checkbox" />处理器占用</label>
           <label class="seg-item" :class="{ 'is-on': appearance.telemetryMemory }"><input v-model="appearance.telemetryMemory" class="sr-only" type="checkbox" />内存占用</label>
+        </div>
+        <div v-if="appearance.telemetryCpu || appearance.telemetryMemory" class="telemetry-style-row">
+          <span class="field-label">处理器与内存样式</span>
+          <SegmentedControl
+            :model-value="normalizeTelemetryStyle(appearance.telemetryStyle)"
+            :options="telemetryStyleOptions"
+            name="telemetry-style"
+            label="处理器与内存微读数样式"
+            @update:model-value="val => (appearance.telemetryStyle = normalizeTelemetryStyle(val))"
+          />
         </div>
         <p class="hint telemetry-hint">{{ appearance.telemetryMode === 'smart'
           ? '平时保持简洁时间；当网速 ≥ 64 KB/s、处理器 ≥ 35% 或内存 ≥ 80% 时自动切为读数，回落后保持 3 秒平滑收回。仅统计活动物理以太网与 Wi-Fi。'
@@ -387,7 +430,30 @@ watch(() => state.ui.settingsOpen, open => {
 </template>
 
 <style scoped>
-.settings-ui .general-actions { position: sticky; top: 0; z-index: 1; margin: 8px 0 16px; padding: 12px 0; background: var(--surface); border-bottom: 1px solid var(--line); }
+.sticky-sentinel { height: 1px; margin-top: -1px; pointer-events: none; }
+.settings-ui .general-actions {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  margin: 6px -24px 16px;
+  padding: 10px 24px;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.settings-ui .general-actions.is-stuck {
+  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface) 92%, var(--page-bg));
+  backdrop-filter: blur(14px);
+  border-bottom-color: var(--line-strong);
+  box-shadow: 0 8px 20px -12px rgb(0 0 0 / 0.28);
+}
+@container settings (max-width: 640px) {
+  .settings-ui .general-actions {
+    margin: 6px -16px 16px;
+    padding: 10px 16px;
+  }
+}
 .field-hint { margin-left: 6px; font-size: 10.5px; font-weight: 400; color: var(--text-3); }
 .anchor-rail {
   position: relative;
@@ -435,7 +501,8 @@ watch(() => state.ui.settingsOpen, open => {
   touch-action: none;
 }
 .anchor-puck i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.telemetry-config { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.telemetry-config { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.telemetry-style-row { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 2px; }
 .telemetry-hint { margin: 2px 0 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .feature-options { margin-top: 14px; }

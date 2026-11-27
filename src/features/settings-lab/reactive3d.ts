@@ -114,17 +114,6 @@ const THEME_PALETTES: Record<ThemeMode, ThemePalette> = {
     faceStroke: 'rgba(226, 232, 240, 0.42)',
     isLight: false
   },
-  liquid: {
-    bgTop: '#070b14',
-    bgBottom: '#111a2e',
-    grid: 'rgba(125, 211, 252, 0.16)',
-    primary: '#7dd3fc',
-    secondary: '#d8b4fe',
-    glow: '#bae6fd',
-    faceFill: 'rgba(18, 30, 52, 0.72)',
-    faceStroke: 'rgba(214, 240, 255, 0.74)',
-    isLight: false
-  },
   midnight: {
     bgTop: '#050c19',
     bgBottom: '#0c1d38',
@@ -146,17 +135,6 @@ const THEME_PALETTES: Record<ThemeMode, ThemePalette> = {
     faceFill: 'rgba(42, 29, 18, 0.82)',
     faceStroke: 'rgba(245, 158, 11, 0.75)',
     isLight: false
-  },
-  scroll: {
-    bgTop: '#f5ede0',
-    bgBottom: '#e7d8c1',
-    grid: 'rgba(153, 56, 42, 0.1)',
-    primary: '#b94132',
-    secondary: '#9a6b39',
-    glow: '#d9534f',
-    faceFill: 'rgba(252, 247, 238, 0.85)',
-    faceStroke: 'rgba(185, 65, 50, 0.56)',
-    isLight: true
   },
   pixel: {
     bgTop: '#0b140d',
@@ -190,17 +168,6 @@ const THEME_PALETTES: Record<ThemeMode, ThemePalette> = {
     faceFill: 'rgba(32, 14, 56, 0.78)',
     faceStroke: 'rgba(34, 211, 238, 0.8)',
     isLight: false
-  },
-  clay: {
-    bgTop: '#f9edf4',
-    bgBottom: '#e5f0fb',
-    grid: 'rgba(236, 72, 153, 0.1)',
-    primary: '#ec4899',
-    secondary: '#38bdf8',
-    glow: '#f472b6',
-    faceFill: 'rgba(255, 255, 255, 0.88)',
-    faceStroke: 'rgba(236, 72, 153, 0.5)',
-    isLight: true
   }
 }
 

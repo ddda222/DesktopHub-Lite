@@ -123,6 +123,21 @@ await test('胶囊微读数按勾选指标数量格式化单行文案且诚实�
   // 网卡不可用时诚实显示未知，不伪造 0 KB/s
   const unavailable=api.buildTelemetryReadout({netState:'unavailable',downBps:null,upBps:null,cpuPercent:null,memoryPercent:null},{telemetryMode:'always',telemetryNet:true,telemetryCpu:false,telemetryMemory:false})
   assert.equal(unavailable.text,'网速 未知')
+  // CPU 与内存段提供数值百分比用于进度条/双环/格栅动画
+  assert.equal(full.segments.find(s=>s.metric==='cpu')?.percent,42)
+  assert.equal(full.segments.find(s=>s.metric==='memory')?.percent,68)
+  assert.equal(api.normalizeTelemetryStyle('bar'),'bar')
+  assert.equal(api.normalizeTelemetryStyle('ring'),'ring')
+  assert.equal(api.normalizeTelemetryStyle('pulse'),'pulse')
+  assert.equal(api.normalizeTelemetryStyle('unknown'),'bar')
+})
+await test('旧版已移除主题在状态同步时平滑降级为深色或浅色主题',()=>{
+  const state={ui:{},settings:{}}
+  const api=subject(['applyUiState'],{state})
+  api.applyUiState({theme:'liquid'});assert.equal(state.settings.theme,'dark')
+  api.applyUiState({theme:'scroll'});assert.equal(state.settings.theme,'light')
+  api.applyUiState({theme:'clay'});assert.equal(state.settings.theme,'light')
+  api.applyUiState({theme:'neon'});assert.equal(state.settings.theme,'neon')
 })
 await test('普通设置入口打开通用，应用管理入口打开指定页', () => {
   const requested = []

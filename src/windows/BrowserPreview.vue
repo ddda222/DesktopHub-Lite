@@ -5,6 +5,7 @@ import GsapPresence from '@/components/GsapPresence.vue'
 import GsapShowcase from '@/components/GsapShowcase.vue'
 import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import IslandEntry from '@/features/island/IslandEntry.vue'
 import type { TelemetrySnapshot } from '@/features/island/telemetryReadout'
@@ -26,6 +27,17 @@ const previewMode = new URLSearchParams(location.search).get('preview')
 const settingsStandalone = previewMode === 'settings-window'
 const scene = ref('normal')
 const keepOpen = ref(false)
+const previewMotionOptions = MOTION_MODES.map(m => ({ value: m, label: MOTION_LABELS[m] }))
+const previewScaleOptions = [
+  { value: 75, label: '75%' },
+  { value: 100, label: '100%' },
+  { value: 125, label: '125%' }
+] as const
+const previewSceneOptions = [
+  { value: 'normal', label: '桌面／普通窗口' },
+  { value: 'maximized', label: '窗口最大化' },
+  { value: 'fullscreen', label: '游戏／全屏' }
+] as const
 function selectPreviewMotion(mode: MotionMode): void {
   setMotion(mode)
   state.ui.islandExpanded = keepOpen.value || !state.ui.islandExpanded
@@ -175,10 +187,10 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
         <a href="?preview=styles" style="color: inherit; font-weight: 600">十款样式实验室 ↗</a>
         <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button v-for="mode in previewThemes" :key="mode" type="button" :aria-pressed="state.settings.theme === mode" @click="setTheme(mode)">{{ THEME_LABELS[mode] }}</button>
-        <label>动效<select :value="normalizeMotionMode(state.ui.islandAppearance.motion)" aria-label="动态效果" @change="selectPreviewMotion(($event.target as HTMLSelectElement).value as MotionMode)"><option v-for="m in MOTION_MODES" :key="m" :value="m">{{ MOTION_LABELS[m] }}</option></select></label>
-        <label>尺寸<select v-model.number="state.ui.islandAppearance.scale"><option :value="75">75%</option><option :value="100">100%</option><option :value="125">125%</option></select></label>
+        <div class="preview-select-item"><span>动效</span><ThemedSelect size="xs" :model-value="normalizeMotionMode(state.ui.islandAppearance.motion)" :options="previewMotionOptions" aria-label="动态效果" @change="val => selectPreviewMotion(String(val) as MotionMode)" /></div>
+        <div class="preview-select-item"><span>尺寸</span><ThemedSelect size="xs" :model-value="state.ui.islandAppearance.scale" :options="previewScaleOptions" aria-label="灵动岛尺寸" @update:model-value="val => (state.ui.islandAppearance.scale = Number(val))" /></div>
         <label><input v-model="plain" type="checkbox" />纯色背景</label>
-        <label>场景<select v-model="scene" aria-label="模拟窗口状态"><option value="normal">桌面／普通窗口</option><option value="maximized">窗口最大化</option><option value="fullscreen">游戏／全屏</option></select></label>
+        <div class="preview-select-item"><span>场景</span><ThemedSelect v-model="scene" size="xs" :options="previewSceneOptions" aria-label="模拟窗口状态" /></div>
         <label><input v-model="state.ui.islandAppearance.webgl" type="checkbox" />WebGL 边缘光效</label>
         <button type="button" @click="state.ui.islandExpanded = !state.ui.islandExpanded">{{ state.ui.islandExpanded ? '收起' : '展开' }}</button>
       </div>
@@ -255,9 +267,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
 .preview-options { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 12px; }
 .preview-options button { padding: 5px 10px; border-radius: 16px; }
 .preview-options button[aria-pressed='true'] { background: rgba(255,255,255,.3); }
-.preview-options label { display: flex; align-items: center; gap: 6px; }
-select { font: inherit; color: inherit; background: transparent; border: 0; }
-select option { color: #252b3c; }
+.preview-options label, .preview-select-item { display: flex; align-items: center; gap: 6px; }
 .preview-stage { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 20px 0 60px; min-height: 560px; }
 .preview-workbench { display: grid; grid-template-columns: 252px minmax(0, 1fr); gap: 24px; padding: 0 28px; }
 .preview-stage { grid-column: 2; grid-row: 1; min-width: 0; }

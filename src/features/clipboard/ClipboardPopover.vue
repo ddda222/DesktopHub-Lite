@@ -5,6 +5,7 @@ import { animateFlipFromState, captureFlipSnapshot, Flip, gsap, playFlipSnapshot
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import { clipSummary, relativeTime } from '@/lib/format'
 import type { ClipItem, SnippetCopyField, SnippetDraft, SnippetItem, SnippetKind } from '@/lib/desktop/types'
 import { formatJson } from './format-json'
@@ -20,6 +21,7 @@ import {
   deleteSelectedClips,
   deleteSnippet,
   editClip,
+  ensureClipThumbnails,
   filteredClips,
   filteredSnippets,
   groupFilters,
@@ -68,12 +70,86 @@ watch(
   },
   { flush: 'pre' }
 )
+const CLIP_PAGE_SIZE = 20
+const clipPage = ref(1)
+const totalClipPages = computed(() => Math.max(1, Math.ceil(filteredClips.value.length / CLIP_PAGE_SIZE)))
+const pageOffset = computed(() => (clipPage.value - 1) * CLIP_PAGE_SIZE)
+const pagedClips = computed(() =>
+  filteredClips.value.slice(pageOffset.value, pageOffset.value + CLIP_PAGE_SIZE)
+)
+const visiblePageNumbers = computed<number[]>(() => {
+  const total = totalClipPages.value
+  const current = clipPage.value
+  if (total <= 5) return Array.from({ length: total }, (_, idx) => idx + 1)
+  const start = Math.max(1, Math.min(current - 2, total - 4))
+  return Array.from({ length: 5 }, (_, idx) => start + idx)
+})
+
+function setClipPage(nextPage: number): void {
+  const target = Math.max(1, Math.min(totalClipPages.value, nextPage))
+  if (target === clipPage.value) return
+  clipPage.value = target
+  const minIdx = (target - 1) * CLIP_PAGE_SIZE
+  const maxIdx = Math.min(filteredClips.value.length - 1, minIdx + CLIP_PAGE_SIZE - 1)
+  if (filteredClips.value.length > 0 && (state.ui.activeIndex < minIdx || state.ui.activeIndex > maxIdx)) {
+    state.ui.activeIndex = minIdx
+  }
+  void nextTick(() => {
+    listEl.value?.scrollTo({ top: 0 })
+  })
+}
+
 watch(
-  () => filteredClips.value.map(item => item.id).join('|'),
+  [() => state.ui.query, () => state.ui.group, () => state.ui.favoritesOnly],
   () => {
-    const snap = captureFlipSnapshot(listEl.value, '.row', state.ui.islandReducedMotion, 36)
+    clipPage.value = 1
+    void nextTick(() => listEl.value?.scrollTo({ top: 0 }))
+  }
+)
+
+watch(totalClipPages, total => {
+  if (clipPage.value > total) clipPage.value = total
+})
+
+watch(
+  () => state.ui.activeIndex,
+  idx => {
+    if (!isHistoryView.value || !filteredClips.value.length) return
+    const targetPage = Math.floor(Math.max(0, idx) / CLIP_PAGE_SIZE) + 1
+    if (targetPage >= 1 && targetPage <= totalClipPages.value && targetPage !== clipPage.value) {
+      clipPage.value = targetPage
+    }
+  }
+)
+
+watch(
+  [pagedClips, isHistoryView, () => state.ui.panel],
+  ([items, historyView, panel]) => {
+    if (!isDesktop || !historyView || (panel && panel !== 'clipboard')) return
+    void ensureClipThumbnails(items)
+  },
+  { immediate: true }
+)
+
+const clipGroupOptions = computed(() =>
+  state.groups.map(group => ({ value: group, label: group }))
+)
+const snippetGroupOptions = computed(() =>
+  state.snippetGroups.map(group => ({ value: group, label: group }))
+)
+
+let lastFlippedPage = clipPage.value
+watch(
+  () => pagedClips.value.map(item => item.id).join('|'),
+  () => {
+    // 翻页时直接切页避免跨页全量 DOM 测量闪烁，同页内部删减记录时保留平滑补位。
+    if (lastFlippedPage !== clipPage.value) {
+      lastFlippedPage = clipPage.value
+      return
+    }
+    const snap = captureFlipSnapshot(listEl.value, '.row', state.ui.islandReducedMotion, 24)
     if (!snap) return
-    void nextTick(() => playFlipSnapshot(snap, listEl.value, '.row', activeMotionPreset.value.pill, { stagger: 0.01, maxItems: 36 }))
+    void nextTick(() => playFlipSnapshot(snap, listEl.value, '.row', activeMotionPreset.value.pill, { stagger: 0.01, maxItems: 24 }))
   },
   { flush: 'pre' }
 )
@@ -195,6 +271,11 @@ function toggleSelected(id: string): void {
 function stopSelecting(): void {
   selecting.value = false
   selectedIds.value = new Set()
+  deletePrompt.value = null
+}
+
+function selectCurrentPage(): void {
+  selectedIds.value = new Set([...selectedIds.value, ...pagedClips.value.map((clip) => clip.id)])
   deletePrompt.value = null
 }
 
@@ -763,11 +844,19 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
-  // Alt+1~9 序号快拷（历史记录与常用短语双视图均支持）
+  if (isHistoryView.value && (event.key === 'PageDown' || event.key === 'PageUp')) {
+    if (totalClipPages.value > 1) {
+      event.preventDefault()
+      setClipPage(clipPage.value + (event.key === 'PageDown' ? 1 : -1))
+    }
+    return
+  }
+
+  // Alt+1~9 序号快拷（历史记录按当前页内序号快拷，常用短语同前）
   if (event.altKey && !event.ctrlKey && !event.metaKey && event.key >= '1' && event.key <= '9') {
     const idx = Number(event.key) - 1
     if (isHistoryView.value) {
-      const clip = filteredClips.value[idx]
+      const clip = pagedClips.value[idx]
       if (clip) {
         event.preventDefault()
         onCopy(clip)
@@ -1040,7 +1129,8 @@ function openDetectedUrl(url: string): void {
           role="group"
           aria-label="批量选择操作"
         >
-          <button class="chip" type="button" @click="selectVisible">全选筛选结果</button>
+          <button class="chip" type="button" @click="selectCurrentPage">全选本页</button>
+          <button class="chip" type="button" @click="selectVisible">全选筛选（{{ filteredClips.length }}）</button>
           <button class="chip" type="button" @click="stopSelecting">取消选择</button>
           <button
             class="chip"
@@ -1206,14 +1296,14 @@ function openDetectedUrl(url: string): void {
         </div>
 
         <div class="detail-actions">
-          <select
-            class="snippet-select"
-            :value="detailClip.group"
+          <ThemedSelect
+            class="snippet-select-wrap"
+            size="sm"
+            :model-value="detailClip.group"
+            :options="clipGroupOptions"
             aria-label="记录分组"
-            @change="assignClipGroup(detailClip.id, ($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="group in state.groups" :key="group" :value="group">{{ group }}</option>
-          </select>
+            @change="val => assignClipGroup(detailClip!.id, String(val))"
+          />
           <button class="btn btn-ghost is-danger" type="button" @click="onDelete(detailClip)">
             删除
           </button>
@@ -1287,16 +1377,16 @@ function openDetectedUrl(url: string): void {
           aria-label="剪贴板记录"
         >
           <div
-            v-for="(clip, index) in filteredClips"
+            v-for="(clip, localIdx) in pagedClips"
             :key="clip.id"
             class="row"
             role="button"
             tabindex="-1"
-            :data-index="index"
-            :class="{ 'is-active': index === state.ui.activeIndex }"
+            :data-index="pageOffset + localIdx"
+            :class="{ 'is-active': pageOffset + localIdx === state.ui.activeIndex }"
             :aria-label="`${clipSummary(clip)}，${clip.group}，${relativeTime(clip.copiedAt)}`"
             @click="selecting ? toggleSelected(clip.id) : onCopy(clip)"
-            @mouseenter="setActive(index)"
+            @mouseenter="setActive(pageOffset + localIdx)"
           >
             <input
               v-if="selecting"
@@ -1315,7 +1405,7 @@ function openDetectedUrl(url: string): void {
               />
               <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
               <Icon v-else name="text" :size="16" />
-              <span v-if="!selecting && index < 9" class="index-kbd" :title="`按 Alt+${index + 1} 快捷复制`">{{ index + 1 }}</span>
+              <span v-if="!selecting && localIdx < 9" class="index-kbd" :title="`按 Alt+${localIdx + 1} 快捷复制`">{{ localIdx + 1 }}</span>
             </div>
 
             <div class="row-main">
@@ -1402,6 +1492,41 @@ function openDetectedUrl(url: string): void {
             }}
           </p>
         </div>
+
+        <nav v-if="totalClipPages > 1" class="clip-pager" aria-label="剪贴板分页">
+          <span class="pager-summary">共 {{ filteredClips.length }} 条 · {{ clipPage }}/{{ totalClipPages }} 页</span>
+          <div class="pager-controls">
+            <button
+              class="pager-btn"
+              type="button"
+              :disabled="clipPage <= 1"
+              aria-label="上一页"
+              @click="setClipPage(clipPage - 1)"
+            >
+              ‹
+            </button>
+            <button
+              v-for="num in visiblePageNumbers"
+              :key="num"
+              class="pager-btn"
+              type="button"
+              :class="{ 'is-on': num === clipPage }"
+              :aria-current="num === clipPage ? 'page' : undefined"
+              @click="setClipPage(num)"
+            >
+              {{ num }}
+            </button>
+            <button
+              class="pager-btn"
+              type="button"
+              :disabled="clipPage >= totalClipPages"
+              aria-label="下一页"
+              @click="setClipPage(clipPage + 1)"
+            >
+              ›
+            </button>
+          </div>
+        </nav>
       </template>
     </template>
 
@@ -1483,15 +1608,13 @@ function openDetectedUrl(url: string): void {
                 <span class="tag-credential">账密（内置）</span>
               </template>
               <template v-else-if="!customGroupMode">
-                <select
+                <ThemedSelect
                   v-model="editingSnippet.group"
-                  class="snippet-select"
+                  class="snippet-select-wrap"
+                  size="sm"
+                  :options="snippetGroupOptions"
                   aria-label="常用短语分组"
-                >
-                  <option v-for="group in state.snippetGroups" :key="group" :value="group">
-                    {{ group }}
-                  </option>
-                </select>
+                />
                 <button
                   class="chip"
                   type="button"
@@ -3106,6 +3229,60 @@ function openDetectedUrl(url: string): void {
   .pw-toggle:active {
     transform: none;
   }
+}
+
+/* 分页器 */
+.clip-pager {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.pager-summary {
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.pager-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pager-btn {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: var(--r-chip);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.pager-btn:hover:not(:disabled):not(.is-on) {
+  background: var(--hover);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.pager-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.pager-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.snippet-select-wrap {
+  min-width: 98px;
+  width: auto;
 }
 
 /* 底部提示 */

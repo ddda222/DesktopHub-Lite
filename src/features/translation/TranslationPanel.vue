@@ -13,6 +13,7 @@ import { gsap, vGsapPress, vGsapPulse } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import Icon from '@/components/Icon.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import {
   closePanel,
   cancelTranslation,
@@ -39,8 +40,18 @@ watch(sourceLanguage, (lang) => {
   gsap.to(swapIconEl.value, { rotation: lang === 'en' ? 180 : 0, duration: spec.duration, ease: spec.ease })
 })
 const targetLanguage = computed(() => state.translation.direction === 'auto' ? 'auto' : state.translation.direction === 'en-zh' ? 'zh' : 'en')
-function chooseLanguage(event: Event, source: boolean) {
-  const language = (event.target as HTMLSelectElement).value
+const sourceLanguageOptions = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: '英语' },
+  { value: 'auto', label: '自动检测' }
+] as const
+const targetLanguageOptions = computed(() => [
+  ...(targetLanguage.value === 'auto' ? [{ value: 'auto', label: '自动匹配', disabled: true }] : []),
+  { value: 'en', label: '英语' },
+  { value: 'zh', label: '中文' }
+])
+function chooseLanguage(value: string | number, source: boolean) {
+  const language = String(value)
   if (language === 'auto') setTranslationDirection('auto')
   else setTranslationDirection((language === 'zh') === source ? 'zh-en' : 'en-zh')
 }
@@ -153,9 +164,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
       <!-- 方向与快捷填充合一 -->
       <div class="top-bar">
         <div class="languages" role="group" aria-label="翻译方向">
-          <select aria-label="原文语言" :value="sourceLanguage" @change="chooseLanguage($event, true)">
-            <option value="zh">中文</option><option value="en">英语</option><option value="auto">自动检测</option>
-          </select>
+          <ThemedSelect
+            class="lang-select"
+            size="xs"
+            aria-label="原文语言"
+            :model-value="sourceLanguage"
+            :options="sourceLanguageOptions"
+            @change="val => chooseLanguage(val, true)"
+          />
           <button
             v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
             class="swap"
@@ -171,10 +187,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
               <Icon name="swap" :size="16" />
             </span>
           </button>
-          <select aria-label="译文语言" :value="targetLanguage" @change="chooseLanguage($event, false)">
-            <option v-if="targetLanguage === 'auto'" value="auto" disabled>自动匹配</option>
-            <option value="en">英语</option><option value="zh">中文</option>
-          </select>
+          <ThemedSelect
+            class="lang-select"
+            size="xs"
+            aria-label="译文语言"
+            :model-value="targetLanguage"
+            :options="targetLanguageOptions"
+            @change="val => chooseLanguage(val, false)"
+          />
         </div>
 
         <div class="source-head-actions">
@@ -385,15 +405,14 @@ function onPanelKeydown(event: KeyboardEvent): void {
   border-radius: var(--r-card);
   background: var(--surface-2);
 }
-.languages select, .swap {
-  height: 28px; color: var(--text); background: transparent; border: 0;
+.languages :deep(.lang-select), .swap {
+  height: 28px; color: var(--text); background: transparent; border: 0; box-shadow: none;
   border-radius: var(--r-chip); font: inherit; font-size: var(--text-sm); cursor: pointer;
 }
-.languages select { width: 6.8em; padding-inline: 6px; font-weight: 600; }
-.languages select option { color: var(--text); background: var(--surface); }
+.languages :deep(.lang-select) { min-width: 6.4em; padding-inline: 7px; font-weight: 600; }
 .swap { width: 30px; display: grid; place-items: center; color: var(--accent); touch-action: manipulation; }
 .swap-icon { display: grid; place-items: center; }
-.languages :is(select, .swap):hover { background: var(--hover); }
+.languages :deep(.lang-select):hover, .languages .swap:hover { background: var(--hover); }
 .languages :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* 原文 */

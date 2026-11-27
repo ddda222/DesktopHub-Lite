@@ -20,6 +20,9 @@ impl PendingConfiguration {
 fn default_telemetry_mode() -> String {
     "smart".into()
 }
+fn default_telemetry_style() -> String {
+    "bar".into()
+}
 fn default_motion_mode() -> String {
     "glide".into()
 }
@@ -43,6 +46,8 @@ pub struct PortablePreferences {
     pub motion: String,
     #[serde(default = "default_telemetry_mode")]
     pub telemetry_mode: String,
+    #[serde(default = "default_telemetry_style")]
+    pub telemetry_style: String,
     #[serde(default = "default_true")]
     pub telemetry_net: bool,
     #[serde(default = "default_true")]
@@ -66,6 +71,7 @@ impl PortablePreferences {
             webgl: ui.island_appearance.webgl,
             motion: ui.island_appearance.motion.clone(),
             telemetry_mode: ui.island_appearance.telemetry_mode.clone(),
+            telemetry_style: ui.island_appearance.telemetry_style.clone(),
             telemetry_net: ui.island_appearance.telemetry_net,
             telemetry_cpu: ui.island_appearance.telemetry_cpu,
             telemetry_memory: ui.island_appearance.telemetry_memory,
@@ -80,6 +86,7 @@ impl PortablePreferences {
         ui.island_appearance.scale = self.scale; ui.island_appearance.webgl = self.webgl;
         ui.island_appearance.motion = self.motion.clone();
         ui.island_appearance.telemetry_mode = self.telemetry_mode.clone();
+        ui.island_appearance.telemetry_style = self.telemetry_style.clone();
         ui.island_appearance.telemetry_net = self.telemetry_net;
         ui.island_appearance.telemetry_cpu = self.telemetry_cpu;
         ui.island_appearance.telemetry_memory = self.telemetry_memory;
@@ -133,6 +140,10 @@ pub fn parse(bytes: &[u8]) -> Result<ConfigurationBackup, String> {
     for app in value["applications"]["apps"].as_array().ok_or("应用结构无效")? { keys(app, &["id", "name", "target", "categoryId", "color", "initials", "hidden", "broken"])?; }
     // 兼容旧版备份的已移除页面；其余未知页面仍严格拒绝。
     if backup.preferences.island_page == "compare" { backup.preferences.island_page = crate::state::PANEL_APPLICATIONS.into(); }
+    // 兼容旧版备份中已精简移除的琉璃、书卷、黏土主题，导入时平滑降级。
+    if matches!(backup.preferences.theme.as_str(), "liquid" | "scroll" | "clay") {
+        backup.preferences.theme = crate::state::normalize_theme(&backup.preferences.theme);
+    }
     validate(&backup)?;
     Ok(backup)
 }
@@ -164,6 +175,7 @@ pub fn validate(backup: &ConfigurationBackup) -> Result<(), String> {
         || !categories.contains(p.active_category_id.as_str())
         || !crate::desktop_features::IslandAppearance::valid_motion_mode(&p.motion)
         || !crate::desktop_features::IslandAppearance::valid_telemetry_mode(&p.telemetry_mode)
+        || !crate::desktop_features::IslandAppearance::valid_telemetry_style(&p.telemetry_style)
         || (p.telemetry_mode != "off" && !p.telemetry_net && !p.telemetry_cpu && !p.telemetry_memory)
     {
         return Err("显示偏好包含无效主题、页面、分类、比例、延时或胶囊微读数设置".into());
@@ -202,7 +214,7 @@ pub fn describe(before: &ConfigurationBackup, after: &ConfigurationBackup) -> Ch
     let categories=counts(&before.applications.categories,&after.applications.categories,|v| &v.id);
     let mut preferences=Vec::new();
     let a=serde_json::to_value(&before.preferences).unwrap_or_default();let b=serde_json::to_value(&after.preferences).unwrap_or_default();
-    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryMemory","微读数·内存")] {
+    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryStyle","微读数样式"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryMemory","微读数·内存")] {
         if a[key]!=b[key] { preferences.push(PreferenceChange{label:label.into(),before:a[key].as_str().map(str::to_owned).unwrap_or_else(||a[key].to_string()),after:b[key].as_str().map(str::to_owned).unwrap_or_else(||b[key].to_string())}); }
     }
     let mut app_details=Vec::new();
@@ -244,9 +256,15 @@ mod tests {
     }
     fn bytes(value: &ConfigurationBackup) -> Vec<u8> { serde_json::to_vec(value).unwrap() }
     #[test] fn round_trip_preserves_portable_configuration() {
-        for theme in ["midnight", "mecha", "scroll", "pixel", "blueprint", "neon", "clay"] {
+        for theme in ["midnight", "mecha", "pixel", "blueprint", "neon"] {
             let mut backup=sample(); backup.preferences.theme=theme.into();
             let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert!(restored.applications.apps[0].broken.is_none()); assert_eq!(restored.preferences.theme,theme);
+        }
+        for (legacy_theme, fallback) in [("liquid", "dark"), ("scroll", "light"), ("clay", "light")] {
+            let mut backup = sample();
+            backup.preferences.theme = legacy_theme.into();
+            let restored = parse(&bytes(&backup)).unwrap();
+            assert_eq!(restored.preferences.theme, fallback);
         }
         for motion in ["glide", "sweep", "bounce", "focus", "flicker", "step", "unroll"] {
             let mut backup=sample(); backup.preferences.motion=motion.into();
@@ -308,10 +326,11 @@ mod tests {
     #[test] fn legacy_backups_without_telemetry_fields_default_cleanly_and_invalid_combinations_fail() {
         let mut value=serde_json::to_value(sample()).unwrap();
         let prefs=value["preferences"].as_object_mut().unwrap();
-        prefs.remove("motion");prefs.remove("telemetryMode");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryMemory");
+        prefs.remove("motion");prefs.remove("telemetryMode");prefs.remove("telemetryStyle");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryMemory");
         let restored=parse(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(restored.preferences.motion,"glide");
         assert_eq!(restored.preferences.telemetry_mode,"smart");
+        assert_eq!(restored.preferences.telemetry_style,"bar");
         assert!(restored.preferences.telemetry_net && restored.preferences.telemetry_cpu && restored.preferences.telemetry_memory);
 
         let mut bad_motion=sample();

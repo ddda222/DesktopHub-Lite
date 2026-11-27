@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import SystemAppPicker from './SystemAppPicker.vue'
 import { captureFlipSnapshot, playFlipSnapshot } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
@@ -22,6 +23,10 @@ const filters = computed(() => [
   ...categories.value.map(cat => ({ ...cat, count: state.apps.filter(app => categoryKey(app) === cat.id).length }))
 ])
 const filterName = computed(() => filter.value === null ? '全部应用' : categoryName(filter.value))
+const categorySelectOptions = computed(() => [
+  { value: 'all', label: '未分类' },
+  ...categories.value.map(cat => ({ value: cat.id, label: cat.name }))
+])
 const visible = computed(() => {
   const term = query.value.trim().toLocaleLowerCase()
   return state.apps.filter(app => (filter.value === null || categoryKey(app) === filter.value) &&
@@ -287,7 +292,16 @@ async function removeApp(id: string): Promise<void> {
             >
               <template v-if="editId !== app.id">
                 <p class="full-app-name">{{ app.name }}</p><p class="app-path">{{ app.target }}</p>
-                <label class="field"><span class="field-label">所属分类</span><select class="control" :value="categoryKey(app)" :disabled="busy" @change="changeCategory(app.id, ($event.target as HTMLSelectElement).value)"><option value="all">未分类</option><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.name }}</option></select></label>
+                <div class="field">
+                  <span class="field-label">所属分类</span>
+                  <ThemedSelect
+                    :model-value="categoryKey(app)"
+                    :options="categorySelectOptions"
+                    :disabled="busy"
+                    aria-label="所属分类"
+                    @change="val => changeCategory(app.id, String(val))"
+                  />
+                </div>
                 <div class="actions app-actions">
                   <button class="btn" :disabled="busy" @click="action(() => toggleAppHidden(app.id), app.hidden ? '应用已显示' : '应用已隐藏')">{{ app.hidden ? '显示应用' : '隐藏应用' }}</button>
                   <button class="btn" :disabled="busy" @click="startEdit(app)">编辑</button>

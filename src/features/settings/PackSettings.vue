@@ -9,6 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import MotionSaveButton from '@/components/MotionSaveButton.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import { vGsapPulse } from '@/lib/gsapMotion'
 import { invokeHost, isDesktop, listenHost, pickApplicationTarget } from '@/lib/desktop/desktop'
 import { DEFAULT_PACK_SETTINGS, DEFAULT_REVERSE_PORT, type PackSettings } from '@/features/pack/types'
@@ -23,6 +24,11 @@ const justSaved = ref(false)
 let savedResetTimer: number | null = null
 const feedback = ref('')
 const isError = ref(false)
+const packTypeOptions = [
+  { value: '3', label: '3 · 云端证书' },
+  { value: '0', label: '0 · 自有证书' },
+  { value: '1', label: '1 · 公共测试（旧版）' }
+] as const
 
 let unlisten: (() => void) | null = null
 
@@ -364,16 +370,14 @@ onBeforeUnmount(() => {
           </span>
         </label>
 
-        <label class="field">
+        <div class="field">
           <span class="field-label">证书类型</span>
-          <span class="select-wrap">
-            <select v-model="draft.packType" class="control select">
-              <option value="3">3 · 云端证书</option>
-              <option value="0">0 · 自有证书</option>
-              <option value="1">1 · 公共测试（旧版）</option>
-            </select>
-          </span>
-        </label>
+          <ThemedSelect
+            v-model="draft.packType"
+            :options="packTypeOptions"
+            aria-label="证书类型"
+          />
+        </div>
 
         <label class="field">
           <span class="field-label">默认调试设备序列号（可选）</span>

@@ -18,14 +18,11 @@ pub const PANEL_OVERFLOW: &str = "overflow";
 
 pub const THEME_DARK: &str = "dark";
 pub const THEME_LIGHT: &str = "light";
-pub const THEME_LIQUID: &str = "liquid";
 pub const THEME_MIDNIGHT: &str = "midnight";
 pub const THEME_MECHA: &str = "mecha";
-pub const THEME_SCROLL: &str = "scroll";
 pub const THEME_PIXEL: &str = "pixel";
 pub const THEME_BLUEPRINT: &str = "blueprint";
 pub const THEME_NEON: &str = "neon";
-pub const THEME_CLAY: &str = "clay";
 pub const THEME_SYSTEM: &str = "system";
 
 pub fn valid_theme(theme: &str) -> bool {
@@ -33,16 +30,23 @@ pub fn valid_theme(theme: &str) -> bool {
         theme,
         THEME_DARK
             | THEME_LIGHT
-            | THEME_LIQUID
             | THEME_MIDNIGHT
             | THEME_MECHA
-            | THEME_SCROLL
             | THEME_PIXEL
             | THEME_BLUEPRINT
             | THEME_NEON
-            | THEME_CLAY
             | THEME_SYSTEM
     )
+}
+
+/// 将已下线的旧版主题平滑映射到明/暗基线主题，确保旧配置文件或旧备份仍可无损加载。
+pub fn normalize_theme(theme: &str) -> String {
+    match theme {
+        "liquid" => THEME_DARK.to_string(),
+        "scroll" | "clay" => THEME_LIGHT.to_string(),
+        other if valid_theme(other) => other.to_string(),
+        _ => THEME_DARK.to_string(),
+    }
 }
 
 pub const CATEGORY_ALL: &str = "all";

@@ -69,14 +69,11 @@ const themeMaterials: Record<ThemeMode, { orb: string; desc: string }> = {
   system: { orb: 'radial-gradient(circle at 30% 30%, #ffffff, #64748b 58%, #0f172a)', desc: '钛灰液态银' },
   light: { orb: 'radial-gradient(circle at 30% 30%, #ffffff, #dbeafe 60%, #93c5fd)', desc: '冰透白水晶' },
   dark: { orb: 'radial-gradient(circle at 30% 30%, #e2e8f0, #334155 55%, #090d16)', desc: '曜石液态汞' },
-  liquid: { orb: 'radial-gradient(circle at 28% 28%, #ffffff, #7dd3fc 48%, #c084fc 85%, #0b1325)', desc: '菲涅尔虹彩琉璃' },
   midnight: { orb: 'radial-gradient(circle at 30% 30%, #e0f2fe, #38bdf8 52%, #082042)', desc: '深海蓝琉璃' },
   mecha: { orb: 'radial-gradient(circle at 30% 30%, #fef3c7, #f59e0b 54%, #451a03)', desc: '熔融琥珀金' },
-  scroll: { orb: 'radial-gradient(circle at 30% 30%, #fff7ed, #c24132 58%, #292524)', desc: '宣纸朱砂墨' },
   pixel: { orb: 'radial-gradient(circle at 30% 30%, #ecfccb, #84cc16 54%, #14532d)', desc: '荧光绿琉璃' },
   blueprint: { orb: 'radial-gradient(circle at 30% 30%, #f0f9ff, #38bdf8 52%, #0c4a6e)', desc: '普鲁士光学蓝' },
-  neon: { orb: 'radial-gradient(circle at 30% 30%, #fce7f3, #ec4899 50%, #22d3ee)', desc: '赛博色散铬' },
-  clay: { orb: 'radial-gradient(circle at 30% 30%, #ffffff, #f9a8d4 54%, #7dd3fc)', desc: '柔雾奶霜冻' }
+  neon: { orb: 'radial-gradient(circle at 30% 30%, #fce7f3, #ec4899 50%, #22d3ee)', desc: '赛博色散铬' }
 }
 
 const motionCurves: Record<MotionMode, string> = {

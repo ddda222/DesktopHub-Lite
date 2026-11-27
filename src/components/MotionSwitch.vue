@@ -21,9 +21,7 @@ const emit = defineEmits<{
 
 const knobEl = ref<HTMLElement | null>(null)
 
-const preserveGeometryTheme = computed(() =>
-  state.settings.theme === 'scroll' || state.settings.theme === 'pixel'
-)
+const preserveGeometryTheme = computed(() => state.settings.theme === 'pixel')
 
 const knobTransition = computed(() => {
   if (state.ui.islandReducedMotion) return INSTANT_TRANSITION

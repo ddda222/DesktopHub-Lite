@@ -24,9 +24,11 @@ import {
   buildTelemetryReadout,
   countTelemetryMetrics,
   normalizeTelemetryPrefs,
+  normalizeTelemetryStyle,
   stepSmartTelemetry,
   type TelemetrySnapshot
 } from './telemetryReadout'
+import TelemetryCapsuleReadout from './TelemetryCapsuleReadout.vue'
 import ClipboardPopover from '@/features/clipboard/ClipboardPopover.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import FileShelf from '@/features/files/FileShelf.vue'
@@ -95,33 +97,26 @@ const capsuleStatusLabelEl = ref<HTMLElement | null>(null)
 const quickCodeTextEl = ref<HTMLElement | null>(null)
 const appGridEl = ref<HTMLElement | null>(null)
 function resolveVariant(mode = state.settings.theme): IslandVariant {
-  if (mode === 'liquid') return 'liquid'
   if (mode === 'midnight') return 'telemetry'
   if (mode === 'mecha') return 'mecha'
-  if (mode === 'scroll') return 'scroll'
   if (mode === 'pixel') return 'pixel'
   if (mode === 'blueprint') return 'blueprint'
   if (mode === 'neon') return 'neon'
-  if (mode === 'clay') return 'clay'
   return 'standard'
 }
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)')
 const dark = ref(isDarkTheme())
 const variant = ref<IslandVariant>(resolveVariant())
 const telemetry = computed(() => variant.value === 'telemetry')
-const glassPalette = computed<'cool' | 'liquid' | 'amber' | 'vermilion' | 'lime' | 'chalk' | 'neon' | 'candy'>(() => {
-  if (variant.value === 'liquid') return 'liquid'
+const glassPalette = computed<'cool' | 'amber' | 'lime' | 'chalk' | 'neon'>(() => {
   if (variant.value === 'mecha') return 'amber'
-  if (variant.value === 'scroll') return 'vermilion'
   if (variant.value === 'pixel') return 'lime'
   if (variant.value === 'blueprint') return 'chalk'
   if (variant.value === 'neon') return 'neon'
-  if (variant.value === 'clay') return 'candy'
   return 'cool'
 })
-/** 霓虹招牌与软糖表情随胶囊状态切换，只做装饰，读屏仍以状态文字为准。 */
+/** 霓虹招牌随胶囊状态切换，只做装饰，读屏仍以状态文字为准。 */
 const neonSign = computed(() => ({ working: '加班中', paused: '打烊', feedback: '好嘞', mail: '来信', approval: '请示', files: '寄存', 'quick-ocr': '识字' } as Record<string, string>)[capsuleStatus.value.kind] ?? '营业中')
-const clayFace = computed(() => ({ working: '•̀ᴗ•́', paused: '-ᴗ-', feedback: '^ᴗ^', mail: '•o•', approval: '•﹏•', files: '•ᴗ•', 'quick-ocr': '•̀ω•́' } as Record<string, string>)[capsuleStatus.value.kind] ?? 'ᵔᴗᵔ')
 const hostExpanded = computed(() => state.ui.islandExpanded)
 const hostMailNotices = useMailList<MailNotice>('bar', 'mail_notices', 'mail-notices-changed', message => pushToast(message, 'error'))
 const mailNotices = computed(() => (isDesktop ? hostMailNotices.value : (props.previewMail?.length ? props.previewMail : hostMailNotices.value)))
@@ -250,6 +245,7 @@ watch(tucked, value => {
 const telemetryReadout = computed(() =>
   telemetryActive.value ? buildTelemetryReadout(telemetrySample.value, telemetryPrefs.value) : null
 )
+const telemetryStyle = computed(() => normalizeTelemetryStyle(appearance.value.telemetryStyle))
 const showQuickOcr = computed(() =>
   !expanded.value && !tucked.value && !approval.value && !quickMenuOpen.value && !!quickOcrClip.value
 )
@@ -461,26 +457,23 @@ const visibleWidth = computed(() => {
     const count = telemetryReadout.value.metricCount
     const table: Record<IslandVariant, [number, number][]> = {
       standard: [[140, 118], [188, 168], [240, 218]],
-      liquid: [[156, 134], [202, 182], [254, 232]],
       telemetry: [[158, 136], [204, 184], [256, 234]],
-      scroll: [[178, 156], [226, 206], [278, 256]],
       mecha: [[190, 168], [240, 220], [292, 270]],
       pixel: [[204, 182], [258, 238], [312, 290]],
       blueprint: [[196, 174], [248, 228], [300, 280]],
-      neon: [[200, 178], [252, 232], [304, 284]],
-      clay: [[176, 156], [226, 206], [278, 258]]
+      neon: [[200, 178], [252, 232], [304, 284]]
     }
     const [base, floor] = table[variant.value][Math.min(2, Math.max(0, count - 1))]
-    return Math.min(availableWidth.value - 24, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra)))
+    const visualCount = Number(telemetryPrefs.value.telemetryCpu) + Number(telemetryPrefs.value.telemetryMemory)
+    const stylePerMetric = telemetryStyle.value === 'bar' ? 30 : telemetryStyle.value === 'ring' ? 18 : telemetryStyle.value === 'pulse' ? 20 : 0
+    const styleExtra = visualCount * stylePerMetric * scale.value
+    return Math.min(availableWidth.value - 24, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra + styleExtra)))
   }
   const idle = capsuleStatus.value.kind === 'idle'
   let baseWidth = (idle ? 128 : 168) * scale.value
-  if (variant.value === 'liquid') baseWidth = (idle ? 142 : 178) * scale.value
-  else if (variant.value === 'telemetry') baseWidth = (idle ? 148 : 186) * scale.value
+  if (variant.value === 'telemetry') baseWidth = (idle ? 148 : 186) * scale.value
   else if (variant.value === 'mecha' || variant.value === 'pixel') baseWidth = (idle ? 176 : 208) * scale.value
-  else if (variant.value === 'scroll') baseWidth = (idle ? 164 : 196) * scale.value
   else if (variant.value === 'blueprint' || variant.value === 'neon') baseWidth = (idle ? 184 : 216) * scale.value
-  else if (variant.value === 'clay') baseWidth = (idle ? 168 : 200) * scale.value
   if (runTask.value.stage === 'running') {
     baseWidth = Math.max(baseWidth, 276 * scale.value)
   }
@@ -490,8 +483,8 @@ const visibleWidth = computed(() => {
   return Math.min(availableWidth.value - 24, Math.max(menuFloor, Math.round(baseWidth + badgeExtra)))
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
-const lineHeights: Record<IslandVariant, number> = { standard: 5, liquid: 6, telemetry: 7, mecha: 8, scroll: 9, pixel: 9, blueprint: 8, neon: 6, clay: 8 }
-const compactHeights: Record<IslandVariant, number> = { standard: 32, liquid: 34, telemetry: 32, mecha: 34, scroll: 34, pixel: 36, blueprint: 34, neon: 34, clay: 36 }
+const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, pixel: 9, blueprint: 8, neon: 6 }
+const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, pixel: 36, blueprint: 34, neon: 34 }
 const maxExpandedHeight = computed(() => Math.max(220, window.screen.availHeight - 60))
 const rawExpandedHeight = computed(() =>
   48 + (approval.value ? 0 : chromeHeight.value) + (!approval.value && !viewingMail.value && !ocrPanelOpen.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value)
@@ -507,11 +500,11 @@ const visibleHeight = computed(() => {
   return compactHeights[variant.value] * scale.value + (quickMenuOpen.value ? 42 : 0) + (showPackStrip.value ? Math.round(32 * scale.value) : 0)
 })
 const cornerRadius = computed(() => {
-  if (variant.value === 'mecha' || variant.value === 'scroll' || variant.value === 'pixel') return 4
+  if (variant.value === 'mecha' || variant.value === 'pixel') return 4
   if (variant.value === 'blueprint') return 2
   const base = expanded.value
-    ? (telemetry.value ? 12 : variant.value === 'clay' ? 28 : variant.value === 'liquid' ? 22 : variant.value === 'neon' ? 20 : 18)
-    : tucked.value ? (telemetry.value ? 4 : 5) : quickMenuOpen.value ? 16 : (telemetry.value ? 10 : variant.value === 'liquid' ? 26 : 24)
+    ? (telemetry.value ? 12 : variant.value === 'neon' ? 20 : 18)
+    : tucked.value ? (telemetry.value ? 4 : 5) : quickMenuOpen.value ? 16 : (telemetry.value ? 10 : 24)
   return Math.min(base, visibleHeight.value / 2, visibleWidth.value / 2)
 })
 const bounds = computed(() => ({
@@ -1717,7 +1710,7 @@ onBeforeUnmount(() => {
       <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" :moving="geometryMoving || pageSwitching" />
       <GlassLight v-if="materialReady && glassAvailable"
         :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :paused="pageSwitching"
-        :corner-radius="variant === 'mecha' || variant === 'scroll' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : undefined"
+        :corner-radius="variant === 'mecha' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : undefined"
         :palette="glassPalette" @unavailable="glassAvailable = false" />
       <CapsuleOrbitTrack
         :width="visibleWidth"
@@ -1742,20 +1735,17 @@ onBeforeUnmount(() => {
             aria-hidden="true"
           >
             <span v-if="telemetry && !expanded" class="telemetry-led" :class="capsuleStatus.kind" />
-            <span v-else-if="variant === 'liquid' && !expanded" class="liquid-orb-dot" />
             <span v-else-if="variant === 'mecha' && !expanded" class="mecha-badge">U·06</span>
-            <span v-else-if="variant === 'scroll' && !expanded" class="scroll-seal">{{ capsuleStatus.kind === 'working' ? '忙' : capsuleStatus.kind === 'paused' ? '止' : capsuleStatus.kind === 'telemetry' ? '巡' : '安' }}</span>
             <span v-else-if="variant === 'pixel' && !expanded" class="pixel-hp">♥HP</span>
             <span v-else-if="variant === 'blueprint' && !expanded" class="bp-tag">图 01</span>
             <span v-else-if="variant === 'neon' && !expanded" class="neon-sign">{{ neonSign }}</span>
-            <span v-else-if="variant === 'clay' && !expanded" class="clay-face">{{ clayFace }}</span>
             <span class="capsule-label" :class="{ 'is-telemetry': capsuleStatus.kind === 'telemetry' }">
-              <template v-if="capsuleStatus.kind === 'telemetry' && telemetryReadout">
-                <template v-for="(seg, idx) in telemetryReadout.segments" :key="idx">
-                  <i v-if="idx > 0" class="tel-sep">·</i>
-                  <span class="tel-seg"><em class="tel-pre" :class="{ accent: seg.accent }">{{ seg.prefix }}</em>{{ seg.value }}</span>
-                </template>
-              </template>
+              <TelemetryCapsuleReadout
+                v-if="capsuleStatus.kind === 'telemetry' && telemetryReadout"
+                :readout="telemetryReadout"
+                :style-mode="telemetryStyle"
+                :reduced="motionReduced"
+              />
               <template v-else>
                 <CapsuleMorphGlyph
                   v-if="capsuleStatus.kind !== 'idle'"
@@ -1775,11 +1765,9 @@ onBeforeUnmount(() => {
               </span>
             </span>
             <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
-            <span v-else-if="variant === 'scroll' && !expanded" class="scroll-knot" />
             <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
             <span v-else-if="variant === 'blueprint' && !expanded" class="bp-scale">1:1</span>
             <span v-else-if="variant === 'neon' && !expanded" class="neon-hours">24H</span>
-            <span v-else-if="variant === 'clay' && !expanded" class="clay-dots"><i /><i /><i /></span>
           </span>
           <span class="grip" aria-hidden="true" />
         </button>
@@ -2116,11 +2104,6 @@ onBeforeUnmount(() => {
 .window-dragging .capsule { cursor: grabbing; }
 .island:not(.expanded) .capsule { height: var(--capsule-height); width: 100%; }
 .island:not(.expanded) .capsule-bar.has-quick-code .capsule { width: auto; }
-.liquid-orb-dot {
-  flex: none; width: 8px; height: 8px; border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #ffffff, #7dd3fc 58%, #c084fc);
-  box-shadow: 0 0 10px rgba(125, 211, 252, .65);
-}
 .capsule-badges {
   display: inline-flex; align-items: center; gap: 4px; margin-left: 4px;
 }
@@ -2515,14 +2498,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 }
 .capsule-label { display: inline-flex; align-items: center; gap: 5px; }
 .capsule-label.is-telemetry { gap: 4px; font-size: 12px; letter-spacing: 0; font-variant-numeric: tabular-nums; }
-.tel-sep { font-style: normal; opacity: .4; margin: 0 1px; }
-.tel-seg { display: inline-flex; align-items: baseline; gap: 2.5px; }
-.tel-pre { font-style: normal; font-size: 11px; font-weight: 600; color: var(--text-2); }
-.tel-pre.accent { color: var(--accent); font-weight: 700; }
-.variant-scroll:not(.expanded) .capsule-label.is-telemetry { font-family: var(--font-sans); letter-spacing: 0; }
 .variant-pixel:not(.expanded) .capsule-label.is-telemetry { padding: 1px 6px; font-size: 11.5px; }
-.variant-pixel:not(.expanded) .tel-pre { color: #86efac; }
-.variant-pixel:not(.expanded) .tel-pre.accent { color: #facc15; }
+.variant-pixel:not(.expanded) :deep(.tel-pre) { color: #86efac; }
+.variant-pixel:not(.expanded) :deep(.tel-pre.accent) { color: #facc15; }
+.variant-pixel:not(.expanded) :deep(.tel-val) { color: #bef264; }
+.variant-pixel:not(.expanded) :deep(.tel-bar-track),
+.variant-pixel:not(.expanded) :deep(.tel-pulse-bar) { border-radius: 0; }
 
 /* ==================== 琥珀重工（variant-mecha：45° 倒角装甲与液压导轨） ==================== */
 .island.variant-mecha {
@@ -2579,62 +2560,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-mecha .feature-pane :deep(.textarea),
 .variant-mecha .feature-pane :deep(.row) { border-radius: 3px; }
 .variant-mecha .feature-pane :deep(.row:hover) { box-shadow: inset 3px 0 0 rgba(245, 158, 11, .55); }
-
-/* ==================== 海棠书卷（variant-scroll：四角内凹花窗、燕尾红签与折角方笺） ==================== */
-.island.variant-scroll {
-  border-radius: 2px; box-shadow: none;
-  -webkit-mask:
-    radial-gradient(circle 7px at 0 0, transparent 96%, #000 100%) top left,
-    radial-gradient(circle 7px at 100% 0, transparent 96%, #000 100%) top right,
-    radial-gradient(circle 7px at 0 100%, transparent 96%, #000 100%) bottom left,
-    radial-gradient(circle 7px at 100% 100%, transparent 96%, #000 100%) bottom right;
-  -webkit-mask-size: 51% 51%;
-  -webkit-mask-repeat: no-repeat;
-}
-.island.variant-scroll.expanded {
-  -webkit-mask:
-    radial-gradient(circle 11px at 0 0, transparent 96%, #000 100%) top left,
-    radial-gradient(circle 11px at 100% 0, transparent 96%, #000 100%) top right,
-    radial-gradient(circle 11px at 0 100%, transparent 96%, #000 100%) bottom left,
-    radial-gradient(circle 11px at 100% 100%, transparent 96%, #000 100%) bottom right;
-  -webkit-mask-size: 51% 51%;
-  -webkit-mask-repeat: no-repeat;
-}
-.island.variant-scroll.tucked { -webkit-mask: none; }
-.variant-scroll:not(.expanded) .capsule-text { width: 100%; justify-content: space-between; padding: 0 14px; font-family: Georgia, 'Songti SC', 'SimSun', serif; letter-spacing: .08em; }
-.scroll-seal {
-  padding: 1px 5px; border-radius: 1px; background: var(--accent); color: #fff;
-  font-size: 10px; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .38);
-}
-.scroll-knot { width: 6px; height: 6px; transform: rotate(45deg); border: 1.4px solid var(--accent); }
-.variant-scroll .grip { width: 30px; height: 2px; border-radius: 0; background: rgba(31, 36, 33, .45); }
-.variant-scroll .toolbar { border-bottom: 1px solid rgba(31, 36, 33, .22); padding-top: 0; }
-.variant-scroll .mode-selection {
-  top: 0; bottom: 0; border-radius: 0; background: var(--accent); box-shadow: none;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
-}
-.variant-scroll .mode-nav .selected,
-.variant-scroll .mode-nav .selected svg { color: #fff; transform: translateY(-2px); }
-.variant-scroll .round-action { border-radius: 3px; border-color: rgba(31, 36, 33, .2); }
-.variant-scroll .categories button { border-radius: 2px; border-color: rgba(31, 36, 33, .14); font-family: 'Songti SC', 'SimSun', var(--font-sans); }
-.variant-scroll .categories .selected { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .35); }
-.variant-scroll .app-tile {
-  position: relative; border-radius: 0; background: var(--surface-2); border: 1px solid rgba(31, 36, 33, .2);
-  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
-}
-.variant-scroll .app-tile::after {
-  content: ''; position: absolute; top: 0; right: 0; width: 8px; height: 8px;
-  background: #cfc6b2; border-left: 1px solid rgba(31, 36, 33, .25); border-bottom: 1px solid rgba(31, 36, 33, .25);
-  pointer-events: none;
-}
-.variant-scroll .app-tile:hover { border-color: var(--accent); background: #f2ece0; }
-.variant-scroll .feature-pane { --r-chip: 3px; --r-tile: 3px; }
-.variant-scroll .feature-pane :deep(.search),
-.variant-scroll .feature-pane :deep(.pause),
-.variant-scroll .feature-pane :deep(.seg),
-.variant-scroll .feature-pane :deep(.seg-btn),
-.variant-scroll .feature-pane :deep(.textarea) { border-radius: 3px; border-color: rgba(31, 36, 33, .24); }
-.variant-scroll .feature-pane :deep(.row) { border-radius: 2px; border-bottom: 1px dashed rgba(31, 36, 33, .22); }
 
 /* ==================== 像素掌机（variant-pixel：锯齿外壳、双层液晶内屏与 3D 厚底按键） ==================== */
 .island.variant-pixel {
@@ -2735,7 +2660,6 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .dismiss-handle.ready .dismiss-pill { background: var(--accent); opacity: .92; width: 62px; }
 .variant-mecha .dismiss-pill,
 .variant-pixel .dismiss-pill,
-.variant-scroll .dismiss-pill,
 .variant-blueprint .dismiss-pill { border-radius: 0; }
 
 .reduced :deep(*), .reduced :deep(*::before), .reduced :deep(*::after) { transition: none !important; animation: none !important; filter: none !important; }

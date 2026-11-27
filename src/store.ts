@@ -8,7 +8,7 @@
  */
 import { computed, reactive, watch } from 'vue'
 import { host, newRequestId } from '@/lib/desktop/host'
-import { isDarkThemeMode } from '@/lib/themes'
+import { isDarkThemeMode, normalizeThemeMode } from '@/lib/themes'
 import { isMotionMode, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import {
   defaultIslandAppearance,
@@ -174,14 +174,31 @@ async function refreshClipboard(): Promise<void> {
   state.ui.paused = status.paused
   state.settings.recordClipboard = !status.paused
   if (!groupFilters.value.includes(state.ui.group)) state.ui.group = '全部'
-  if (state.ui.panel === 'clipboard') void loadClipImages()
+  if (state.ui.panel === 'clipboard') void ensureClipThumbnails(state.clips.slice(0, 20))
+}
+
+const loadingThumbIds = new Set<string>()
+
+/** 仅按需读取指定剪贴板条目（当前页）的图片缩略图，避免全量加载造成卡顿。 */
+export async function ensureClipThumbnails(items: ClipItem[]): Promise<void> {
+  if (!isDesktop) return
+  for (const clip of items) {
+    if (clip.kind !== 'image' || clip.imageUrl || clip.imageMissing || loadingThumbIds.has(clip.id)) {
+      continue
+    }
+    loadingThumbIds.add(clip.id)
+    try {
+      clip.imageUrl = await invokeHost<string>('read_clipboard_thumbnail', { id: clip.id })
+    } catch {
+      clip.imageMissing = true
+    } finally {
+      loadingThumbIds.delete(clip.id)
+    }
+  }
 }
 
 async function loadClipImages(): Promise<void> {
-  for (const clip of state.clips.filter((item) => item.kind === 'image' && !item.imageUrl && !item.imageMissing)) {
-    try { clip.imageUrl = await invokeHost<string>('read_clipboard_thumbnail', { id: clip.id }) }
-    catch { clip.imageMissing = true }
-  }
+  await ensureClipThumbnails(state.clips.slice(0, 20))
 }
 
 let translationSettingsRefresh = 0
@@ -346,7 +363,14 @@ function applyUiState(ui: UiState): void {
     state.ui.activeCategoryId = ui.activeCategoryId
   }
   if (!themeBusy) {
-    state.settings.theme = ui.theme as HubSettings['theme']
+    const rawTheme = ui.theme
+    state.settings.theme = (
+      rawTheme === 'scroll' || rawTheme === 'clay'
+        ? 'light'
+        : ['system', 'light', 'dark', 'midnight', 'mecha', 'pixel', 'blueprint', 'neon'].includes(rawTheme)
+          ? rawTheme
+          : 'dark'
+    ) as HubSettings['theme']
   }
 }
 
@@ -1060,7 +1084,7 @@ export function isDarkTheme(theme: HubSettings['theme'] = state.settings.theme):
 }
 
 function applyTheme(): void {
-  const mode = state.settings.theme
+  const mode = normalizeThemeMode(state.settings.theme)
   const resolved = mode === 'system' ? (prefersDark.matches ? 'dark' : 'light') : mode
   document.documentElement.dataset.theme = resolved
 }

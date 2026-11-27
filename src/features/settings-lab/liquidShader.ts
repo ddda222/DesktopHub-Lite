@@ -72,16 +72,6 @@ const MATERIALS: Record<ThemeMode, LiquidMaterial> = {
     isLight: false,
     inkStyle: 0
   },
-  liquid: {
-    bgA: [0.03, 0.05, 0.11],
-    bgB: [0.07, 0.11, 0.22],
-    core: [0.16, 0.36, 0.62],
-    rim: [0.88, 0.96, 1.0],
-    accent: [0.76, 0.62, 1.0],
-    dispersion: 1.35,
-    isLight: false,
-    inkStyle: 0
-  },
   midnight: {
     bgA: [0.02, 0.05, 0.11],
     bgB: [0.05, 0.13, 0.25],
@@ -101,16 +91,6 @@ const MATERIALS: Record<ThemeMode, LiquidMaterial> = {
     dispersion: 0.72,
     isLight: false,
     inkStyle: 0
-  },
-  scroll: {
-    bgA: [0.96, 0.93, 0.88],
-    bgB: [0.89, 0.83, 0.74],
-    core: [0.72, 0.23, 0.18],
-    rim: [0.98, 0.92, 0.82],
-    accent: [0.22, 0.20, 0.19],
-    dispersion: 0.32,
-    isLight: true,
-    inkStyle: 1
   },
   pixel: {
     bgA: [0.04, 0.08, 0.05],
@@ -140,16 +120,6 @@ const MATERIALS: Record<ThemeMode, LiquidMaterial> = {
     accent: [0.14, 0.92, 0.98],
     dispersion: 1.25,
     isLight: false,
-    inkStyle: 0
-  },
-  clay: {
-    bgA: [0.97, 0.92, 0.95],
-    bgB: [0.88, 0.93, 0.99],
-    core: [0.95, 0.54, 0.72],
-    rim: [1.0, 0.98, 1.0],
-    accent: [0.44, 0.76, 0.98],
-    dispersion: 0.78,
-    isLight: true,
     inkStyle: 0
   }
 }

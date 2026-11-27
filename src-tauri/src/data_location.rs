@@ -124,6 +124,19 @@ pub struct AutoMigrateOutcome {
     pub backup_dir: Option<PathBuf>,
 }
 
+/// 历史配置或迁移前生成的单条本地备份摘要。
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRecord {
+    pub path: String,
+    pub name: String,
+    /// `"config"` 表示配置恢复前备份的 .json；`"migration"` 表示数据迁移前备份的目录。
+    pub kind: String,
+    pub modified_ms: u64,
+    pub total_files: usize,
+    pub total_bytes: u64,
+}
+
 pub fn default_shared_data_dir(fallback_app_local_dir: &Path) -> PathBuf {
     #[cfg(windows)]
     if Path::new(r"D:\").exists() {
@@ -953,6 +966,244 @@ pub fn auto_migrate_empty_shared_dir(
     }))
 }
 
+fn system_time_ms(time: std::io::Result<SystemTime>) -> u64 {
+    time.ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis().min(u64::MAX as u128) as u64)
+        .unwrap_or(0)
+}
+
+fn count_dir_files_shallow(dir: &Path, depth: u8) -> Result<(usize, u64), String> {
+    if depth > 4 {
+        return Err("备份目录层级过深，已拒绝扫描".into());
+    }
+    ensure_safe_existing_dir(dir, "备份目录")?;
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    let entries = fs::read_dir(dir).map_err(|_| "无法读取备份目录")?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&p) else {
+            continue;
+        };
+        if meta.file_type().is_symlink() || is_reparse_point(&meta) {
+            continue;
+        }
+        if meta.file_type().is_file() {
+            files += 1;
+            bytes = bytes.saturating_add(meta.len());
+        } else if meta.file_type().is_dir() {
+            let (f, b) = count_dir_files_shallow(&p, depth + 1)?;
+            files += f;
+            bytes = bytes.saturating_add(b);
+        }
+    }
+    Ok((files, bytes))
+}
+
+fn remove_safe_dir_recursive(dir: &Path, depth: u8) -> Result<usize, String> {
+    if depth > 4 {
+        return Err("目录层级过深，已中止清理".into());
+    }
+    let meta = match fs::symlink_metadata(dir) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(_) => return Err("无法访问目标子目录".into()),
+    };
+    if meta.file_type().is_symlink() || is_reparse_point(&meta) || !meta.file_type().is_dir() {
+        return Err("目标包含不受支持的符号链接或非目录项".into());
+    }
+    let mut removed = 0usize;
+    let entries = fs::read_dir(dir).map_err(|_| "无法读取目标子目录")?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        let m = fs::symlink_metadata(&p).map_err(|_| "无法检查子项权限")?;
+        if m.file_type().is_symlink() || is_reparse_point(&m) {
+            return Err("发现符号链接，已中止清理以防越权删除".into());
+        }
+        if m.file_type().is_file() {
+            fs::remove_file(&p).map_err(|_| format!("无法删除文件 {}", p.display()))?;
+            removed += 1;
+        } else if m.file_type().is_dir() {
+            removed += remove_safe_dir_recursive(&p, depth + 1)?;
+        }
+    }
+    fs::remove_dir(dir).map_err(|_| format!("无法移除目录 {}", dir.display()))?;
+    Ok(removed)
+}
+
+/// 从 `data-location.json` 的历史记录中移除指定目录路径。
+pub fn remove_recent_dir_entry(pointer_file: &Path, target: &Path) {
+    let mut pointer = load_pointer(pointer_file);
+    let target_key = path_key(target);
+    let before = pointer.recent_dirs.len();
+    pointer
+        .recent_dirs
+        .retain(|item| path_key(Path::new(item)) != target_key);
+    if pointer.recent_dirs.len() != before {
+        let _ = save_pointer(pointer_file, &pointer);
+    }
+}
+
+/// 列出当前数据目录下的历史配置备份与迁移备份记录，按时间倒序。
+pub fn list_backup_records(current_dir: &Path) -> Vec<BackupRecord> {
+    let mut records = Vec::new();
+    let cfg_dir = current_dir.join("config-backups");
+    if cfg_dir.is_dir() && ensure_safe_existing_dir(&cfg_dir, "配置备份目录").is_ok() {
+        if let Ok(entries) = fs::read_dir(&cfg_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let Ok(meta) = fs::symlink_metadata(&p) else {
+                    continue;
+                };
+                if !meta.file_type().is_file() || is_reparse_point(&meta) {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !name.to_ascii_lowercase().ends_with(".json") {
+                    continue;
+                }
+                records.push(BackupRecord {
+                    path: strip_verbatim_prefix(&resolve_logical_path(&p))
+                        .to_string_lossy()
+                        .into_owned(),
+                    name,
+                    kind: "config".into(),
+                    modified_ms: system_time_ms(meta.modified()),
+                    total_files: 1,
+                    total_bytes: meta.len(),
+                });
+            }
+        }
+    }
+
+    let mig_dir = current_dir.join("migration-backups");
+    if mig_dir.is_dir() && ensure_safe_existing_dir(&mig_dir, "迁移备份目录").is_ok() {
+        if let Ok(entries) = fs::read_dir(&mig_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                let Ok(meta) = fs::symlink_metadata(&p) else {
+                    continue;
+                };
+                if !meta.file_type().is_dir() || is_reparse_point(&meta) {
+                    continue;
+                }
+                let Ok((total_files, total_bytes)) = count_dir_files_shallow(&p, 0) else {
+                    continue;
+                };
+                records.push(BackupRecord {
+                    path: strip_verbatim_prefix(&resolve_logical_path(&p))
+                        .to_string_lossy()
+                        .into_owned(),
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    kind: "migration".into(),
+                    modified_ms: system_time_ms(meta.modified()),
+                    total_files,
+                    total_bytes,
+                });
+            }
+        }
+    }
+
+    records.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| b.name.cmp(&a.name)));
+    records
+}
+
+/// 仅针对已验证为历史候选目录的路径，删除白名单内的旧配置文件与缓存并从历史记录中移除。
+/// 若旧目录中包含其他无关文件则完整保留这些无关文件；若旧目录因此变空则同步清理空目录。
+pub fn delete_candidate_old_data_files(
+    current_dir: &Path,
+    target_dir: &Path,
+    allowed_candidates: &[CandidateOldDir],
+    pointer_file: &Path,
+) -> Result<usize, String> {
+    if paths_overlap(current_dir, target_dir) {
+        return Err("不能删除当前正在使用的数据目录或包含当前目录的路径".into());
+    }
+    let target_key = path_key(target_dir);
+    if !allowed_candidates
+        .iter()
+        .any(|c| path_key(Path::new(&c.path)) == target_key)
+    {
+        return Err("仅支持删除本机扫描识别到的历史配置目录，已拒绝任意路径删除".into());
+    }
+    ensure_safe_existing_dir(target_dir, "历史数据目录")?;
+
+    let mut removed = 0usize;
+    for name in USER_JSON_FILES {
+        for suffix in ["", ".bak", ".tmp"] {
+            let candidate_file = target_dir.join(format!("{name}{suffix}"));
+            if let Ok(meta) = fs::symlink_metadata(&candidate_file) {
+                if meta.file_type().is_file() && !is_reparse_point(&meta) {
+                    fs::remove_file(&candidate_file)
+                        .map_err(|_| format!("无法删除旧文件 {}", candidate_file.display()))?;
+                    removed += 1;
+                }
+            }
+        }
+    }
+    for extra in ["config-import.pending.json", "desktophub-lite.log"] {
+        let p = target_dir.join(extra);
+        if let Ok(meta) = fs::symlink_metadata(&p) {
+            if meta.file_type().is_file() && !is_reparse_point(&meta) {
+                fs::remove_file(&p).map_err(|_| format!("无法删除旧文件 {}", p.display()))?;
+                removed += 1;
+            }
+        }
+    }
+    for sub in ["clipboard-images", "icons", "migration-backups", "config-backups"] {
+        let sub_path = target_dir.join(sub);
+        if sub_path.exists() {
+            removed += remove_safe_dir_recursive(&sub_path, 0)?;
+        }
+    }
+    if fs::read_dir(target_dir)
+        .map(|mut it| it.next().is_none())
+        .unwrap_or(false)
+    {
+        let _ = fs::remove_dir(target_dir);
+    }
+    remove_recent_dir_entry(pointer_file, target_dir);
+    Ok(removed)
+}
+
+/// 删除当前数据目录下 `config-backups` 或 `migration-backups` 中的单条历史备份。
+pub fn delete_backup_entry(current_dir: &Path, target_path: &Path) -> Result<usize, String> {
+    let meta = fs::symlink_metadata(target_path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "目标备份文件或目录不存在".into()
+        } else {
+            format!("无法访问备份项：{e}")
+        }
+    })?;
+    if meta.file_type().is_symlink() || is_reparse_point(&meta) {
+        return Err("备份项不能是符号链接".into());
+    }
+    let Some(parent) = target_path.parent() else {
+        return Err("无效的备份路径".into());
+    };
+    let parent_key = path_key(parent);
+    let cfg_key = path_key(&current_dir.join("config-backups"));
+    let mig_key = path_key(&current_dir.join("migration-backups"));
+    if parent_key == cfg_key && meta.file_type().is_file() {
+        fs::remove_file(target_path).map_err(|_| "无法删除配置备份文件".to_string())?;
+        return Ok(1);
+    }
+    if parent_key == mig_key && meta.file_type().is_dir() {
+        return remove_safe_dir_recursive(target_path, 0);
+    }
+    Err("仅支持删除当前数据目录 config-backups 或 migration-backups 下的历史备份".into())
+}
+
+/// 清空当前数据目录下的全部历史配置备份与迁移备份。
+pub fn clear_all_backups(current_dir: &Path) -> Result<usize, String> {
+    let mut total = 0usize;
+    for record in list_backup_records(current_dir) {
+        total += delete_backup_entry(current_dir, Path::new(&record.path))?;
+    }
+    Ok(total)
+}
+
 // === TAURI_COMMANDS ===
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1005,6 +1256,7 @@ pub struct DataStorageStatus {
     pub auto_migrated_files: usize,
     pub current_summary: DataDirSummary,
     pub candidates: Vec<CandidateOldDir>,
+    pub backups: Vec<BackupRecord>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1118,6 +1370,7 @@ pub async fn get_data_storage_status(
             &pointer,
             &loc.extra_hint_dirs,
         );
+        let backups = list_backup_records(current_dir);
         Ok(DataStorageStatus {
             current_dir: display_clean(current_dir),
             default_shared_dir: display_clean(&loc.default_shared_dir),
@@ -1127,6 +1380,7 @@ pub async fn get_data_storage_status(
             auto_migrated_files: loc.auto_migrated_files,
             current_summary,
             candidates,
+            backups,
         })
     })
     .await
@@ -1373,6 +1627,81 @@ pub fn restart_for_data_change(app: AppHandle, window: WebviewWindow) -> Result<
     }
     app.request_restart();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_old_data_dir(
+    app: AppHandle,
+    window: WebviewWindow,
+    target_dir: String,
+) -> Result<usize, String> {
+    settings_only(&window)?;
+    let trimmed = target_dir.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("请先指定要清理的历史数据目录".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<crate::AppState>();
+        let loc = app.state::<DataLocationState>();
+        let _gate = state
+            .configuration_gate
+            .lock()
+            .map_err(|_| "配置正在写入，请稍后重试")?;
+        let current_dir = state.store.root();
+        let pointer = load_pointer(&loc.pointer_file);
+        let allowed = discover_candidate_old_dirs_with_hints(
+            current_dir,
+            loc.exe_dir.as_deref(),
+            &loc.app_local_dir,
+            &loc.default_shared_dir,
+            &pointer,
+            &loc.extra_hint_dirs,
+        );
+        let removed = delete_candidate_old_data_files(
+            current_dir,
+            Path::new(&trimmed),
+            &allowed,
+            &loc.pointer_file,
+        )?;
+        crate::log_info!("已清理历史数据目录中的 {} 个旧配置文件：{}", removed, trimmed);
+        Ok(removed)
+    })
+    .await
+    .map_err(|_| "删除旧配置任务未完成".to_string())?
+}
+
+#[tauri::command]
+pub async fn delete_data_backup(
+    app: AppHandle,
+    window: WebviewWindow,
+    backup_path: Option<String>,
+    clear_all: bool,
+) -> Result<usize, String> {
+    settings_only(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<crate::AppState>();
+        let _gate = state
+            .configuration_gate
+            .lock()
+            .map_err(|_| "配置正在写入，请稍后重试")?;
+        let current_dir = state.store.root();
+        if clear_all {
+            let count = clear_all_backups(current_dir)?;
+            crate::log_info!("已清空全部历史配置/迁移备份文件（共 {} 个）", count);
+            Ok(count)
+        } else {
+            let path = backup_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "请先指定要删除的备份记录".to_string())?;
+            let count = delete_backup_entry(current_dir, Path::new(path))?;
+            crate::log_info!("已删除历史备份：{}", path);
+            Ok(count)
+        }
+    })
+    .await
+    .map_err(|_| "删除历史备份任务未完成".to_string())?
 }
 
 // === TESTS ===
@@ -1810,5 +2139,68 @@ mod tests {
             fs::read(dst.join("pack-scripts.json")).unwrap(),
             fs::read(src.join("pack-scripts.json")).unwrap()
         );
+    }
+
+    #[test]
+    fn delete_old_data_dir_removes_only_app_files_and_protects_current_dir() {
+        let root = temp_case("delete_old_data");
+        let current = root.join("current");
+        let old = root.join("old-ver").join("data");
+        let app_local = root.join("local");
+        let pointer_file = app_local.join(POINTER_FILE);
+        fs::create_dir_all(&app_local).unwrap();
+        write_rich_user_data(&current);
+        write_rich_user_data(&old);
+        fs::write(old.join("personal-notes.txt"), b"keep-me").unwrap();
+
+        let mut ptr = DataLocationPointer::default();
+        ptr.recent_dirs = vec![old.to_string_lossy().into_owned()];
+        save_pointer(&pointer_file, &ptr).unwrap();
+
+        let candidates = discover_candidate_old_dirs_with_hints(
+            &current,
+            None,
+            &app_local,
+            &current,
+            &ptr,
+            &[],
+        );
+        assert_eq!(candidates.len(), 1);
+
+        // 不得删除当前正在使用的数据目录或未授权路径
+        assert!(delete_candidate_old_data_files(&current, &current, &candidates, &pointer_file).is_err());
+        assert!(delete_candidate_old_data_files(&current, &root.join("unrelated"), &candidates, &pointer_file).is_err());
+
+        let removed = delete_candidate_old_data_files(&current, &old, &candidates, &pointer_file).unwrap();
+        assert!(removed >= 10);
+        assert!(!old.join("ui-preferences.json").exists());
+        assert!(!old.join("clipboard-images").exists());
+        assert_eq!(fs::read(old.join("personal-notes.txt")).unwrap(), b"keep-me");
+        assert!(load_pointer(&pointer_file).recent_dirs.is_empty());
+    }
+
+    #[test]
+    fn backup_records_listing_and_scoped_deletion_work_safely() {
+        let root = temp_case("backup_delete");
+        let cfg_dir = root.join("config-backups");
+        let mig_dir = root.join("migration-backups").join("before-migrate-100");
+        fs::create_dir_all(&cfg_dir).unwrap();
+        fs::create_dir_all(&mig_dir).unwrap();
+        let cfg_file = cfg_dir.join("before-import-100.json");
+        fs::write(&cfg_file, br#"{"ok":true}"#).unwrap();
+        fs::write(mig_dir.join("ui-preferences.json"), br#"{"theme":"dark"}"#).unwrap();
+        let secret_outside = root.join("ui-preferences.json");
+        fs::write(&secret_outside, br#"{"theme":"dark"}"#).unwrap();
+
+        let records = list_backup_records(&root);
+        assert_eq!(records.len(), 2);
+        // 不允许通过 delete_backup_entry 删除工作目录顶层有效配置
+        assert!(delete_backup_entry(&root, &secret_outside).is_err());
+        assert!(secret_outside.is_file());
+
+        assert_eq!(delete_backup_entry(&root, &cfg_file).unwrap(), 1);
+        assert!(!cfg_file.exists());
+        assert_eq!(clear_all_backups(&root).unwrap(), 1);
+        assert!(list_backup_records(&root).is_empty());
     }
 }

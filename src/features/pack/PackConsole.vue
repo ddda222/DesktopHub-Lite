@@ -12,6 +12,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import { gsap, vGsapPulse } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { invokeHost, isDesktop, listenHost, pickApplicationTarget } from '@/lib/desktop/desktop'
@@ -107,6 +108,21 @@ watch(progress, (pct) => {
 }, { flush: 'post' })
 
 const adbReady = computed(() => !!adb.value?.serial)
+const adbDeviceOptions = computed(() => [
+  { value: '', label: '选择设备…' },
+  ...(adb.value?.devices ?? []).map(device => ({
+    value: device.serial,
+    label: `${device.model || device.serial} · ${device.serial}`
+  }))
+])
+const scriptEnvOptions = [
+  { value: 'local', label: '本地联调' },
+  { value: 'remote', label: '正式远程' }
+] as const
+const scriptKindOptions = [
+  { value: 'command', label: '短命令' },
+  { value: 'pack', label: '云打包长任务' }
+] as const
 const adbStateTone = computed(() => {
   if (adbReady.value) return 'is-on'
   if (adb.value?.error && !adb.value.devices.length) return 'is-err'
@@ -532,18 +548,15 @@ function openPackSettings(): void {
       <div class="adb-main">
         <div class="adb-device">
           <span class="status-dot" :class="adbStateTone" aria-hidden="true" />
-          <select
+          <ThemedSelect
             v-if="(adb?.devices.length ?? 0) > 1"
             class="device-select"
-            :value="adb?.serial ?? ''"
+            size="sm"
+            :model-value="adb?.serial ?? ''"
+            :options="adbDeviceOptions"
             aria-label="选择调试设备"
-            @change="chooseDevice(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">选择设备…</option>
-            <option v-for="device in adb?.devices" :key="device.serial" :value="device.serial">
-              {{ device.model || device.serial }} · {{ device.serial }}
-            </option>
-          </select>
+            @change="val => chooseDevice(String(val))"
+          />
           <span v-else-if="adb?.serial" class="device-text" :title="adb.serial">
             {{ adb.devices[0]?.model || '已连接' }} · <code>{{ adb.serial }}</code>
           </span>
@@ -615,20 +628,24 @@ function openPackSettings(): void {
         </label>
 
         <div class="field-row">
-          <label class="field">
+          <div class="field">
             <span>环境</span>
-            <select v-model="editing.env">
-              <option value="local">本地联调</option>
-              <option value="remote">正式远程</option>
-            </select>
-          </label>
-          <label class="field">
+            <ThemedSelect
+              v-model="editing.env"
+              size="sm"
+              :options="scriptEnvOptions"
+              aria-label="脚本运行环境"
+            />
+          </div>
+          <div class="field">
             <span>类型</span>
-            <select v-model="editing.kind">
-              <option value="command">短命令</option>
-              <option value="pack">云打包长任务</option>
-            </select>
-          </label>
+            <ThemedSelect
+              v-model="editing.kind"
+              size="sm"
+              :options="scriptKindOptions"
+              aria-label="脚本类型"
+            />
+          </div>
           <label class="field">
             <span>预估（秒）</span>
             <input v-model.number="editing.estimateSec" type="number" min="0" max="7200" />
@@ -1296,13 +1313,6 @@ function openPackSettings(): void {
   flex: 1;
   min-width: 0;
   max-width: 210px;
-  height: 24px;
-  padding: 0 6px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--surface-2);
-  color: var(--text);
-  font-size: 11px;
 }
 .adb-port {
   display: inline-flex;

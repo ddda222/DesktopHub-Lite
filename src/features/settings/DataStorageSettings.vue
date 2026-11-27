@@ -33,6 +33,15 @@ export interface CandidateOldDir {
   summary: DataDirSummary
 }
 
+export interface BackupRecord {
+  path: string
+  name: string
+  kind: 'config' | 'migration' | string
+  modifiedMs: number
+  totalFiles: number
+  totalBytes: number
+}
+
 export interface DataStorageStatus {
   currentDir: string
   defaultSharedDir: string
@@ -42,6 +51,7 @@ export interface DataStorageStatus {
   autoMigratedFiles?: number
   currentSummary: DataDirSummary
   candidates: CandidateOldDir[]
+  backups: BackupRecord[]
 }
 
 export interface QuickDataPrompt {
@@ -70,10 +80,13 @@ export interface ImportOldDataPreview {
 
 const status = ref<DataStorageStatus | null>(null)
 const loading = ref(false)
-const busy = ref<'open' | 'pick-switch' | 'pick-import' | 'apply' | 'restart' | null>(null)
+const busy = ref<'open' | 'pick-switch' | 'pick-import' | 'apply' | 'restart' | 'delete' | null>(null)
 const feedback = ref('')
 const failed = ref(false)
 const restartInfo = ref<{ message: string; backupDir?: string | null } | null>(null)
+const confirmDeleteOldPath = ref<string | null>(null)
+const confirmDeleteBackupPath = ref<string | null>(null)
+const confirmClearAllBackups = ref(false)
 
 const switchPreview = ref<SwitchDataDirPreview | null>(null)
 const importPreview = ref<ImportOldDataPreview | null>(null)
@@ -198,6 +211,16 @@ function buildDemoStatus(): DataStorageStatus {
           corruptedFiles: []
         }
       }
+    ],
+    backups: [
+      {
+        path: 'D:\\DesktopHub-Data\\config-backups\\before-import-demo.json',
+        name: 'before-import-demo.json',
+        kind: 'config',
+        modifiedMs: Date.now() - 86400_000,
+        totalFiles: 1,
+        totalBytes: 18432
+      }
     ]
   }
 }
@@ -227,6 +250,90 @@ async function focusPreview(): Promise<void> {
 function clearPreviews(): void {
   switchPreview.value = null
   importPreview.value = null
+  confirmDeleteOldPath.value = null
+  confirmDeleteBackupPath.value = null
+  confirmClearAllBackups.value = false
+}
+
+function formatBackupTime(ms: number): string {
+  if (!ms) return '未知时间'
+  const date = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+async function confirmDeleteOldDir(targetDir: string): Promise<void> {
+  if (busy.value || hasPendingRestart.value) return
+  busy.value = 'delete'
+  feedback.value = ''
+  failed.value = false
+  try {
+    if (!isDesktop) {
+      if (status.value) {
+        status.value.candidates = status.value.candidates.filter(item => item.path !== targetDir)
+      }
+      feedback.value = '演示：已从列表并模拟清理该历史配置目录。'
+    } else {
+      const removed = await invokeHost<number>('delete_old_data_dir', { targetDir })
+      await loadStatus()
+      feedback.value = `已从磁盘清理 ${removed} 个旧配置文件，并移除该历史记录。`
+    }
+    confirmDeleteOldPath.value = null
+  } catch (error) {
+    failed.value = true
+    feedback.value = `删除旧配置失败：${String(error)}`
+  } finally {
+    busy.value = null
+  }
+}
+
+async function confirmDeleteBackup(backupPath: string): Promise<void> {
+  if (busy.value) return
+  busy.value = 'delete'
+  feedback.value = ''
+  failed.value = false
+  try {
+    if (!isDesktop) {
+      if (status.value) {
+        status.value.backups = status.value.backups.filter(item => item.path !== backupPath)
+      }
+      feedback.value = '演示：已移除该历史备份记录。'
+    } else {
+      await invokeHost<number>('delete_data_backup', { backupPath, clearAll: false })
+      await loadStatus()
+      feedback.value = '已删除该历史备份。'
+    }
+    confirmDeleteBackupPath.value = null
+  } catch (error) {
+    failed.value = true
+    feedback.value = `删除备份失败：${String(error)}`
+  } finally {
+    busy.value = null
+  }
+}
+
+async function confirmClearBackups(): Promise<void> {
+  if (busy.value) return
+  busy.value = 'delete'
+  feedback.value = ''
+  failed.value = false
+  try {
+    if (!isDesktop) {
+      if (status.value) status.value.backups = []
+      feedback.value = '演示：已清空全部历史备份。'
+    } else {
+      const removed = await invokeHost<number>('delete_data_backup', { backupPath: null, clearAll: true })
+      await loadStatus()
+      feedback.value = `已清空全部历史备份（共删除 ${removed} 个文件）。`
+    }
+    confirmClearAllBackups.value = false
+    confirmDeleteBackupPath.value = null
+  } catch (error) {
+    failed.value = true
+    feedback.value = `清空历史备份失败：${String(error)}`
+  } finally {
+    busy.value = null
+  }
 }
 
 async function openCurrentDir(): Promise<void> {
@@ -722,6 +829,96 @@ watch(() => state.ui.settingsOpen, open => {
             >
               切换到此目录
             </button>
+            <button
+              class="btn btn-danger"
+              type="button"
+              :disabled="Boolean(busy) || hasPendingRestart"
+              @click="confirmDeleteOldPath = confirmDeleteOldPath === item.path ? null : item.path"
+            >
+              删除旧配置
+            </button>
+          </div>
+          <div v-if="confirmDeleteOldPath === item.path" class="candidate-confirm" role="alert">
+            <span>将直接从磁盘删除该目录下的 DesktopHub 旧配置文件与缓存并移除此记录，操作不可恢复，是否继续？</span>
+            <div class="actions">
+              <button
+                class="btn btn-danger is-confirming"
+                type="button"
+                :disabled="Boolean(busy)"
+                @click="confirmDeleteOldDir(item.path)"
+              >
+                {{ busy === 'delete' ? '正在清理…' : '确认删除' }}
+              </button>
+              <button class="btn" type="button" :disabled="Boolean(busy)" @click="confirmDeleteOldPath = null">
+                取消
+              </button>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="status && status.backups.length" class="candidate-block">
+      <div class="backup-head">
+        <p class="field-label">历史配置与迁移备份（{{ status.backups.length }}）</p>
+        <button
+          v-if="!confirmClearAllBackups"
+          class="btn btn-quiet-danger"
+          type="button"
+          :disabled="Boolean(busy)"
+          @click="confirmClearAllBackups = true; confirmDeleteBackupPath = null"
+        >
+          清空全部备份
+        </button>
+        <div v-else class="actions" role="alert">
+          <button
+            class="btn btn-danger is-confirming"
+            type="button"
+            :disabled="Boolean(busy)"
+            @click="confirmClearBackups"
+          >
+            {{ busy === 'delete' ? '清空中…' : '确认清空全部' }}
+          </button>
+          <button class="btn" type="button" :disabled="Boolean(busy)" @click="confirmClearAllBackups = false">
+            取消
+          </button>
+        </div>
+      </div>
+      <ul class="candidate-list">
+        <li v-for="bak in status.backups" :key="bak.path" class="candidate-item">
+          <div class="candidate-meta">
+            <div class="candidate-title">
+              <strong>{{ bak.name }}</strong>
+              <span class="tag">{{ bak.kind === 'migration' ? '迁移备份' : '配置备份' }}</span>
+              <span class="tag">{{ bak.totalFiles }} 个文件 · {{ formatBytes(bak.totalBytes) }}</span>
+            </div>
+            <p class="hint candidate-counts">
+              备份时间：{{ formatBackupTime(bak.modifiedMs) }} · <code>{{ bak.path }}</code>
+            </p>
+          </div>
+          <div class="actions candidate-actions">
+            <button
+              v-if="confirmDeleteBackupPath !== bak.path"
+              class="btn btn-danger"
+              type="button"
+              :disabled="Boolean(busy)"
+              @click="confirmDeleteBackupPath = bak.path; confirmClearAllBackups = false"
+            >
+              删除
+            </button>
+            <template v-else>
+              <button
+                class="btn btn-danger is-confirming"
+                type="button"
+                :disabled="Boolean(busy)"
+                @click="confirmDeleteBackup(bak.path)"
+              >
+                {{ busy === 'delete' ? '删除中…' : '确认删除' }}
+              </button>
+              <button class="btn" type="button" :disabled="Boolean(busy)" @click="confirmDeleteBackupPath = null">
+                取消
+              </button>
+            </template>
           </div>
         </li>
       </ul>
@@ -825,6 +1022,28 @@ watch(() => state.ui.settingsOpen, open => {
 .candidate-meta { flex: 1; min-width: 200px; }
 .candidate-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; font-size: 13px; }
 .candidate-counts { margin: 6px 0 0; }
+.candidate-confirm {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: var(--danger-weak);
+  border: 1px solid var(--danger);
+  font-size: 12px;
+  color: var(--danger);
+}
+.backup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.backup-head .field-label { margin: 0; }
 .migration-preview {
   margin-top: 14px;
   padding: 16px;

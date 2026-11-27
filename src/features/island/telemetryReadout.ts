@@ -3,6 +3,7 @@
  */
 
 export type TelemetryMode = 'off' | 'smart' | 'always'
+export type TelemetryStyle = 'text' | 'bar' | 'ring' | 'pulse'
 
 export interface TelemetryPrefs {
   telemetryMode: TelemetryMode
@@ -23,6 +24,12 @@ export interface TelemetrySegment {
   prefix: string
   value: string
   accent: boolean
+  metric?: 'net' | 'cpu' | 'memory'
+  percent?: number | null
+}
+
+export function normalizeTelemetryStyle(style: unknown): TelemetryStyle {
+  return style === 'text' || style === 'bar' || style === 'ring' || style === 'pulse' ? style : 'bar'
 }
 
 export interface TelemetryReadout {
@@ -145,30 +152,32 @@ export function buildTelemetryReadout(
       const upDominant = sample.upBps > sample.downBps * 1.5 && sample.upBps >= SMART_NET_SUSTAIN_BPS
       const arrow = upDominant ? '↑' : '↓'
       const primary = upDominant ? sample.upBps : sample.downBps
-      segments.push({ prefix: arrow, value: formatCompactSpeed(primary, verbose), accent: true })
+      segments.push({ prefix: arrow, value: formatCompactSpeed(primary, verbose), accent: true, metric: 'net', percent: null })
       ariaParts.push(`${upDominant ? '上传' : '下载'} ${formatCompactSpeed(primary, true)}`)
       tipParts.push(`下载 ${formatCompactSpeed(sample.downBps, true)} · 上传 ${formatCompactSpeed(sample.upBps, true)}`)
     } else if (sample.netState === 'unavailable') {
-      segments.push({ prefix: verbose ? '网速' : '↓', value: '未知', accent: false })
+      segments.push({ prefix: verbose ? '网速' : '↓', value: '未知', accent: false, metric: 'net', percent: null })
       ariaParts.push('网速未知')
       tipParts.push('未检测到活动的物理以太网或 Wi-Fi')
     } else {
-      segments.push({ prefix: '↓', value: verbose ? '-- KB/s' : '--', accent: true })
+      segments.push({ prefix: '↓', value: verbose ? '-- KB/s' : '--', accent: true, metric: 'net', percent: null })
       ariaParts.push('网速预热中')
       tipParts.push('网速采样预热中')
     }
   }
 
   if (prefs.telemetryCpu) {
-    const val = sample.cpuPercent !== null ? `${Math.round(sample.cpuPercent)}%` : '--%'
-    segments.push({ prefix: 'CPU', value: val, accent: false })
+    const pct = sample.cpuPercent !== null ? Math.round(sample.cpuPercent) : null
+    const val = pct !== null ? `${pct}%` : '--%'
+    segments.push({ prefix: 'CPU', value: val, accent: false, metric: 'cpu', percent: pct })
     ariaParts.push(`处理器 ${val}`)
     tipParts.push(`处理器 ${val}`)
   }
 
   if (prefs.telemetryMemory) {
-    const val = sample.memoryPercent !== null ? `${Math.round(sample.memoryPercent)}%` : '--%'
-    segments.push({ prefix: '内存', value: val, accent: false })
+    const pct = sample.memoryPercent !== null ? Math.round(sample.memoryPercent) : null
+    const val = pct !== null ? `${pct}%` : '--%'
+    segments.push({ prefix: '内存', value: val, accent: false, metric: 'memory', percent: pct })
     ariaParts.push(`内存 ${val}`)
     tipParts.push(`内存 ${val}`)
   }

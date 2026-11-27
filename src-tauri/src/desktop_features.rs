@@ -26,6 +26,7 @@ pub struct IslandAppearance {
     pub webgl: bool,
     pub hide_from_capture: bool,
     pub telemetry_mode: String,
+    pub telemetry_style: String,
     pub telemetry_net: bool,
     pub telemetry_cpu: bool,
     pub telemetry_memory: bool,
@@ -44,6 +45,7 @@ impl Default for IslandAppearance {
             webgl: true,
             hide_from_capture: false,
             telemetry_mode: "smart".into(),
+            telemetry_style: "bar".into(),
             telemetry_net: true,
             telemetry_cpu: true,
             telemetry_memory: true,
@@ -65,6 +67,10 @@ impl IslandAppearance {
         matches!(mode, "off" | "smart" | "always")
     }
 
+    pub fn valid_telemetry_style(style: &str) -> bool {
+        matches!(style, "text" | "bar" | "ring" | "pulse")
+    }
+
     pub fn valid_motion_mode(mode: &str) -> bool {
         matches!(mode, "glide" | "sweep" | "bounce" | "focus" | "flicker" | "step" | "unroll")
     }
@@ -80,6 +86,9 @@ impl IslandAppearance {
         }
         if !Self::valid_telemetry_mode(&self.telemetry_mode) {
             self.telemetry_mode = "smart".into();
+        }
+        if !Self::valid_telemetry_style(&self.telemetry_style) {
+            self.telemetry_style = "bar".into();
         }
         if self.telemetry_mode != "off" && !self.has_any_telemetry_metric() {
             self.telemetry_mode = "off".into();
@@ -111,6 +120,9 @@ pub fn save_island_appearance(
     }
     if !IslandAppearance::valid_telemetry_mode(&appearance.telemetry_mode) {
         return Err("无效的胶囊微读数模式".into());
+    }
+    if !IslandAppearance::valid_telemetry_style(&appearance.telemetry_style) {
+        return Err("无效的微读数样式".into());
     }
     if appearance.telemetry_mode != "off" && !appearance.has_any_telemetry_metric() {
         return Err("开启胶囊微读数时，请至少勾选一项系统指标".into());

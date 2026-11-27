@@ -6,6 +6,7 @@ import Icon from '@/components/Icon.vue'
 import MotionSaveButton from '@/components/MotionSaveButton.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
+import ThemedSelect from '@/components/ThemedSelect.vue'
 import { animateFlipFromState, Flip, gsap, vGsapPress } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import DesktopFeatures from './DesktopFeatures.vue'
@@ -279,10 +280,12 @@ async function saveTranslation(): Promise<void> {
   } finally { translationBusy.value = false }
 }
 
-function onProviderChange(event: Event): void {
-  const el = event.target as HTMLSelectElement | null
-  if (!el) return
-  const provider = translationProviderPresets.find((item) => item.id === el.value)
+const providerOptions = computed(() =>
+  translationProviderPresets.map(provider => ({ value: provider.id, label: provider.name }))
+)
+
+function onProviderChange(value: string | number): void {
+  const provider = translationProviderPresets.find((item) => item.id === String(value))
   if (!provider) return
   translationDraft.value.providerId = provider.id
   translationDraft.value.baseUrl = provider.baseUrl
@@ -291,10 +294,8 @@ function onProviderChange(event: Event): void {
   translationFeedback.value = ''
 }
 
-function onDirectionChange(event: Event): void {
-  const el = event.target as HTMLSelectElement | null
-  if (!el) return
-  translationDraft.value.direction = el.value as TranslateDirection
+function onDirectionChange(value: string | number): void {
+  translationDraft.value.direction = String(value) as TranslateDirection
 }
 
 /** 密钥输入只存在于内存，保存后立即清空，界面不回显任何密钥内容 */
@@ -573,41 +574,25 @@ onBeforeUnmount(() => {
             <p class="hint">配置模型服务商、接口与密钥，供文本翻译与剪贴板 AI 解读共用。所有请求均需手动触发，不会自动读取或上传剪贴板内容。</p>
 
             <div class="field-grid">
-              <label class="field">
+              <div class="field">
                 <span class="field-label">服务商</span>
-                <span class="select-wrap">
-                  <select
-                    class="control select"
-                    :value="translationDraft.providerId"
-                    @change="onProviderChange"
-                  >
-                    <option
-                      v-for="provider in translationProviderPresets"
-                      :key="provider.id"
-                      :value="provider.id"
-                    >
-                      {{ provider.name }}
-                    </option>
-                  </select>
-                  <Icon class="chev" name="chevron-down" :size="12" />
-                </span>
-              </label>
+                <ThemedSelect
+                  :model-value="translationDraft.providerId"
+                  :options="providerOptions"
+                  aria-label="翻译服务商"
+                  @change="onProviderChange"
+                />
+              </div>
 
-              <label class="field">
+              <div class="field">
                 <span class="field-label">默认翻译方向</span>
-                <span class="select-wrap">
-                  <select
-                    class="control select"
-                    :value="translationDraft.direction"
-                    @change="onDirectionChange"
-                  >
-                    <option v-for="opt in directionOptions" :key="opt.value" :value="opt.value">
-                      {{ opt.label }}
-                    </option>
-                  </select>
-                  <Icon class="chev" name="chevron-down" :size="12" />
-                </span>
-              </label>
+                <ThemedSelect
+                  :model-value="translationDraft.direction"
+                  :options="directionOptions"
+                  aria-label="默认翻译方向"
+                  @change="onDirectionChange"
+                />
+              </div>
 
               <label class="field field-wide">
                 <span class="field-label">接口地址</span>
