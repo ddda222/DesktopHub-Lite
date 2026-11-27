@@ -143,7 +143,13 @@ pub fn start(app: AppHandle) {
                     last_flash = None;
                 }
             }
-            std::thread::sleep(Duration::from_millis(85));
+            // 只有存在待清除的提醒时才需要高频检查前台窗口；其余时间等待任务栏消息或 500ms 超时。
+            // 任务栏闪烁消息到达会立即唤醒线程，不增加提醒延迟。
+            let pending = enabled && state.ui.snapshot().wechat_attention;
+            let timeout = if pending { 85 } else { 500 };
+            let _ = unsafe {
+                MsgWaitForMultipleObjectsEx(None, timeout, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+            };
         }
         if let Some((hwnd, _)) = hook {
             unsafe {

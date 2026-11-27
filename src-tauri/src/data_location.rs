@@ -1099,34 +1099,38 @@ fn build_import_preview(
 }
 
 #[tauri::command]
-pub fn get_data_storage_status(
+pub async fn get_data_storage_status(
     app: AppHandle,
     window: WebviewWindow,
 ) -> Result<DataStorageStatus, String> {
     settings_only(&window)?;
-    let state = app.state::<crate::AppState>();
-    let loc = app.state::<DataLocationState>();
-    let current_dir = state.store.root();
-    let pointer = load_pointer(&loc.pointer_file);
-    let current_summary = inspect_data_dir(current_dir)?;
-    let candidates = discover_candidate_old_dirs_with_hints(
-        current_dir,
-        loc.exe_dir.as_deref(),
-        &loc.app_local_dir,
-        &loc.default_shared_dir,
-        &pointer,
-        &loc.extra_hint_dirs,
-    );
-    Ok(DataStorageStatus {
-        current_dir: display_clean(current_dir),
-        default_shared_dir: display_clean(&loc.default_shared_dir),
-        mode: loc.mode.clone(),
-        pending_restart: loc.pending_restart.load(Ordering::Relaxed),
-        auto_migrated_from: loc.auto_migrated_from.clone(),
-        auto_migrated_files: loc.auto_migrated_files,
-        current_summary,
-        candidates,
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<crate::AppState>();
+        let loc = app.state::<DataLocationState>();
+        let current_dir = state.store.root();
+        let pointer = load_pointer(&loc.pointer_file);
+        let current_summary = inspect_data_dir(current_dir)?;
+        let candidates = discover_candidate_old_dirs_with_hints(
+            current_dir,
+            loc.exe_dir.as_deref(),
+            &loc.app_local_dir,
+            &loc.default_shared_dir,
+            &pointer,
+            &loc.extra_hint_dirs,
+        );
+        Ok(DataStorageStatus {
+            current_dir: display_clean(current_dir),
+            default_shared_dir: display_clean(&loc.default_shared_dir),
+            mode: loc.mode.clone(),
+            pending_restart: loc.pending_restart.load(Ordering::Relaxed),
+            auto_migrated_from: loc.auto_migrated_from.clone(),
+            auto_migrated_files: loc.auto_migrated_files,
+            current_summary,
+            candidates,
+        })
     })
+    .await
+    .map_err(|_| "数据目录检查中断".to_string())?
 }
 
 #[tauri::command]
@@ -1156,22 +1160,26 @@ pub async fn pick_data_dir_for_switch(
 }
 
 #[tauri::command]
-pub fn preview_switch_data_dir(
+pub async fn preview_switch_data_dir(
     app: AppHandle,
     window: WebviewWindow,
     target_dir: String,
 ) -> Result<SwitchDataDirPreview, String> {
     settings_only(&window)?;
-    let trimmed = target_dir.trim();
+    let trimmed = target_dir.trim().to_string();
     if trimmed.is_empty() {
         crate::log_warn!("数据目录操作未完成（预览切换）：目标目录为空");
         return Err("请先指定目标目录".into());
     }
-    let state = app.state::<crate::AppState>();
-    build_switch_preview(state.store.root(), Path::new(trimmed)).map_err(|error| {
-        crate::log_warn!("数据目录操作未完成（预览切换）：{error}");
-        error
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<crate::AppState>();
+        build_switch_preview(state.store.root(), Path::new(&trimmed)).map_err(|error| {
+            crate::log_warn!("数据目录操作未完成（预览切换）：{error}");
+            error
+        })
     })
+    .await
+    .map_err(|_| "数据目录检查中断".to_string())?
 }
 
 #[tauri::command]
@@ -1271,22 +1279,26 @@ pub async fn pick_old_data_dir_for_import(
 }
 
 #[tauri::command]
-pub fn preview_old_data_import(
+pub async fn preview_old_data_import(
     app: AppHandle,
     window: WebviewWindow,
     source_dir: String,
 ) -> Result<ImportOldDataPreview, String> {
     settings_only(&window)?;
-    let trimmed = source_dir.trim();
+    let trimmed = source_dir.trim().to_string();
     if trimmed.is_empty() {
         crate::log_warn!("数据目录操作未完成（预览旧版导入）：源目录为空");
         return Err("请先指定旧版数据目录".into());
     }
-    let state = app.state::<crate::AppState>();
-    build_import_preview(state.store.root(), Path::new(trimmed)).map_err(|error| {
-        crate::log_warn!("数据目录操作未完成（预览旧版导入）：{error}");
-        error
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<crate::AppState>();
+        build_import_preview(state.store.root(), Path::new(&trimmed)).map_err(|error| {
+            crate::log_warn!("数据目录操作未完成（预览旧版导入）：{error}");
+            error
+        })
     })
+    .await
+    .map_err(|_| "数据目录检查中断".to_string())?
 }
 
 #[tauri::command]

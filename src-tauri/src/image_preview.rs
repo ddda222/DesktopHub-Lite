@@ -12,13 +12,18 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 
 #[tauri::command]
 pub async fn open_image_preview(app: AppHandle, source: String, id: String) -> Result<(), String> {
-    let state = app.state::<crate::AppState>();
     let preview = match source.as_str() {
         "clipboard" => Preview {
-            data_uri: crate::clipboard_service::read_clipboard_thumbnail(state, id, Some(true))?,
+            data_uri: crate::clipboard_service::read_clipboard_thumbnail(
+                app.clone(),
+                id,
+                Some(true),
+            )
+            .await?,
             name: "剪贴板图片".into(),
         },
         "shelf" => {
+            let state = app.state::<crate::AppState>();
             let paths = crate::file_shelf::selected_paths(&state, &[id])?;
             let path = std::path::Path::new(&paths[0]);
             let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();

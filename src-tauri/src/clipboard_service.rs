@@ -398,35 +398,44 @@ pub(crate) fn read_clipboard_image_bytes(state: &AppState, id: &str) -> Result<V
     Ok(bytes)
 }
 #[tauri::command]
-pub fn read_clipboard_thumbnail(
-    state: State<'_, AppState>,
+pub async fn read_clipboard_thumbnail(
+    app: AppHandle,
     id: String,
     full: Option<bool>,
 ) -> Result<String, String> {
-    let index = state.clipboard.lock().unwrap_or_else(|e| e.into_inner());
-    let entry = index
-        .entries
-        .iter()
-        .find(|item| item.id == id)
-        .ok_or("记录已不存在")?;
-    let bytes = std::fs::read(image_path(entry, &state)?).map_err(|_| "图片文件缺失")?;
-    if bytes.len() > 32 * 1024 * 1024 {
-        return Err("图片超过限制".into());
-    }
-    if full.unwrap_or(false) {
-        return Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)));
-    }
-    let image = image::load_from_memory(&bytes)
-        .map_err(|_| "图片无法解码")?
-        .thumbnail(320, 240);
-    let mut output = Cursor::new(Vec::new());
-    image
-        .write_to(&mut output, image::ImageFormat::Png)
-        .map_err(|_| "缩略图生成失败")?;
-    Ok(format!(
-        "data:image/png;base64,{}",
-        STANDARD.encode(output.into_inner())
-    ))
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let state = app.state::<AppState>();
+        // 只在锁内解析图片路径；读取、解码、缩放都放到锁外，避免阻塞剪贴板监听线程。
+        let path = {
+            let index = state.clipboard.lock().unwrap_or_else(|e| e.into_inner());
+            let entry = index
+                .entries
+                .iter()
+                .find(|item| item.id == id)
+                .ok_or("记录已不存在")?;
+            image_path(entry, &state)?
+        };
+        let bytes = std::fs::read(path).map_err(|_| "图片文件缺失")?;
+        if bytes.len() > 32 * 1024 * 1024 {
+            return Err("图片超过限制".into());
+        }
+        if full.unwrap_or(false) {
+            return Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)));
+        }
+        let image = image::load_from_memory(&bytes)
+            .map_err(|_| "图片无法解码")?
+            .thumbnail(320, 240);
+        let mut output = Cursor::new(Vec::new());
+        image
+            .write_to(&mut output, image::ImageFormat::Png)
+            .map_err(|_| "缩略图生成失败")?;
+        Ok(format!(
+            "data:image/png;base64,{}",
+            STANDARD.encode(output.into_inner())
+        ))
+    })
+    .await
+    .map_err(|_| "缩略图读取中断".to_string())?
 }
 fn mutate(
     app: &AppHandle,

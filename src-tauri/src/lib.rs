@@ -686,8 +686,15 @@ struct ImportResult {
 ///
 /// 只读这两个目录，不做全盘扫描；同一个目标已经存在就跳过，不重复添加。
 #[tauri::command]
-fn import_desktop_shortcuts(app: AppHandle, category_id: Option<String>) -> Result<ImportResult, String> {
-    import_application_targets(&app, category_id, applications::desktop_shortcuts())
+async fn import_desktop_shortcuts(
+    app: AppHandle,
+    category_id: Option<String>,
+) -> Result<ImportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        import_application_targets(&app, category_id, applications::desktop_shortcuts())
+    })
+    .await
+    .map_err(|_| "桌面快捷方式导入中断".to_string())?
 }
 
 #[tauri::command]
