@@ -6,7 +6,7 @@ import Icon from '@/components/Icon.vue'
 import MotionSaveButton from '@/components/MotionSaveButton.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
-import { animateFlipFromState, animateSplitReveal, Flip, gsap, vGsapPress } from '@/lib/gsapMotion'
+import { animateFlipFromState, Flip, gsap, vGsapPress } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import DesktopFeatures from './DesktopFeatures.vue'
 import AppManagement from './AppManagement.vue'
@@ -105,46 +105,42 @@ const navWormTransition = computed(() =>
 const navEl = ref<HTMLElement | null>(null)
 const clearBtnEl = ref<HTMLElement | null>(null)
 
+const appsVisited = ref(state.ui.settingsSection === 'apps')
 let sectionTl: gsap.core.Timeline | null = null
+let wormTween: gsap.core.Timeline | null = null
 
 watch(() => state.ui.settingsSection, (next, prev) => {
+  if (next === 'apps') appsVisited.value = true
+  if (wormTween) {
+    wormTween.progress(1).kill()
+    wormTween = null
+  }
   const worm = navEl.value?.querySelector<HTMLElement>('.nav-worm')
   const flipState = worm && !state.ui.islandReducedMotion ? Flip.getState(worm) : null
   void nextTick(() => {
     const nextWorm = navEl.value?.querySelector<HTMLElement>('.nav-worm')
     if (flipState && nextWorm) {
-      animateFlipFromState(flipState, nextWorm, navWormTransition.value, { absolute: true })
+      wormTween = animateFlipFromState(flipState, nextWorm, navWormTransition.value, { absolute: true })
     }
     contentEl.value?.scrollTo({ top: 0 })
     if (prev && next !== prev && !state.ui.islandReducedMotion) {
       const panels = contentEl.value?.querySelectorAll<HTMLElement>(':scope > .panel, :scope > .app-management')
       const activePanel = panels ? Array.from(panels).find((el) => el.offsetParent !== null) : null
       if (activePanel) {
-        sectionTl?.kill()
+        if (sectionTl) {
+          sectionTl.progress(1).kill()
+          sectionTl = null
+        }
         const preset = activeMotionPreset.value
         const offsetY = preset.mode === 'flicker' ? 0 : preset.mode === 'bounce' ? 10 : 6
-        const titleEl = activePanel.querySelector<HTMLElement>('.panel-title')
-        const cards = activePanel.querySelectorAll<HTMLElement>('.card, .save-row, .shortcut-fields, .features')
         const tl = gsap.timeline({
           onComplete: () => { sectionTl = null }
         })
         tl.fromTo(
           activePanel,
           { opacity: 0, y: offsetY },
-          { opacity: 1, y: 0, duration: preset.paneTransition.duration, ease: preset.paneTransition.ease, clearProps: 'transform' },
-          0
+          { opacity: 1, y: 0, duration: Math.min(0.16, preset.paneTransition.duration), ease: preset.paneTransition.ease, clearProps: 'transform,opacity' }
         )
-        if (titleEl && preset.mode !== 'flicker') {
-          animateSplitReveal(titleEl, state.ui.islandReducedMotion, { y: 6, stagger: 0.014, duration: 0.2 })
-        }
-        if (cards.length && preset.mode !== 'flicker') {
-          tl.fromTo(
-            cards,
-            { opacity: 0, y: 6 },
-            { opacity: 1, y: 0, duration: 0.22, stagger: 0.032, ease: preset.paneTransition.ease, clearProps: 'transform,opacity' },
-            0.03
-          )
-        }
         sectionTl = tl
       }
     }
@@ -394,6 +390,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   sectionTl?.kill()
+  wormTween?.kill()
   stopClearTimer()
   if (translationSavedTimer !== null) window.clearTimeout(translationSavedTimer)
   if (shortcutsSavedTimer !== null) window.clearTimeout(shortcutsSavedTimer)
@@ -447,7 +444,7 @@ onBeforeUnmount(() => {
         </nav>
 
         <section ref="contentEl" class="content scroll-y" :aria-label="currentSectionLabel">
-          <AppManagement v-show="state.ui.settingsSection === 'apps'" @dirty-change="appsDraftPending = $event" />
+          <AppManagement v-if="appsVisited" v-show="state.ui.settingsSection === 'apps'" @dirty-change="appsDraftPending = $event" />
           <MixerSettings v-if="state.ui.settingsSection === 'audio' && state.ui.settingsOpen" />
           <MailSettings v-if="state.ui.settingsSection === 'mail' && state.ui.settingsOpen" />
           <KeepAlive><ApprovalSettings v-if="state.ui.settingsSection === 'approvals' && state.ui.settingsOpen" /></KeepAlive>

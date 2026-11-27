@@ -41,7 +41,7 @@ mod windows;
 mod wechat;
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde::Serialize;
 use tauri::{
@@ -60,6 +60,11 @@ use storage::Store;
 use translation::TranslationSettings;
 use windows::{WindowsHandle, WindowState};
 
+static PAGE_SEQ: AtomicU64 = AtomicU64::new(0);
+static THEME_SEQ: AtomicU64 = AtomicU64::new(0);
+static MOTION_SEQ: AtomicU64 = AtomicU64::new(0);
+static CATEGORY_SEQ: AtomicU64 = AtomicU64::new(0);
+
 pub const UI_STATE_EVENT: &str = "ui-state";
 /// 应用配置变化事件：图标条、溢出网格、设置窗口各自持有一份镜像，靠它刷新。
 pub const APPLICATIONS_EVENT: &str = "applications-changed";
@@ -75,6 +80,7 @@ pub struct AppState {
     island_reading_explanation: AtomicBool,
     store: Store,
     configuration_gate: Mutex<()>,
+    ui_persist_gate: tokio::sync::Mutex<()>,
     apps: Mutex<AppConfig>,
     ui: UiStateHandle,
     windows: WindowsHandle,
@@ -114,6 +120,9 @@ fn broadcast_apps(app: &AppHandle, config: &AppConfig) {
 
 pub(crate) fn hide_window(app: &AppHandle, label: &str) {
     if let Some(window) = app.get_webview_window(label) {
+        if label == windows::POP && !window.is_visible().unwrap_or(false) {
+            return;
+        }
         if window.hide().is_ok() && label == windows::BAR {
             approvals::visibility(app, false);
             let _ = window.emit_to(label, "island-visibility", false);
@@ -236,24 +245,41 @@ fn set_island_anchor(app: AppHandle, anchor: String) -> Result<UiState, String> 
     Ok(next)
 }
 
-#[tauri::command]
-fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Result<UiState, String> {
+fn select_island_page_sync(app: &AppHandle, page: String, focus: Option<bool>) -> Result<UiState, String> {
     if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
     let state = app.state::<AppState>();
     let previous = state.ui.snapshot();
-    let next = update_ui_preferences(&app, |ui| {
+    let next = update_ui_preferences(app, |ui| {
         ui.island_page = page.clone();
         ui.island_expanded = true;
         ui.panel = if page == state::PANEL_APPLICATIONS { None } else { Some(page.clone()) };
     })?;
     if previous.island_page == PANEL_TRANSLATION && page != PANEL_TRANSLATION {
-        translation::cancel_for_window(&app, windows::BAR);
+        translation::cancel_for_window(app, windows::BAR);
     }
     state.windows.mark_bar_expanded();
-    if focus.unwrap_or(true) { show_window(&app, windows::BAR); }
-    hide_window(&app, windows::POP);
-    broadcast_ui(&app);
+    if focus.unwrap_or(true) { show_window(app, windows::BAR); }
+    hide_window(app, windows::POP);
+    broadcast_ui(app);
     Ok(next)
+}
+
+#[tauri::command]
+async fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -> Result<UiState, String> {
+    if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
+    let seq = PAGE_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let state = app.state::<AppState>();
+    let _order = state.ui_persist_gate.lock().await;
+    if seq < PAGE_SEQ.load(Ordering::SeqCst) && !focus.unwrap_or(true) {
+        if page != PANEL_TRANSLATION && state.ui.snapshot().island_page == PANEL_TRANSLATION {
+            translation::cancel_for_window(&app, windows::BAR);
+        }
+        return Ok(state.ui.snapshot());
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || select_island_page_sync(&handle, page, focus))
+        .await
+        .map_err(|_| "切换灵动岛页面中断".to_string())?
 }
 
 #[tauri::command]
@@ -283,7 +309,7 @@ fn toggle_panel(app: AppHandle, panel: String) -> Result<UiState, String> {
         return Err(format!("未知弹层：{panel}"));
     }
     if state::valid_island_page(&panel) {
-        return select_island_page(app, panel, Some(true));
+        return select_island_page_sync(&app, panel, Some(true));
     }
     log_info!("toggle_panel {panel}");
     let state = app.state::<AppState>();
@@ -396,16 +422,27 @@ fn start_bar_drag(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
 
 /// 切换图标条分类。分类是跨窗口状态：弹层窗口也要跟着变。
 #[tauri::command]
-fn set_category(app: AppHandle, category_id: String) -> Result<UiState, String> {
+async fn set_category(app: AppHandle, category_id: String) -> Result<UiState, String> {
+    let seq = CATEGORY_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     let state = app.state::<AppState>();
-    let next = update_ui_preferences(&app, |ui| {
-        let known = state.apps.lock().unwrap_or_else(|e| e.into_inner()).categories.iter().any(|c| c.id == category_id);
-        if known || category_id == CATEGORY_ALL {
-            ui.active_category_id = category_id.clone();
-        }
-    })?;
-    broadcast_ui(&app);
-    Ok(next)
+    let _order = state.ui_persist_gate.lock().await;
+    if seq < CATEGORY_SEQ.load(Ordering::SeqCst) {
+        return Ok(state.ui.snapshot());
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<AppState>();
+        let next = update_ui_preferences(&handle, |ui| {
+            let known = state.apps.lock().unwrap_or_else(|e| e.into_inner()).categories.iter().any(|c| c.id == category_id);
+            if known || category_id == CATEGORY_ALL {
+                ui.active_category_id = category_id.clone();
+            }
+        })?;
+        broadcast_ui(&handle);
+        Ok(next)
+    })
+    .await
+    .map_err(|_| "切换分类中断".to_string())?
 }
 
 /// 自检：直接按标签显示窗口并回报真实可见状态，用于无人工介入地验证窗口链路。
@@ -433,24 +470,46 @@ fn selftest_windows(app: AppHandle) -> Vec<String> {
 
 /// 切换主题。system 交给前端按系统偏好解析，Rust 只记录用户选择。
 #[tauri::command]
-fn set_theme(app: AppHandle, theme: String) -> Result<UiState, String> {
+async fn set_theme(app: AppHandle, theme: String) -> Result<UiState, String> {
     if !valid_theme(&theme) {
         return Err(format!("未知主题：{theme}"));
     }
-    let next = update_ui_preferences(&app, |ui| ui.theme = theme)?;
-    broadcast_ui(&app);
-    Ok(next)
+    let seq = THEME_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let state = app.state::<AppState>();
+    let _order = state.ui_persist_gate.lock().await;
+    if seq < THEME_SEQ.load(Ordering::SeqCst) {
+        return Ok(state.ui.snapshot());
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let next = update_ui_preferences(&handle, |ui| ui.theme = theme)?;
+        broadcast_ui(&handle);
+        Ok(next)
+    })
+    .await
+    .map_err(|_| "主题保存中断".to_string())?
 }
 
 /// 切换独立动态效果，即时生效并广播到所有窗口。
 #[tauri::command]
-fn set_motion(app: AppHandle, motion: String) -> Result<UiState, String> {
+async fn set_motion(app: AppHandle, motion: String) -> Result<UiState, String> {
     if !desktop_features::IslandAppearance::valid_motion_mode(&motion) {
         return Err(format!("未知动态效果：{motion}"));
     }
-    let next = update_ui_preferences(&app, |ui| ui.island_appearance.motion = motion)?;
-    broadcast_ui(&app);
-    Ok(next)
+    let seq = MOTION_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let state = app.state::<AppState>();
+    let _order = state.ui_persist_gate.lock().await;
+    if seq < MOTION_SEQ.load(Ordering::SeqCst) {
+        return Ok(state.ui.snapshot());
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let next = update_ui_preferences(&handle, |ui| ui.island_appearance.motion = motion)?;
+        broadcast_ui(&handle);
+        Ok(next)
+    })
+    .await
+    .map_err(|_| "动态效果保存中断".to_string())?
 }
 
 /// 弹一条轻提示。提示由独立的 toast 窗口渲染，避免被图标条窗口裁掉。
@@ -1213,6 +1272,7 @@ pub fn run() {
                     theme: prefs.theme,
                 }),
                 configuration_gate: Mutex::new(()),
+                ui_persist_gate: tokio::sync::Mutex::new(()),
                 windows: WindowsHandle::new(window_state),
                 clipboard: Mutex::new(clipboard),
                 snippets: Mutex::new(snippets),

@@ -295,14 +295,33 @@ export async function bootstrap(): Promise<void> {
 }
 
 let lastSettingsRequest = 0
+let pendingPageOps = 0
+let latestPageReq = 0
+let pendingThemeOps = 0
+let latestThemeReq = 0
+let pendingMotionOps = 0
+let latestMotionReq = 0
+let pendingCategoryOps = 0
+let latestCategoryReq = 0
+
 function applyUiState(ui: UiState): void {
+  const pageBusy = typeof pendingPageOps !== 'undefined' && pendingPageOps > 0
+  const motionBusy = typeof pendingMotionOps !== 'undefined' && pendingMotionOps > 0
+  const categoryBusy = typeof pendingCategoryOps !== 'undefined' && pendingCategoryOps > 0
+  const themeBusy = typeof pendingThemeOps !== 'undefined' && pendingThemeOps > 0
+
   state.ui.islandExpanded = ui.islandExpanded
   state.ui.islandAnchor = ui.islandAnchor
-  state.ui.islandPage = ['applications', 'clipboard', 'translation', 'files', 'audio', 'pack'].includes(ui.islandPage) ? ui.islandPage : 'applications'
+  if (!pageBusy) {
+    state.ui.islandPage = ['applications', 'clipboard', 'translation', 'files', 'audio', 'pack'].includes(ui.islandPage) ? ui.islandPage : 'applications'
+  }
   state.ui.islandHoverMs = ui.islandHoverMs
   state.ui.islandLeaveMs = ui.islandLeaveMs
   state.ui.islandReducedMotion = ui.islandReducedMotion
-  state.ui.islandAppearance = ui.islandAppearance
+  const keepMotion = state.ui.islandAppearance?.motion
+  state.ui.islandAppearance = motionBusy && ui.islandAppearance && keepMotion
+    ? { ...ui.islandAppearance, motion: keepMotion }
+    : ui.islandAppearance
   if (state.ui.islandAppearance && !isMotionMode(state.ui.islandAppearance.motion)) {
     state.ui.islandAppearance.motion = 'glide'
   }
@@ -314,15 +333,42 @@ function applyUiState(ui: UiState): void {
   state.ui.wechatStatus = ui.wechatStatus
   state.ui.wechatAttention = ui.wechatAttention
   state.ui.wechatEvent = ui.wechatEvent
-  state.ui.panel = ['clipboard', 'translation', 'files', 'audio', 'pack', 'category', 'overflow'].includes(ui.panel ?? '') ? ui.panel : null
+  if (!pageBusy) {
+    state.ui.panel = ['clipboard', 'translation', 'files', 'audio', 'pack', 'category', 'overflow'].includes(ui.panel ?? '') ? ui.panel : null
+  }
   state.ui.settingsOpen = ui.settingsOpen
   if (ui.settingsOpen && ui.settingsRequest && ui.settingsRequest[0] > lastSettingsRequest) {
     lastSettingsRequest = ui.settingsRequest[0]
     state.ui.settingsSection = ui.settingsRequest[1]
   }
   state.ui.paused = ui.paused
-  state.ui.activeCategoryId = ui.activeCategoryId
-  state.settings.theme = ui.theme as HubSettings['theme']
+  if (!categoryBusy) {
+    state.ui.activeCategoryId = ui.activeCategoryId
+  }
+  if (!themeBusy) {
+    state.settings.theme = ui.theme as HubSettings['theme']
+  }
+}
+
+export async function selectIslandPage(page: UiState['islandPage'], focus: boolean): Promise<void> {
+  const previousPage = state.ui.islandPage
+  const previousPanel = state.ui.panel
+  state.ui.islandPage = page
+  state.ui.panel = page === 'applications' ? null : page
+  if (!isDesktop) return
+  const reqId = ++latestPageReq
+  pendingPageOps++
+  try {
+    await invokeHost('select_island_page', { page, focus })
+  } catch (error) {
+    if (reqId === latestPageReq) {
+      state.ui.islandPage = previousPage
+      state.ui.panel = previousPanel
+    }
+    pushToast(String(error), 'error')
+  } finally {
+    pendingPageOps--
+  }
 }
 
 /** 订阅 Rust 广播的跨窗口状态；返回取消订阅函数。 */
@@ -489,8 +535,19 @@ export function setGroup(group: string): void {
 }
 
 export function setCategory(id: string): void {
-  if (isDesktop) void requestCategory(id).catch(error => pushToast(`切换分类失败：${String(error)}`, 'error'))
-  else state.ui.activeCategoryId = id
+  const previous = state.ui.activeCategoryId
+  state.ui.activeCategoryId = id
+  if (!isDesktop) return
+  const reqId = ++latestCategoryReq
+  pendingCategoryOps++
+  void requestCategory(id)
+    .catch(error => {
+      if (reqId === latestCategoryReq) state.ui.activeCategoryId = previous
+      pushToast(`切换分类失败：${String(error)}`, 'error')
+    })
+    .finally(() => {
+      pendingCategoryOps--
+    })
 }
 
 export function moveActive(delta: number): void {
@@ -962,13 +1019,35 @@ export async function copyTranslation(): Promise<void> {
 /* ---------- 设置 ---------- */
 
 export function setTheme(theme: HubSettings['theme']): void {
-  if (isDesktop) void requestTheme(theme).catch(error => pushToast(`保存主题失败：${String(error)}`, 'error'))
-  else state.settings.theme = theme
+  const previous = state.settings.theme
+  state.settings.theme = theme
+  if (!isDesktop) return
+  const reqId = ++latestThemeReq
+  pendingThemeOps++
+  void requestTheme(theme)
+    .catch(error => {
+      if (reqId === latestThemeReq) state.settings.theme = previous
+      pushToast(`保存主题失败：${String(error)}`, 'error')
+    })
+    .finally(() => {
+      pendingThemeOps--
+    })
 }
 
 export function setMotion(motion: MotionMode): void {
+  const previous = state.ui.islandAppearance.motion
   state.ui.islandAppearance.motion = motion
-  if (isDesktop) void requestMotion(motion).catch(error => pushToast(`保存动态效果失败：${String(error)}`, 'error'))
+  if (!isDesktop) return
+  const reqId = ++latestMotionReq
+  pendingMotionOps++
+  void requestMotion(motion)
+    .catch(error => {
+      if (reqId === latestMotionReq) state.ui.islandAppearance.motion = previous
+      pushToast(`保存动态效果失败：${String(error)}`, 'error')
+    })
+    .finally(() => {
+      pendingMotionOps--
+    })
 }
 
 /* ---------- 主题落地 ---------- */

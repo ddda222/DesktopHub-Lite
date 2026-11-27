@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends string">
-import { computed, nextTick, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { Flip, animateFlipFromState } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { state } from '@/store'
@@ -19,6 +19,7 @@ const emit = defineEmits<{ 'update:modelValue': [T] }>()
 const uid = useId()
 const groupEl = ref<HTMLElement | null>(null)
 const flipId = `seg-thumb-${uid}`
+let thumbTween: gsap.core.Timeline | null = null
 
 const thumbTransition = computed(() =>
   state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.pill
@@ -29,18 +30,27 @@ watch(
   () => {
     const root = groupEl.value
     if (!root || state.ui.islandReducedMotion) return
+    if (thumbTween) {
+      thumbTween.progress(1).kill()
+      thumbTween = null
+    }
     const prev = root.querySelector<HTMLElement>('.seg-thumb')
     if (!prev) return
     const flipState = Flip.getState(prev)
     void nextTick(() => {
       const next = root.querySelector<HTMLElement>('.seg-thumb')
       if (next) {
-        animateFlipFromState(flipState, next, thumbTransition.value, { absolute: true })
+        thumbTween = animateFlipFromState(flipState, next, thumbTransition.value, { absolute: true })
       }
     })
   },
   { flush: 'pre' }
 )
+
+onBeforeUnmount(() => {
+  thumbTween?.kill()
+  thumbTween = null
+})
 </script>
 
 <template>

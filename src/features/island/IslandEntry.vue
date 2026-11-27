@@ -58,6 +58,7 @@ import {
   iconFor,
   launchApp,
   openSettings,
+  selectIslandPage,
   setCategory,
   setPaused,
   state,
@@ -424,20 +425,7 @@ const paneInitial = computed(() => {
     x: paneDir.value * preset.paneOffsetX,
     y: preset.paneOffsetY,
     scaleX: preset.paneScaleX,
-    scaleY: preset.paneScaleY,
-    filter: preset.paneBlurPx ? `blur(${preset.paneBlurPx}px)` : 'blur(0px)'
-  }
-})
-const paneExit = computed(() => {
-  if (motionReduced.value) return { opacity: 0 }
-  const preset = motionPreset.value
-  return {
-    opacity: 0,
-    x: paneDir.value * -preset.paneOffsetX * 0.65,
-    y: -preset.paneOffsetY * 0.65,
-    scaleX: preset.paneScaleX === 1 ? 1 : 0.97,
-    scaleY: preset.paneScaleY === 1 ? 1 : 0.99,
-    filter: preset.paneBlurPx ? `blur(${Math.round(preset.paneBlurPx * 0.65)}px)` : 'blur(0px)'
+    scaleY: preset.paneScaleY
   }
 })
 const capsuleTextTransition = computed(() => {
@@ -595,12 +583,15 @@ let stopOcrResult: (() => void) | undefined
 let stopOcrError: (() => void) | undefined
 let stopQuickImageOcr: (() => void) | undefined
 const dismissHandle = ref<HTMLButtonElement | null>(null)
+const ordinaryPaneEl = ref<HTMLElement | null>(null)
 const dismissProxy = { y: 0, scaleY: 1 }
 let dismissTween: gsap.core.Tween | null = null
 let shellTween: gsap.core.Tween | gsap.core.Timeline | null = null
 let capsuleTween: gsap.core.Tween | null = null
 let chromeTween: gsap.core.Tween | null = null
 let contentTween: gsap.core.Tween | null = null
+let paneTween: gsap.core.Tween | null = null
+let navFlipTween: gsap.core.Timeline | null = null
 let dismissCurrentY = 0
 let suppressDismissClick = false
 let dismissSession: {
@@ -1187,6 +1178,34 @@ watch(page, (nextPage, prevPage) => {
     pageSwitchTimer = setTimeout(() => { pageSwitching.value = false }, pageSwitchDuration())
   }
 }, { flush: 'sync' })
+
+watch(page, (nextPage, prevPage) => {
+  measureContent()
+  paneTween?.kill()
+  paneTween = null
+  if (!expanded.value || approval.value || ocrPanelOpen.value || viewingMail.value) return
+  if (!prevPage || nextPage === prevPage || motionReduced.value || !paneInitial.value) return
+  const target = ordinaryPaneEl.value?.firstElementChild as HTMLElement | null
+  if (!target) return
+  paneTween = gsap.fromTo(
+    target,
+    paneInitial.value,
+    {
+      opacity: 1,
+      x: 0,
+      y: 0,
+      scaleX: 1,
+      scaleY: 1,
+      duration: Math.max(0.001, Math.min(0.18, paneTransition.value.duration)),
+      ease: paneTransition.value.ease,
+      clearProps: 'transform,opacity',
+      onComplete: () => {
+        paneTween = null
+        measureContent()
+      }
+    }
+  )
+}, { flush: 'post' })
 watch(() => props.previewKeepOpen, value => { if (!value && !hovering.value) leave() })
 watch(() => state.ui.islandAnchor, () => { if (!isDesktop) windowDrag.reset() })
 watch(() => shelf.busy, busy => {
@@ -1214,17 +1233,7 @@ watch(suppressed, () => {
 async function selectPage(value: typeof page.value): Promise<void> {
   mailSelected.value = false
   closeOcrPanel()
-  const previous = state.ui.islandPage
-  const previousPanel = state.ui.panel
-  state.ui.islandPage = value
-  state.ui.panel = value === 'applications' ? null : value
-  if (!isDesktop) return
-  try { await invokeHost('select_island_page', { page: value, focus: !document.hasFocus() }) }
-  catch (error) {
-    state.ui.islandPage = previous
-    state.ui.panel = previousPanel
-    pushToast(String(error), 'error')
-  }
+  await selectIslandPage(value, !document.hasFocus())
 }
 
 async function openWechat(): Promise<void> {
@@ -1555,12 +1564,16 @@ watch(() => filteredApps.value.map(item => item.id).join('|'), () => {
 watch([page, expanded, viewingMail, ocrPanelOpen], () => {
   const nav = modeNav.value
   if (!nav || motionReduced.value) return
+  if (navFlipTween) {
+    navFlipTween.progress(1).kill()
+    navFlipTween = null
+  }
   const prev = nav.querySelector<HTMLElement>('.mode-selection')
   if (!prev) return
   const flipState = Flip.getState(prev)
   void nextTick(() => {
     const next = nav.querySelector<HTMLElement>('.mode-selection')
-    if (next) animateFlipFromState(flipState, next, pillTransition.value, { absolute: true })
+    if (next) navFlipTween = animateFlipFromState(flipState, next, pillTransition.value, { absolute: true })
   })
 }, { flush: 'pre' })
 
@@ -1655,6 +1668,8 @@ onBeforeUnmount(() => {
   capsuleTween?.kill()
   chromeTween?.kill()
   contentTween?.kill()
+  paneTween?.kill()
+  navFlipTween?.kill()
   observer?.disconnect()
   contentObserver?.disconnect()
   cancelAnimationFrame(frame)
@@ -1940,15 +1955,7 @@ onBeforeUnmount(() => {
           <ApprovalPrompt v-if="approval" :key="approval.id" :card="approval" :count="approvalCount" :busy="answering" @answer="answerApproval" />
           <OcrResultPanel v-else-if="ocrPanelOpen && expanded" />
           <MailNotices v-else-if="viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
-          <div v-show="!approval && !ocrPanelOpen && !viewingMail" class="ordinary-pane" :style="{ '--pane-dir': paneDir }">
-          <GsapPresence
-            mode="out-in"
-            :initial="paneInitial"
-            :animate="{ opacity: 1, x: 0, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' }"
-            :exit="paneExit"
-            :transition="paneTransition"
-            @animation-complete="measureContent"
-          >
+          <div v-show="!approval && !ocrPanelOpen && !viewingMail" ref="ordinaryPaneEl" class="ordinary-pane" :style="{ '--pane-dir': paneDir }">
             <div
               v-if="page === 'applications'"
               key="applications"
@@ -2007,7 +2014,6 @@ onBeforeUnmount(() => {
               <AudioMixer v-else-if="page === 'audio'" :active="expanded" />
               <PackConsole v-else-if="page === 'pack'" />
             </div>
-          </GsapPresence>
           </div>
         </div>
       </div>

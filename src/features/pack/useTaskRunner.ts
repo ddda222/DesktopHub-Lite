@@ -396,11 +396,13 @@ export function startBrowserPackSimulation(scenario: 'pack' | 'error' | 'command
 
 async function refreshShared(withLog: boolean): Promise<void> {
   if (!isDesktop) return
-  const next = await invokeHost<TaskState>('task_state')
+  const next = await invokeHost<TaskState | null>('task_state')
+  if (!next) return
   sharedTask.value = next
   ensureTicker(next.stage === 'running')
   if (withLog) {
-    sharedLog.value = await invokeHost<string[]>('task_log')
+    const lines = await invokeHost<string[] | null>('task_log')
+    if (Array.isArray(lines)) sharedLog.value = lines
   }
 }
 
@@ -417,11 +419,12 @@ export function useTaskRunner(report: (message: string) => void, options: { with
     try {
       if (!stopSharedState) {
         stopSharedState = await listenHost<TaskState>('task-state', next => {
+          if (!next) return
           sharedTask.value = next
           ensureTicker(next.stage === 'running')
           if (next.stage !== 'running') {
-            void invokeHost<string[]>('task_log').then(lines => {
-              sharedLog.value = lines
+            void invokeHost<string[] | null>('task_log').then(lines => {
+              if (Array.isArray(lines)) sharedLog.value = lines
             }).catch(() => {})
           }
         })

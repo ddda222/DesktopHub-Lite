@@ -11,13 +11,13 @@
 .settings-ui:focus-visible { outline: none; }
 .settings-ui .win {
   width: min(760px, 100%); height: min(560px, 100%); max-width: 100%; max-height: 100%; min-width: 0; min-height: 0;
-  display: flex; flex-direction: column; overflow: hidden; container: settings / inline-size;
+  display: flex; flex-direction: column; overflow: clip; container: settings / inline-size;
   background: var(--pop-bg); backdrop-filter: var(--glass-backdrop);
   border: 1px solid var(--line-strong); border-radius: 16px;
   box-shadow: inset 0 1px 0 var(--island-top-sheen), var(--pop-shadow);
 }
 .settings-ui.is-standalone { padding: 0; background: transparent; }
-.settings-ui.is-standalone .win { width: 100%; height: 100%; max-width: none; max-height: none; }
+.settings-ui.is-standalone .win { width: 100%; height: 100%; max-width: none; max-height: none; backdrop-filter: none; }
 .settings-ui .win-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; height: 52px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; user-select: none; }
 .settings-ui .window-dragging .win-head { cursor: grabbing; }
 .settings-ui .window-brand { display: flex; gap: 12px; align-items: center; min-width: 0; }
