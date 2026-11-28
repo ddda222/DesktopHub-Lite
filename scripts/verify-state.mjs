@@ -348,4 +348,37 @@ await test('常用短语账密类别校验、密码保留与禁止删除内置�
   assert.equal(calls[2].args.field, 'password')
   assert.match(toasts.at(-1).msg, /不记入剪贴板历史/)
 })
+await test('bootstrap 具备幂等与防重入保护，并发与重复调用只初始化一次', async () => {
+  const job = deferred()
+  let appCalls = 0
+  const state = { ready: false, loadError: '', shortcuts: { bar: '', clipboard: '', translation: '', ocr: '' }, settings: {} }
+  const api = subject(
+    ['bootstrap'],
+    {
+      state,
+      applyApps() {},
+      refreshClipboard: async () => {},
+      refreshSnippets: async () => {},
+      refreshTranslationSettings: async () => {},
+      applyUiState() {},
+      invokeHost: async (command) => {
+        if (command === 'list_applications') {
+          appCalls++
+          return job.promise
+        }
+        if (command === 'get_shortcuts') return { bar: 'Ctrl+Alt+Space', clipboard: 'Ctrl+Shift+V', translation: 'Ctrl+Shift+F', ocr: 'Ctrl+Shift+O', errors: [] }
+        return {}
+      }
+    },
+    'let bootstrapPromise: Promise<void> | null = null'
+  )
+  const first = api.bootstrap()
+  const second = api.bootstrap()
+  assert.equal(appCalls, 1)
+  job.resolve({ categories: [], apps: [] })
+  await Promise.all([first, second])
+  assert.equal(state.ready, true)
+  await api.bootstrap()
+  assert.equal(appCalls, 1)
+})
 if(failed)process.exitCode=1

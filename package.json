@@ -8,7 +8,8 @@
     "dev": "vite",
     "typecheck": "vue-tsc --noEmit",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit": "node scripts/verify-state.mjs && node --test scripts/verify-agent-settings.mjs && node scripts/verify-island-physics.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

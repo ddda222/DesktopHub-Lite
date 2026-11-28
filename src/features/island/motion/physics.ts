@@ -21,7 +21,7 @@ const MOTION_PROFILES: Record<string, MotionPhysicsProfile> = {
   flicker: { damping: 38, omega: 7.5 }
 }
 
-function advanceSpring(axis: Spring, seconds: number, damping = 28, omega = 6): boolean {
+export function advanceSpring(axis: Spring, seconds: number, damping = 28, omega = 6): boolean {
   const offset = axis.value - axis.target
   const decay = Math.exp(-damping * seconds)
   const cos = Math.cos(omega * seconds), sin = Math.sin(omega * seconds)

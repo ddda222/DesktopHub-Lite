@@ -4,8 +4,17 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const ts = require('typescript')
+// 离线转译 `@/lib/motions` 为 data URL，解决 Node 原生 ESM 无法识别 Vite 路径别名的问题。
+const motionsSrc = readFileSync(new URL('../src/lib/motions.ts', import.meta.url), 'utf8')
+const motionsJs = ts.transpileModule(motionsSrc, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+}).outputText
+const motionsModuleUrl = 'data:text/javascript;base64,' + Buffer.from(motionsJs).toString('base64')
 const src = readFileSync(new URL('../src/features/island/motion/physics.ts', import.meta.url), 'utf8')
-const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText
+const rawJs = ts.transpileModule(src, {
+  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 }
+}).outputText
+const js = rawJs.replace(/from\s+['"]@\/lib\/motions['"]/g, `from '${motionsModuleUrl}'`)
 const { advanceSpring } = await import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'))
 function at(rate, steps) {
   const axis = { value: 0, velocity: 40, target: 2 }
