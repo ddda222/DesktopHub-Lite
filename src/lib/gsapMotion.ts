@@ -36,6 +36,8 @@ export function ensureGsapRegistered(): typeof gsap {
     CustomBounce.create('hubBounceDrop', { strength: 0.42, squash: 2, squashID: 'hubBounceDropSquash' })
     CustomWiggle.create('hubWiggleReject', { wiggles: 6, type: 'anticipate' })
     CustomWiggle.create('hubWiggleJitter', { wiggles: 5, type: 'easeOut' })
+    // 失焦切窗口等场景 WebView2 偶发 140–240ms 单帧调度抖动，放低 lagSmoothing 阈值防止短收起补间被单帧吞光。
+    gsap.ticker.lagSmoothing(120, 16)
     registered = true
   }
   return gsap

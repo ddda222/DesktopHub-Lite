@@ -633,4 +633,109 @@ await test('appendNotchRegions 靠左/靠右停靠补齐贴屏侧 90° 直角底
   assert.equal(rightRegions[2].radius, 0)
   assert.ok(rightRegions.length + 2 <= 6, 'split 靠边展开总 HRGN 区域数不得超过 Rust 后端 6 段上限')
 })
+
+const envelopeSource = fs.readFileSync(new URL('../src/features/island/motionEnvelope.ts', import.meta.url), 'utf8')
+const envelopeMod = ts.transpileModule(envelopeSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+const envelopeCtx = { exports: {} }
+vm.runInNewContext(envelopeMod, envelopeCtx)
+const envelopeApi = envelopeCtx.exports
+
+await test('activeMotionEnvelope 运动期单调不缩，宽胶囊或途中增宽绝不输出 38px 矮 HRGN 腰斩面板', () => {
+  // 场景 A：从 504x460 展开态收起至 520x38 宽胶囊（多遥测+徽标比展开更宽）
+  const stepA = envelopeApi.advanceMotionEnvelope({
+    current: null,
+    prevWidth: 504,
+    prevHeight: 460,
+    targetWidth: 520,
+    targetHeight: 38,
+    domWidth: 480,
+    domHeight: 444
+  })
+  assert.deepEqual({ ...stepA.envelope }, { width: 520, height: 460 })
+  assert.equal(stepA.needsExpandRegion, true, '宽度超出展开态时应扩宽 HRGN，但高度必须保持 460 罩住面板')
+
+  // 场景 B：普通收起（504x460 -> 220x38），初始不需触发 Win32 扩容
+  const stepB0 = envelopeApi.advanceMotionEnvelope({
+    current: null,
+    prevWidth: 504,
+    prevHeight: 460,
+    targetWidth: 220,
+    targetHeight: 38
+  })
+  assert.deepEqual({ ...stepB0.envelope }, { width: 504, height: 460 })
+  assert.equal(stepB0.needsExpandRegion, false)
+
+  // 场景 B 途中第 100ms：启动应用/遥测刷新把收起胶囊从 220 撑宽到 248，高度 38
+  const stepB1 = envelopeApi.advanceMotionEnvelope({
+    current: stepB0.envelope,
+    prevWidth: 220,
+    prevHeight: 38,
+    targetWidth: 248,
+    targetHeight: 38
+  })
+  assert.deepEqual({ ...stepB1.envelope }, { width: 504, height: 460 })
+  assert.equal(stepB1.needsExpandRegion, false, '未超出展开包络时不得提前下发矮 HRGN')
+
+  // 场景 B+ 途中反馈/徽标撑宽到 540 (> 504)：仅单调扩宽，高度仍锁定 460
+  const stepB2 = envelopeApi.advanceMotionEnvelope({
+    current: stepB1.envelope,
+    prevWidth: 248,
+    prevHeight: 38,
+    targetWidth: 540,
+    targetHeight: 38
+  })
+  assert.deepEqual({ ...stepB2.envelope }, { width: 540, height: 460 })
+  assert.equal(stepB2.needsExpandRegion, true)
+})
+
+await test('展开→全屏细线态收起及途中 suppressed=true 不跳过动画，已收起态胶囊切细线保持立即避让', () => {
+  // AN-01：背后有最大化窗口，从展开态收起到 tucked 细线态必须播动画
+  assert.equal(
+    envelopeApi.shouldBypassShellMotion({
+      isDesktop: true,
+      tucked: true,
+      reducedMotion: false,
+      wasExpanded: true,
+      expanded: false,
+      closingFromExpanded: true
+    }),
+    false
+  )
+  // AN-03：展开→收起运动途中收到 500ms 轮询广播 suppressed=true，不得 kill/瞬切
+  assert.equal(
+    envelopeApi.shouldBypassShellMotion({
+      isDesktop: true,
+      tucked: true,
+      reducedMotion: false,
+      wasExpanded: false,
+      expanded: false,
+      closingFromExpanded: true
+    }),
+    false
+  )
+  // 已收起态（普通胶囊 -> 全屏细线）应立即切换避让，不拖泥带水
+  assert.equal(
+    envelopeApi.shouldBypassShellMotion({
+      isDesktop: true,
+      tucked: true,
+      reducedMotion: false,
+      wasExpanded: false,
+      expanded: false,
+      closingFromExpanded: false
+    }),
+    true
+  )
+  // 减弱动态始终跳过补间
+  assert.equal(
+    envelopeApi.shouldBypassShellMotion({
+      isDesktop: true,
+      tucked: true,
+      reducedMotion: true,
+      wasExpanded: true,
+      expanded: false,
+      closingFromExpanded: true
+    }),
+    true
+  )
+})
 if(failed)process.exitCode=1

@@ -29,6 +29,11 @@ import {
   shouldKeepTranslationOpen
 } from './dismissGesture'
 import {
+  advanceMotionEnvelope,
+  shouldBypassShellMotion,
+  type MotionEnvelope
+} from './motionEnvelope'
+import {
   buildTelemetryReadout,
   countTelemetryMetrics,
   normalizeTelemetryPrefs,
@@ -856,6 +861,13 @@ let expandStageFrameA = 0
 let expandStageFrameB = 0
 /** 标记当前几何动画处于收缩方向：桌面定帧窗口下直接复用展开态 HRGN，收缩启动零 Win32 调用。 */
 let geometryShrinking = false
+/** 标记当前是否正在执行「展开态 → 收起/细线态」过渡，避免全屏避让或途中 suppressed 斩断收起动画。 */
+let closingFromExpanded = false
+/** 运动期单调不缩包络：在 geometryMoving 期间只增不减，杜绝矮 HRGN 腰斩尚未收完的展开面板。 */
+let activeMotionEnvelope: MotionEnvelope | null = null
+/** 收缩期间推迟到 settleGeometry 再执行的收尾清理标记。 */
+let pendingDismissReset = false
+let pendingMailClose = false
 let clockTimer: ReturnType<typeof setTimeout> | undefined
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
 let quickOcrTimer: ReturnType<typeof setTimeout> | undefined
@@ -1207,12 +1219,31 @@ function applyShellImmediate(): void {
   }
 }
 
+function measureLiveShellEnvelope(): { width: number; height: number } {
+  if (isSplit.value) {
+    const topW = topShellEl.value?.offsetWidth ?? 0
+    const topH = topShellEl.value?.offsetHeight ?? 0
+    const cardW = splitCardVisible.value ? (cardShellEl.value?.offsetWidth ?? 0) : 0
+    const cardH = splitCardVisible.value ? (cardShellEl.value?.offsetHeight ?? 0) : 0
+    return {
+      width: Math.max(topW, cardW),
+      height: topH + (cardH > 0 ? SPLIT_GAP + cardH : 0)
+    }
+  }
+  return {
+    width: panel.value?.offsetWidth ?? 0,
+    height: panel.value?.offsetHeight ?? 0
+  }
+}
+
 function settleGeometry(): void {
   clearTimeout(geometryTimer)
   geometryTimer = undefined
   const wasStaging = expandStaging
   cancelExpandStaging()
   geometryShrinking = false
+  closingFromExpanded = false
+  activeMotionEnvelope = null
   // 若两阶段扩容被打断或定时器兜底触发，确保外壳尺寸与最新目标严丝合缝后再测量 HRGN。
   if ((wasStaging || (!shellTween && !splitCardTween)) && panel.value) {
     shellTween?.kill()
@@ -1221,6 +1252,14 @@ function settleGeometry(): void {
     splitCardTween = null
     applyShellImmediate()
   }
+  if (pendingDismissReset && !dismissSession) {
+    pendingDismissReset = false
+    resetDismissStateAfterMotion()
+  }
+  if (pendingMailClose && !expanded.value) {
+    pendingMailClose = false
+    mailSelected.value = false
+  }
   viewportSize.value = isDesktop
     ? computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
     : { ...bounds.value }
@@ -1228,13 +1267,29 @@ function settleGeometry(): void {
   queueGeometry()
 }
 
-function reserveGeometry(prevWidth?: number, prevHeight?: number): void {
+function reserveGeometry(prevWidth?: number, prevHeight?: number, prevExpanded?: boolean): void {
   clearTimeout(geometryTimer)
   cancelExpandStaging()
   const target = bounds.value
-  if ((isDesktop && tucked.value) || state.ui.islandReducedMotion || reducedMotion.value) {
+  const wasExpanded = prevExpanded === true
+  if (expanded.value) {
+    closingFromExpanded = false
+  } else if (wasExpanded) {
+    closingFromExpanded = true
+  }
+  const bypass = shouldBypassShellMotion({
+    isDesktop,
+    tucked: tucked.value,
+    reducedMotion: state.ui.islandReducedMotion || reducedMotion.value,
+    wasExpanded,
+    expanded: expanded.value,
+    closingFromExpanded
+  })
+  if (bypass) {
     geometryMoving.value = false
     geometryShrinking = false
+    closingFromExpanded = false
+    activeMotionEnvelope = null
     viewportSize.value = isDesktop
       ? computeDesktopStageSize(target, viewportSize.value.height, viewportSize.value.width)
       : { ...target }
@@ -1243,28 +1298,35 @@ function reserveGeometry(prevWidth?: number, prevHeight?: number): void {
   }
   const headroom = expanded.value && !pageSwitching.value ? motionPreset.value.bounceHeadroom : 0
   if (isDesktop) {
+    const live = measureLiveShellEnvelope()
+    const envelopeStep = advanceMotionEnvelope({
+      current: activeMotionEnvelope,
+      prevWidth,
+      prevHeight,
+      targetWidth: target.width + headroom,
+      targetHeight: target.height + headroom,
+      domWidth: live.width,
+      domHeight: live.height
+    })
+    activeMotionEnvelope = envelopeStep.envelope
     const stage = computeDesktopStageSize(
-      { width: target.width + headroom, height: target.height + headroom },
+      activeMotionEnvelope,
       viewportSize.value.height,
       viewportSize.value.width
     )
     const stageGrowing = stage.width > viewportSize.value.width || stage.height > viewportSize.value.height
-    const isShrinking = !stageGrowing &&
-      prevWidth !== undefined &&
-      prevHeight !== undefined &&
-      target.width <= prevWidth &&
-      target.height <= prevHeight
+    const isShrinking = !stageGrowing && !envelopeStep.needsExpandRegion
     geometryMoving.value = true
     geometryShrinking = isShrinking
     viewportSize.value = stage
     if (stageGrowing) {
       // 仅在极少数超高面板突破定帧水位时执行两阶段无黑影扩容。
       stageDesktopExpandGeometry(stage.width, stage.height)
-    } else if (!isShrinking) {
-      // 定帧窗口尺寸不变：展开/增高时直接同步放开目标包络 HRGN，零延迟且零 SetWindowPos。
-      sendDesktopExpandRegionNow(stage.width, stage.height, target.width + headroom, target.height + headroom)
+    } else if (envelopeStep.needsExpandRegion) {
+      // 仅发送单调不缩的运动包络 HRGN：即便收起胶囊更宽或途中增宽，高度仍完整罩住收缩轨迹。
+      sendDesktopExpandRegionNow(stage.width, stage.height, activeMotionEnvelope.width, activeMotionEnvelope.height)
     }
-    // 收缩方向（isShrinking === true）：当前展开态 HRGN 已完全包含收缩轨迹，不触发任何 Win32 调用。
+    // 收缩方向且未超出当前包络：当前展开态 HRGN 已完全包含收缩轨迹，不触发任何 Win32 调用。
   } else {
     const nextWidth = Math.max(viewportSize.value.width, target.width + headroom)
     const nextHeight = Math.max(viewportSize.value.height, target.height + headroom)
@@ -1296,7 +1358,7 @@ watch(
     ) {
       return
     }
-    reserveGeometry(prevW, prevH)
+    reserveGeometry(prevW, prevH, prevExp)
   },
   { flush: 'sync' }
 )
@@ -1320,6 +1382,10 @@ watch(islandShape, () => {
   capsuleTween?.kill()
   geometryMoving.value = false
   geometryShrinking = false
+  closingFromExpanded = false
+  activeMotionEnvelope = null
+  pendingDismissReset = false
+  pendingMailClose = false
   applyShellImmediate()
   if (capsuleTextEl.value) {
     const hide = expanded.value && (isSplit.value ? !approval.value : !isNoticeStatus.value)
@@ -1419,10 +1485,29 @@ function stopDismissSpring(): void {
   dismissTween = null
 }
 
+function resetDismissStateAfterMotion(): void {
+  stopDismissSpring()
+  dismissCurrentY = 0
+  dismissSession = undefined
+  dismissProxy.y = 0
+  dismissProxy.scaleY = 1
+  if (!isSplit.value || expanded.value) {
+    syncDismissTransform()
+  }
+  panel.value?.classList.remove('dismiss-dragging')
+  cardShellEl.value?.classList.remove('dismiss-dragging')
+  const handle = dismissHandle.value
+  if (handle) {
+    handle.classList.remove('dragging')
+    handle.classList.remove('ready')
+  }
+}
+
 function clearDismissVisual(): void {
   stopDismissSpring()
   dismissCurrentY = 0
   dismissSession = undefined
+  pendingDismissReset = false
   applyDismissVisual(0, 1, false, false)
   panel.value?.classList.remove('dismiss-dragging')
   cardShellEl.value?.classList.remove('dismiss-dragging')
@@ -1451,9 +1536,26 @@ function startDismissSnapBack(_initialVelocityPxPerSec: number): void {
   })
 }
 
-function collapseNow(clearPin = true): void {
+function collapseNow(clearPin = true, preserveDismissOffset = false): void {
   closeAnyOpenThemedSelect(element.value)
-  clearDismissVisual()
+  stopDismissSpring()
+  dismissSession = undefined
+  panel.value?.classList.remove('dismiss-dragging')
+  cardShellEl.value?.classList.remove('dismiss-dragging')
+  const handle = dismissHandle.value
+  if (handle) {
+    handle.classList.remove('dragging')
+    handle.classList.remove('ready')
+  }
+  if (preserveDismissOffset && Math.abs(dismissProxy.y) > 0.05) {
+    // 保留拉条当前上推偏移，交由收起补间自然衔接并推迟到 settleGeometry 复位，消除松手瞬弹回 0。
+    pendingDismissReset = true
+  } else if (Math.abs(dismissProxy.y) > 0.05 || Math.abs(dismissProxy.scaleY - 1) > 0.001) {
+    clearDismissVisual()
+  } else {
+    dismissCurrentY = 0
+    pendingDismissReset = true
+  }
   if (clearPin) pinned.value = false
   const active = document.activeElement
   if (active instanceof HTMLElement && element.value?.contains(active)) active.blur()
@@ -1567,7 +1669,7 @@ function endDismissDrag(event: PointerEvent, cancelled = false): void {
 
   if (!cancelled && shouldCommitDismiss(session.lastOffsetY, velocityPxPerSec, session.moved, motionReduced.value)) {
     suppressDismissClick = true
-    collapseNow(true)
+    collapseNow(true, true)
     return
   }
 
@@ -1761,8 +1863,15 @@ watch(hostExpanded, value => {
   hoverExpanding = false
   leftAfterExpand = false
   closeAnyOpenThemedSelect(element.value)
-  clearDismissVisual()
-  mailSelected.value = false
+  if (geometryMoving.value || closingFromExpanded) {
+    // 收缩补间进行中禁止用 clearDismissVisual() 覆写 transform，避免砸断 split 卡片退场；
+    // 同样推迟卸载邮件页直到收起完成，杜绝首帧白屏抽空。
+    pendingDismissReset = true
+    if (mailSelected.value) pendingMailClose = true
+  } else {
+    clearDismissVisual()
+    mailSelected.value = false
+  }
   cancelHover()
   clearTimeout(leaveTimer)
   composing.value = false
@@ -1826,6 +1935,10 @@ watch(() => state.ui.islandAnchor, () => {
   splitCardTween = null
   geometryMoving.value = false
   geometryShrinking = false
+  closingFromExpanded = false
+  activeMotionEnvelope = null
+  pendingDismissReset = false
+  pendingMailClose = false
   applyShellImmediate()
   if (isDesktop) {
     viewportSize.value = computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
@@ -1843,11 +1956,17 @@ watch(() => shelf.busy, busy => {
 })
 
 watch(suppressed, () => {
-  clearDismissVisual()
+  const closingInProgress = closingFromExpanded || (geometryMoving.value && !expanded.value)
+  if (closingInProgress) {
+    // 收起动画途中收到后台全屏/最大化监测广播：不打断正在播放的补间，仅延后收尾复位。
+    pendingDismissReset = true
+  } else {
+    clearDismissVisual()
+    cancelHoverClose()
+  }
   clearQuickOcr()
   cancelHover()
   clearTimeout(leaveTimer)
-  cancelHoverClose()
   if (!urgentFeedback.value) {
     clearTimeout(feedbackTimer)
     feedbackText.value = ''
@@ -2110,7 +2229,8 @@ function stageDesktopExpandGeometry(width: number, height: number): void {
           hoverExpanding = false
           expandStaging = false
           expand(false)
-          settleGeometry()
+          // 由 runShellResize 接管平滑收起补间，不再直接 settleGeometry() 走 applyShellImmediate 瞬切。
+          runShellResize()
           return
         }
         hoverExpanding = false
@@ -2166,8 +2286,9 @@ function queueGeometry(): void {
     const rectH = Math.ceil(rect.height)
     const regions: BarRegion[] = []
     if (geometryMoving.value) {
-      // 仅放开本次动画包络区域，避免不必要地放开整块大矩形。
-      regions.push(computeMovingEnvelopeRegion(rectW, rectH, bounds.value.width, bounds.value.height))
+      // 运动期内始终使用单调不缩包络，绝不用变窄/变矮后的即时 bounds 提前裁切展开面板。
+      const env = activeMotionEnvelope ?? bounds.value
+      regions.push(computeMovingEnvelopeRegion(rectW, rectH, env.width, env.height))
     } else if (tucked.value) {
       // 全屏避让细线态：用 HRGN 精准裁切为顶部 140×14 热区，其余透明区域完全穿透给全屏应用。
       const hit = element.value?.getBoundingClientRect()
@@ -2287,6 +2408,15 @@ function runShellResize(): void {
   splitCardTween?.kill()
   splitCardTween = null
 
+  const bypassMotion = shouldBypassShellMotion({
+    isDesktop,
+    tucked: tucked.value,
+    reducedMotion: motionReduced.value,
+    wasExpanded: false,
+    expanded: expanded.value,
+    closingFromExpanded
+  })
+
   if (isSplit.value) {
     const topEl = topShellEl.value
     const cardEl = cardShellEl.value
@@ -2296,7 +2426,7 @@ function runShellResize(): void {
     const targetCardW = `${splitCardWidth.value}px`
     const targetCardH = `${splitCardHeight.value}px`
 
-    if ((isDesktop && tucked.value) || motionReduced.value || motionMode.value === 'flicker') {
+    if (bypassMotion || motionMode.value === 'flicker') {
       applyShellImmediate()
       onShellAnimationComplete()
       return
@@ -2356,14 +2486,16 @@ function runShellResize(): void {
         }
       }
     } else {
-      // 闭合时零回弹：下方悬浮卡片先迅速收叠回母舰下方，母舰随即缩回紧凑贴顶胶囊
-      const cardCloseDur = Math.max(0.1, Math.min(0.15, (collapseMs.value / 1000) * 0.56))
-      const topCloseDur = Math.max(0.15, Math.min(0.24, (collapseMs.value / 1000) * 0.88))
+      // 闭合时零回弹：下方悬浮卡片先以 150–200ms 平滑收叠回母舰下方，母舰随即缩回紧凑贴顶胶囊或细线。
+      const cardCloseDur = Math.max(0.15, Math.min(0.2, (collapseMs.value / 1000) * 0.72))
+      const topCloseDur = Math.max(0.16, Math.min(0.25, (collapseMs.value / 1000) * 0.9))
+      const cardTargetY = Math.min(-14, dismissProxy.y - 12)
       if (cardEl && splitCardVisible.value) {
         tl.to(cardEl, {
           opacity: 0,
-          y: -14,
+          y: cardTargetY,
           scale: 0.95,
+          scaleY: 0.95,
           filter: 'blur(2px)',
           duration: cardCloseDur,
           ease: 'power2.out',
@@ -2377,7 +2509,7 @@ function runShellResize(): void {
         height: targetTopH,
         duration: topCloseDur,
         ease: 'power3.out'
-      }, splitCardVisible.value ? 0.055 : 0)
+      }, splitCardVisible.value ? 0.06 : 0)
     }
 
     shellTween = tl
@@ -2389,8 +2521,8 @@ function runShellResize(): void {
   const targetW = `${topShellWidth.value}px`
   const targetH = `${visibleHeight.value}px`
   const targetRadius = isNotch.value ? '0px' : `${cornerRadius.value}px`
-  if ((isDesktop && tucked.value) || motionReduced.value) {
-    gsap.set(el, { width: targetW, height: targetH, borderRadius: targetRadius })
+  if (bypassMotion) {
+    gsap.set(el, { width: targetW, height: targetH, borderRadius: targetRadius, y: 0, scaleY: 1 })
     onShellAnimationComplete()
     return
   }
@@ -2421,12 +2553,12 @@ function runShellResize(): void {
       const wDur = Math.max(0.22, Math.min(0.34, (expandMs.value / 1000) * 0.78))
       const hDur = Math.max(0.26, Math.min(0.42, (expandMs.value / 1000) * 0.96))
       const hDelay = motionMode.value === 'sweep' ? 0.075 : 0.035
-      tl.to(el, { width: targetW, borderRadius: '0px', duration: wDur, ease: widthEase }, 0)
+      tl.to(el, { width: targetW, borderRadius: '0px', y: 0, scaleY: 1, duration: wDur, ease: widthEase }, 0)
         .to(el, { height: targetH, duration: hDur, ease: heightEase }, hDelay)
     } else {
-      const hDur = Math.max(0.14, Math.min(0.2, (collapseMs.value / 1000) * 0.76))
-      const wDur = Math.max(0.16, Math.min(0.24, (collapseMs.value / 1000) * 0.9))
-      tl.to(el, { height: targetH, duration: hDur, ease: 'power3.out' }, 0)
+      const hDur = Math.max(0.15, Math.min(0.22, (collapseMs.value / 1000) * 0.78))
+      const wDur = Math.max(0.17, Math.min(0.25, (collapseMs.value / 1000) * 0.92))
+      tl.to(el, { height: targetH, y: 0, scaleY: 1, duration: hDur, ease: 'power3.out' }, 0)
         .to(el, { width: targetW, borderRadius: '0px', duration: wDur, ease: 'power3.out' }, 0.04)
     }
     shellTween = tl
@@ -2442,11 +2574,11 @@ function runShellResize(): void {
     })
     if (expanded.value) {
       // 粘液蠕虫特征：先横向拉开，慢半拍再垂展高度，圆角随同一时间轴过渡
-      tl.to(el, { width: targetW, borderRadius: targetRadius, duration: 0.28, ease: 'back.out(1.25)' }, 0)
+      tl.to(el, { width: targetW, borderRadius: targetRadius, y: 0, scaleY: 1, duration: 0.28, ease: 'back.out(1.25)' }, 0)
         .to(el, { height: targetH, duration: 0.36, ease: 'back.out(1.2)' }, 0.085)
     } else {
       // 收起先压扁，再缩窄
-      tl.to(el, { height: targetH, duration: 0.16, ease: 'power3.inOut' }, 0)
+      tl.to(el, { height: targetH, y: 0, scaleY: 1, duration: 0.16, ease: 'power3.inOut' }, 0)
         .to(el, { width: targetW, borderRadius: targetRadius, duration: 0.22, ease: 'power3.out' }, 0.065)
     }
     shellTween = tl
@@ -2457,6 +2589,8 @@ function runShellResize(): void {
     width: targetW,
     height: targetH,
     borderRadius: targetRadius,
+    y: 0,
+    scaleY: 1,
     duration: Math.max(0.001, spec.duration),
     ease: spec.ease,
     onComplete: () => {
@@ -3179,8 +3313,8 @@ onBeforeUnmount(() => {
             class="island-content"
           >
           <ApprovalPrompt v-if="approval" :key="approval.id" :card="approval" :count="approvalCount" :busy="answering" @answer="answerApproval" />
-          <OcrResultPanel v-else-if="ocrPanelOpen && expanded" />
-          <MailNotices v-else-if="viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
+          <OcrResultPanel v-else-if="ocrPanelOpen && (expanded || geometryMoving)" />
+          <MailNotices v-else-if="viewingMail && (expanded || geometryMoving)" :notices="mailNotices" @error="pushToast($event, 'error')" />
           <div v-show="!approval && !ocrPanelOpen && !viewingMail" ref="ordinaryPaneEl" class="ordinary-pane" :style="{ '--pane-dir': paneDir }">
             <div
               v-if="page === 'applications'"
