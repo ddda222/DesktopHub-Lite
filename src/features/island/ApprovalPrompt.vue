@@ -83,7 +83,7 @@ async function openOrcaAndDismiss() {
 </template>
 
 <style scoped>
-.approval { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; color: var(--text); }
+.approval { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-bottom: 5px; color: var(--text); }
 header, footer, button { display: flex; align-items: center; gap: 6px; }
 header { flex-wrap: wrap; gap: 3px 6px; font-size: 12px; overflow-wrap: anywhere; }
 header strong { font-weight: 600; color: var(--text); }

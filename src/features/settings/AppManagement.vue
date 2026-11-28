@@ -195,7 +195,7 @@ async function removeApp(id: string): Promise<void> {
       <button class="btn btn-primary" :disabled="busy" :aria-expanded="adding" aria-controls="add-app-options" @click="adding = !adding">{{ adding ? '收起添加' : '＋ 添加应用' }}</button>
     </header>
     <div class="app-tools">
-      <label class="field search-field" for="app-search"><span class="field-label">搜索应用</span><span class="search-control"><Icon name="search" :size="16" /><input id="app-search" v-model="query" class="control" type="search" placeholder="名称、目标或分类" /></span></label>
+      <label class="field search-field" for="app-search"><span class="field-label">搜索应用</span><span class="search-control"><Icon name="search" :size="16" /><input id="app-search" v-model="query" class="control" type="search" placeholder="名称、目标或分类" /><button v-if="query" class="search-clear" type="button" aria-label="清空搜索" @click="query = ''"><Icon name="close" :size="12" /></button></span></label>
       <button class="btn" :aria-expanded="managing" aria-controls="category-manager" @click="managing = !managing">管理分类</button>
     </div>
     <GsapPresence
@@ -327,8 +327,10 @@ async function removeApp(id: string): Promise<void> {
 .app-tools { display: flex; align-items: end; gap: 12px; margin: 20px 0 16px; }
 .search-field { flex: 1; }
 .search-control { position: relative; display: block; }
-.search-control > svg { position: absolute; left: 12px; top: 10px; color: var(--text-3); }
-.search-control .control { padding-left: 36px; }
+.search-control > svg { position: absolute; left: 12px; top: 10px; color: var(--text-3); pointer-events: none; }
+.search-control .control { padding-left: 36px; padding-right: 30px; }
+.search-clear { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--text-3); }
+.search-clear:hover { background: var(--hover); color: var(--text); }
 .category-filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .category-filter { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px; padding: 6px 12px; border: 1px solid var(--line-strong); background: var(--surface-2); border-radius: 9px; color: var(--text-2); transition: background 120ms ease, border-color 120ms ease, color 120ms ease; }
 .category-filter > span:first-child { overflow-wrap: anywhere; text-align: left; }

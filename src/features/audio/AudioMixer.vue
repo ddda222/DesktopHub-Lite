@@ -240,7 +240,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
 .refresh-btn { padding:3px 8px; border:1px solid var(--line); border-radius:6px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out),transform 70ms var(--ease-out); }
 .refresh-btn:hover:not(:disabled) { background:var(--hover); border-color:var(--line-strong); color:var(--text); }
 .simulation { font-size:10px; font-weight:500; padding:1px 5px; border:1px solid var(--line-strong); border-radius:4px; color:var(--text-3); }
-.output-devices { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+.output-devices { display:flex; flex-wrap:wrap; gap:5px; padding:2px 0 4px; margin-bottom:8px; }
 .device-chip { display:inline-flex; align-items:center; gap:5px; max-width:100%; padding:4px 9px; border:1px solid var(--line); border-radius:7px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out); }
 .device-chip span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .device-chip .dev-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--text-3); opacity:.5; }
@@ -254,7 +254,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
 .sound-profiles button[aria-pressed=true] { background:var(--accent-weak); color:var(--accent); border-color:var(--accent); font-weight:600; }
 .sound-channel { display:flex; flex-direction:column; gap:3px; padding:8px 0; border-top:1px solid var(--line); }
 .channel-top { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
-.channel-info { display:flex; align-items:center; gap:6px; flex:1; min-width:0; }
+.channel-info { display:flex; align-items:center; gap:6px; flex:1; min-width:0; padding-left:4px; }
 .state-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--text-3); opacity:.65; }
 .state-dot.active { background:var(--accent); box-shadow:0 0 6px var(--accent); opacity:1; }
 .channel-info strong { font-size:12.5px; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

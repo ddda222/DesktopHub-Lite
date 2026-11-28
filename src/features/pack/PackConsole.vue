@@ -580,6 +580,7 @@ function openPackSettings(): void {
             <input
               v-model.number="reversePort"
               type="number"
+              inputmode="numeric"
               min="1"
               max="65535"
               aria-label="ADB 转发端口"
@@ -648,7 +649,7 @@ function openPackSettings(): void {
           </div>
           <label class="field">
             <span>预估（秒）</span>
-            <input v-model.number="editing.estimateSec" type="number" min="0" max="7200" />
+            <input v-model.number="editing.estimateSec" type="number" inputmode="numeric" min="0" max="7200" />
           </label>
         </div>
 
@@ -1339,9 +1340,9 @@ function openPackSettings(): void {
   margin-right: 1px;
 }
 .port-box input {
-  width: 48px;
+  width: 54px;
   border: 0;
-  padding: 0;
+  padding: 0 2px;
   background: transparent;
   color: var(--text);
   font-size: 11px;

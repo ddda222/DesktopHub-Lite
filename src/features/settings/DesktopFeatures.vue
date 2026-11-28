@@ -367,7 +367,7 @@ watch(() => state.ui.settingsOpen, open => {
           </span>
         </div>
       </div>
-      <label class="field"><span class="field-label">显示大小 <output>{{ appearance.scale }}%</output></span><input v-model.number="appearance.scale" class="size-slider" type="range" min="75" max="125" step="5" aria-label="灵动岛显示大小" :aria-valuetext="`${appearance.scale}%`" /></label>
+      <label class="field"><span class="field-label">显示大小 <output>{{ appearance.scale }}%</output></span><input v-model.number="appearance.scale" class="size-slider" type="range" min="75" max="125" step="5" :style="{ '--volume-progress': `${Math.max(0, Math.min(100, ((appearance.scale - 75) / 50) * 100))}%` }" aria-label="灵动岛显示大小" :aria-valuetext="`${appearance.scale}%`" /></label>
       <div class="field field-wide">
         <span class="field-label">胶囊微读数</span>
         <ThemedSelect

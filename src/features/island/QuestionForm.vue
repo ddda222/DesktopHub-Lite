@@ -87,7 +87,7 @@ p { margin: 4px 0 6px; font-size: 13px; user-select: text; }
 .choice:hover { background: var(--hover); }
 .choice:has(input:checked) { border-color: var(--accent); background: var(--accent-weak); color: var(--text); }
 .choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-.choice input { flex: none; width: 15px; height: 15px; margin: 3px 0 0; appearance: auto; accent-color: var(--accent); }
+.choice input { flex: none; width: 15px; height: 15px; margin: 3px 0 0; }
 .choice span { min-width: 0; }
 .skip { font-size: 12px; color: var(--text-2); }
 textarea { width: 100%; margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--r-tile); font: inherit; color: inherit; background: var(--surface-2); resize: vertical; user-select: text; }

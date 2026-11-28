@@ -3873,7 +3873,8 @@ onBeforeUnmount(() => {
   margin-left: calc((var(--content-width) - 2 * var(--content-gutter)) / -2);
   width: calc(var(--content-width) - 2 * var(--content-gutter));
 }
-.ordinary-pane { position: relative; display: block; overflow: clip; }
+.ordinary-pane { position: relative; display: block; overflow: visible; }
+.applications { padding: 4px 6px 6px; margin: -4px -6px -6px; }
 .toolbar {
   display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between;
   gap: 6px; margin-bottom: 8px; padding: 0 0 7px; border-bottom: 1px solid var(--line);
@@ -3910,7 +3911,7 @@ onBeforeUnmount(() => {
 .collapse-action svg { transform: rotate(180deg); }
 .round-action:hover { background: var(--tile-surface); border-color: var(--line); color: var(--text); box-shadow: var(--tile-shadow); }
 .tools .round-action[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); box-shadow: var(--tile-shadow); }
-.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 74px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; margin: 0 0 8px; padding: 2px; }
+.categories { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-height: 76px; overflow-y: auto; overflow-x: hidden; margin: 0 0 8px; padding: 3px 4px 5px; }
 .categories button { flex: none; padding: 3px 10px; border-radius: 20px; border: 1px solid transparent; min-height: 26px; font-size: 12px; color: var(--text-2); transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease, border-color 140ms ease; }
 .categories .selected { color: var(--text); background: var(--tile-surface); font-weight: 600; border-color: var(--line); box-shadow: var(--tile-shadow); }
 .categories button:hover:not(.selected) { color: var(--text); background: var(--hover); border-color: var(--line); }
@@ -3937,7 +3938,7 @@ onBeforeUnmount(() => {
   --app-icon-size: 28px; --app-cell-size: 46px; --app-gap: 8px;
   display: grid; grid-template-columns: repeat(auto-fill, var(--app-cell-size));
   grid-auto-rows: var(--app-cell-size); justify-content: start; align-content: start;
-  max-height: calc(var(--app-cell-size) * 3 + var(--app-gap) * 2); overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; gap: var(--app-gap); padding: 2px;
+  max-height: calc(var(--app-cell-size) * 3 + var(--app-gap) * 2 + 6px); overflow-y: auto; overflow-x: hidden; gap: var(--app-gap); padding: 3px 4px 6px;
   scrollbar-width: thin; scrollbar-color: transparent transparent;
 }
 .app-grid.with-names {
@@ -4040,10 +4041,11 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 12px; border-radius: 12px; background: var(--surface-2); font-size: 12px; }
 .attention-strip > span { flex: 1; }
 .attention-strip button { padding: 5px 8px; border-radius: 8px; background: var(--hover); }
-.feature-pane { max-height: 420px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
-.feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+/* 采用对称安全出血带保护全部功能页的按钮发光、状态蓝点光晕、聚焦环与像素 3D 硬阴影，并移除短页不对称右侧空缝。 */
+.feature-pane { max-height: 430px; padding: 4px 6px 6px; margin: -4px -6px -6px; overflow-y: auto; overflow-x: hidden; }
+.feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; overflow: visible; }
 .feature-pane :deep(.panel > .head) { display: none; }
-.feature-pane :deep(button:disabled) { opacity: 1; color: var(--text-3); background: var(--surface-2); cursor: not-allowed; }
+.feature-pane :deep(button:disabled) { cursor: not-allowed; }
 .feature-pane :deep(.pop > .mode-bar), .feature-pane :deep(.pop > .head), .feature-pane :deep(.pop > .detail), .feature-pane :deep(.pop > .foot), .feature-pane :deep(.panel > .content) { padding-left: 0; padding-right: 0; }
 .feature-pane :deep(.panel > .content) { overflow: visible; scrollbar-gutter: auto; }
 .feature-pane :deep(.pop > .mode-bar) { padding-top: 0; }
@@ -4220,6 +4222,18 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-mecha .round-action {
   border-radius: 3px; border-color: rgba(245, 158, 11, .24);
   clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+.variant-mecha .round-action:focus-visible,
+.variant-mecha .categories button:focus-visible,
+.variant-mecha .app-tile:focus-visible,
+.variant-mecha .capsule-quick-menu button:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 10px rgba(245, 158, 11, .32);
+}
+.variant-mecha .categories .selected:focus-visible,
+.variant-mecha .capsule-quick-menu .quick-audio-chip.active:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px #fff7ed;
 }
 .variant-mecha .categories button {
   border-radius: 2px; font-family: var(--font-mono); font-size: 12px;

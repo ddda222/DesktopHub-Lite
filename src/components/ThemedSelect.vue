@@ -44,12 +44,14 @@ const props = withDefaults(defineProps<{
   id?: string
   disabled?: boolean
   size?: 'default' | 'sm' | 'xs'
+  variant?: 'default' | 'ghost'
   placeholder?: string
 }>(), {
   ariaLabel: undefined,
   id: undefined,
   disabled: false,
   size: 'default',
+  variant: 'default',
   placeholder: '请选择'
 })
 
@@ -294,7 +296,7 @@ onBeforeUnmount(() => {
     ref="triggerEl"
     type="button"
     class="themed-select-trigger"
-    :class="[`size-${size}`, { 'is-open': open }]"
+    :class="[`size-${size}`, { 'is-open': open, 'is-ghost': variant === 'ghost' }]"
     role="combobox"
     :disabled="disabled"
     :aria-label="ariaLabel"
@@ -392,6 +394,21 @@ onBeforeUnmount(() => {
   background: var(--surface);
   box-shadow: 0 0 0 2px var(--accent-weak, var(--hover));
 }
+.themed-select-trigger.is-ghost {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.themed-select-trigger.is-ghost:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--hover);
+}
+.themed-select-trigger.is-ghost:focus-visible,
+.themed-select-trigger.is-ghost.is-open {
+  border-color: transparent;
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1.5px var(--accent, var(--text));
+}
 .themed-select-trigger:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -488,8 +505,8 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-/* 器物主题特征细化 */
-:root[data-theme='midnight'] .themed-select-trigger {
+/* 器物主题特征细化（ghost 幽灵态避让外框装饰，避免内嵌胶囊出现双层套娃边框） */
+:root[data-theme='midnight'] .themed-select-trigger:not(.is-ghost) {
   border-radius: 6px;
   border-color: rgba(109, 182, 255, 0.28);
 }
@@ -498,7 +515,7 @@ onBeforeUnmount(() => {
   border-color: rgba(109, 182, 255, 0.42);
   box-shadow: 0 16px 40px rgba(2, 8, 22, 0.72), 0 0 16px rgba(109, 182, 255, 0.16);
 }
-:root[data-theme='mecha'] .themed-select-trigger,
+:root[data-theme='mecha'] .themed-select-trigger:not(.is-ghost),
 :root[data-theme='mecha'] .themed-select-menu {
   border-radius: 3px;
   border-color: rgba(245, 158, 11, 0.36);
@@ -511,9 +528,13 @@ onBeforeUnmount(() => {
 :root[data-theme='mecha'] .themed-option.is-selected .themed-option-check {
   color: #111318;
 }
-:root[data-theme='pixel'] .themed-select-trigger,
+:root[data-theme='pixel'] .themed-select-trigger:not(.is-ghost),
 :root[data-theme='pixel'] .themed-select-menu,
 :root[data-theme='pixel'] .themed-option {
+  border-radius: 0;
+  font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .themed-select-trigger.is-ghost {
   border-radius: 0;
   font-family: var(--font-mono);
 }
@@ -528,10 +549,14 @@ onBeforeUnmount(() => {
 :root[data-theme='pixel'] .themed-option.is-selected .themed-option-check {
   color: #0f0d1a;
 }
-:root[data-theme='blueprint'] .themed-select-trigger,
+:root[data-theme='blueprint'] .themed-select-trigger:not(.is-ghost),
 :root[data-theme='blueprint'] .themed-select-menu,
 :root[data-theme='blueprint'] .themed-option {
   border-radius: 2px;
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .themed-select-trigger.is-ghost {
+  border-radius: 1px;
   font-family: var(--font-mono);
 }
 :root[data-theme='blueprint'] .themed-select-menu {
@@ -544,7 +569,7 @@ onBeforeUnmount(() => {
 :root[data-theme='blueprint'] .themed-option.is-selected .themed-option-check {
   color: #092241;
 }
-:root[data-theme='neon'] .themed-select-trigger {
+:root[data-theme='neon'] .themed-select-trigger:not(.is-ghost) {
   border-color: rgba(255, 43, 214, 0.36);
 }
 :root[data-theme='neon'] .themed-select-menu {

@@ -167,6 +167,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
           <ThemedSelect
             class="lang-select"
             size="xs"
+            variant="ghost"
             aria-label="原文语言"
             :model-value="sourceLanguage"
             :options="sourceLanguageOptions"
@@ -190,6 +191,7 @@ function onPanelKeydown(event: KeyboardEvent): void {
           <ThemedSelect
             class="lang-select"
             size="xs"
+            variant="ghost"
             aria-label="译文语言"
             :model-value="targetLanguage"
             :options="targetLanguageOptions"

@@ -93,6 +93,103 @@ input {
   color: inherit;
 }
 
+/* 隐藏 WebView2 / Chromium / Firefox 原生灰白数字微调箭头与蓝色搜索清除钮 */
+input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* 全局主题化复选框与单选框（排除仅读屏的 .sr-only 隐藏控件） */
+input[type='checkbox']:not(.sr-only),
+input[type='radio']:not(.sr-only) {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1.5px solid var(--line-strong);
+  background: var(--well-bg, var(--surface-2));
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+input[type='checkbox']:not(.sr-only) {
+  border-radius: 4px;
+}
+input[type='radio']:not(.sr-only) {
+  border-radius: 50%;
+}
+input[type='checkbox']:not(.sr-only):hover:not(:disabled),
+input[type='radio']:not(.sr-only):hover:not(:disabled) {
+  border-color: var(--accent);
+}
+input[type='checkbox']:not(.sr-only):checked,
+input[type='radio']:not(.sr-only):checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type='checkbox']:not(.sr-only):checked::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border: solid var(--accent-text);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(42deg);
+}
+input[type='radio']:not(.sr-only):checked::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-text);
+}
+input[type='checkbox']:not(.sr-only):disabled,
+input[type='radio']:not(.sr-only):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+:root[data-theme='pixel'] input[type='checkbox']:not(.sr-only) {
+  border-radius: 0;
+  border: 2px solid #0f0d1a;
+  background: #141915;
+}
+:root[data-theme='pixel'] input[type='checkbox']:not(.sr-only):checked {
+  background: var(--accent);
+  border-color: #0f0d1a;
+}
+:root[data-theme='blueprint'] input[type='checkbox']:not(.sr-only) {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.72);
+  background: rgba(7, 25, 47, 0.82);
+}
+:root[data-theme='blueprint'] input[type='checkbox']:not(.sr-only):checked {
+  border-style: solid;
+  border-color: #fef08a;
+  background: #fde047;
+}
+:root[data-theme='mecha'] input[type='checkbox']:not(.sr-only) {
+  border-radius: 2px;
+  border-color: rgba(245, 158, 11, 0.46);
+}
+:root[data-theme='neon'] input[type='checkbox']:not(.sr-only):checked,
+:root[data-theme='neon'] input[type='radio']:not(.sr-only):checked {
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.45);
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--text-3);

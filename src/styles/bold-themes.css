@@ -39,6 +39,16 @@
     repeating-linear-gradient(90deg, rgba(224, 242, 254, 0.45) 0 1px, transparent 1px 6px),
     linear-gradient(to right, rgba(253, 224, 71, 0.45) 0 var(--volume-progress, 60%), rgba(8, 33, 63, 0.8) var(--volume-progress, 60%) 100%);
 }
+:root[data-theme='blueprint'] .audio-mixer .volume-slider::-moz-range-track,
+:root[data-theme='blueprint'] .settings-ui .features .size-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 0;
+  border: 1px solid rgba(224, 242, 254, 0.6);
+  box-shadow: none;
+  background:
+    repeating-linear-gradient(90deg, rgba(224, 242, 254, 0.45) 0 1px, transparent 1px 6px),
+    linear-gradient(to right, rgba(253, 224, 71, 0.45) 0 var(--volume-progress, 60%), rgba(8, 33, 63, 0.8) var(--volume-progress, 60%) 100%);
+}
 :root[data-theme='blueprint'] .audio-mixer .volume-slider::-webkit-slider-thumb,
 :root[data-theme='blueprint'] .settings-ui .features .size-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -46,6 +56,16 @@
   width: 12px;
   height: 20px;
   margin-top: -7px;
+  border-radius: 0;
+  background: #fde047;
+  border: 1.5px solid #08203e;
+  box-shadow: 0 0 0 1px #fef08a;
+  clip-path: polygon(0 0, 100% 0, 100% 72%, 50% 100%, 0 72%);
+}
+:root[data-theme='blueprint'] .audio-mixer .volume-slider::-moz-range-thumb,
+:root[data-theme='blueprint'] .settings-ui .features .size-slider::-moz-range-thumb {
+  width: 12px;
+  height: 20px;
   border-radius: 0;
   background: #fde047;
   border: 1.5px solid #08203e;
@@ -108,8 +128,43 @@
   border: 1px dashed rgba(224, 242, 254, 0.45);
   background: rgba(14, 52, 96, 0.55);
 }
+:root[data-theme='blueprint'] .translation-panel .languages,
+:root[data-theme='blueprint'] .translation-panel .result,
+:root[data-theme='blueprint'] .file-preview .file-icon,
+:root[data-theme='blueprint'] .file-preview .text-content,
+:root[data-theme='blueprint'] .file-preview .preview-placeholder,
+:root[data-theme='blueprint'] .file-preview .image-viewer {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.52);
+  background: rgba(8, 33, 63, 0.65);
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .translation-panel .ghost,
+:root[data-theme='blueprint'] .file-preview button {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.55);
+  background: rgba(14, 52, 96, 0.65);
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .translation-panel .ghost:hover,
+:root[data-theme='blueprint'] .file-preview button:hover:not(:disabled) {
+  border-style: solid;
+  border-color: #fde047;
+  background: rgba(23, 74, 132, 0.85);
+  color: #ffffff;
+}
+:root[data-theme='blueprint'] .translation-panel .ghost.copy {
+  border: 1px dashed #fde047;
+  background: rgba(253, 224, 71, 0.16);
+  color: #fde047;
+}
+:root[data-theme='blueprint'] .translation-panel .ghost.copy:hover {
+  border-style: solid;
+  background: #fde047;
+  color: #08203e;
+}
 
-/* 设置中心（蓝晒图纸：毫米坐标网格底 + 双层工程图框 + 剖面斜纹选中态） */
+/* 设置中心（蓝晒图纸：毫米坐标网格底 + 四角套准角标 + 剖面斜纹选中态） */
 :root[data-theme='blueprint'] .settings-ui {
   --accent: #fde047;
   --accent-text: #08203e;
@@ -118,14 +173,31 @@
   font-family: var(--font-mono);
 }
 :root[data-theme='blueprint'] .settings-ui .win {
+  position: relative;
   border-radius: 2px;
   border: 1.5px solid rgba(224, 242, 254, 0.78);
-  outline: 1px dashed rgba(186, 230, 253, 0.45);
-  outline-offset: -6px;
   background:
     linear-gradient(rgba(186, 230, 253, 0.1) 1px, transparent 1px) 0 0 / 24px 24px,
     linear-gradient(90deg, rgba(186, 230, 253, 0.1) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--surface);
+}
+/* 用贴边四角校准角标替代穿透关闭按钮与滚动条的 -6px 虚线内框 */
+:root[data-theme='blueprint'] .settings-ui .win::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  pointer-events: none;
+  z-index: 20;
+  background:
+    linear-gradient(to right, #fde047, #fde047) top left / 9px 1.5px no-repeat,
+    linear-gradient(to bottom, #fde047, #fde047) top left / 1.5px 9px no-repeat,
+    linear-gradient(to left, #fde047, #fde047) top right / 9px 1.5px no-repeat,
+    linear-gradient(to bottom, #fde047, #fde047) top right / 1.5px 9px no-repeat,
+    linear-gradient(to right, #fde047, #fde047) bottom left / 9px 1.5px no-repeat,
+    linear-gradient(to top, #fde047, #fde047) bottom left / 1.5px 9px no-repeat,
+    linear-gradient(to left, #fde047, #fde047) bottom right / 9px 1.5px no-repeat,
+    linear-gradient(to top, #fde047, #fde047) bottom right / 1.5px 9px no-repeat;
+  opacity: 0.78;
 }
 :root[data-theme='blueprint'] .settings-ui .win-head {
   background: rgba(8, 32, 62, 0.88);
@@ -607,6 +679,13 @@
   background: linear-gradient(90deg, #ff2bd6 0%, #00f0ff var(--volume-progress, 70%), rgba(39, 21, 76, 0.85) var(--volume-progress, 70%) 100%);
   box-shadow: 0 0 10px rgba(255, 43, 214, 0.35);
 }
+:root[data-theme='neon'] .audio-mixer .volume-slider::-moz-range-track,
+:root[data-theme='neon'] .settings-ui .features .size-slider::-moz-range-track {
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff2bd6 0%, #00f0ff var(--volume-progress, 70%), rgba(39, 21, 76, 0.85) var(--volume-progress, 70%) 100%);
+  box-shadow: 0 0 10px rgba(255, 43, 214, 0.35);
+}
 :root[data-theme='neon'] .audio-mixer .volume-slider::-webkit-slider-thumb,
 :root[data-theme='neon'] .settings-ui .features .size-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -614,6 +693,15 @@
   width: 16px;
   height: 16px;
   margin-top: -4.5px;
+  border-radius: 50%;
+  background: #090414;
+  border: 2px solid #00f0ff;
+  box-shadow: 0 0 10px #00f0ff, inset 0 0 4px #ff2bd6;
+}
+:root[data-theme='neon'] .audio-mixer .volume-slider::-moz-range-thumb,
+:root[data-theme='neon'] .settings-ui .features .size-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #090414;
   border: 2px solid #00f0ff;
@@ -755,4 +843,98 @@
 :root[data-theme='neon'] .motion-switch.is-on .switch-knob {
   background: #ffffff;
   box-shadow: 0 0 6px #ffffff;
+}
+
+/* 霓虹夜行：补齐设备芯片、翻译/文件、分页、打包台、OCR、邮件与审批 6 大子面板电光覆盖 */
+:root[data-theme='neon'] .audio-mixer .output-devices .device-chip {
+  border-radius: 8px;
+  border-color: rgba(255, 43, 214, 0.34);
+  background: rgba(16, 8, 30, 0.78);
+}
+:root[data-theme='neon'] .audio-mixer .output-devices .device-chip:hover:not(.active):not(:disabled) {
+  border-color: #00f0ff;
+  color: #ffffff;
+  background: rgba(0, 240, 255, 0.12);
+}
+:root[data-theme='neon'] .audio-mixer .output-devices .device-chip.active {
+  background: linear-gradient(90deg, rgba(255, 43, 214, 0.32), rgba(0, 240, 255, 0.24));
+  color: #00f0ff;
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.28);
+}
+:root[data-theme='neon'] .file-shelf .shelf-tools button,
+:root[data-theme='neon'] .file-shelf .shelf-list li,
+:root[data-theme='neon'] .file-preview .file-icon,
+:root[data-theme='neon'] .file-preview .text-content,
+:root[data-theme='neon'] .file-preview .preview-placeholder,
+:root[data-theme='neon'] .file-preview .image-viewer,
+:root[data-theme='neon'] .translation-panel .languages,
+:root[data-theme='neon'] .translation-panel .result,
+:root[data-theme='neon'] .translation-panel .ghost {
+  border-radius: 8px;
+  border-color: rgba(255, 43, 214, 0.32);
+  background: rgba(16, 8, 30, 0.76);
+}
+:root[data-theme='neon'] .file-shelf .shelf-list li:hover,
+:root[data-theme='neon'] .file-shelf .shelf-tools button:hover:not(:disabled),
+:root[data-theme='neon'] .translation-panel .ghost:hover {
+  border-color: #00f0ff;
+  background: rgba(0, 240, 255, 0.12);
+}
+:root[data-theme='neon'] .pop .pager-btn {
+  border-radius: 7px;
+  border-color: rgba(255, 43, 214, 0.32);
+  background: rgba(16, 8, 30, 0.76);
+}
+:root[data-theme='neon'] .pop .pager-btn.is-on:not(:disabled) {
+  background: linear-gradient(90deg, #ff2bd6, #9333ea);
+  color: #ffffff;
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(255, 43, 214, 0.42);
+}
+:root[data-theme='neon'] .pack-console .run-focus:not(.is-error),
+:root[data-theme='neon'] .pack-console .editor,
+:root[data-theme='neon'] .pack-console .confirm-bar:not(.is-remote),
+:root[data-theme='neon'] .ocr-panel .ocr-state-box:not(.is-error),
+:root[data-theme='neon'] .ocr-panel .ocr-textarea,
+:root[data-theme='neon'] .approval .approval-body,
+:root[data-theme='neon'] .question-form textarea {
+  border-radius: 10px;
+  border-color: rgba(255, 43, 214, 0.34);
+  background: rgba(16, 8, 30, 0.78);
+}
+:root[data-theme='neon'] .pack-console .port-box,
+:root[data-theme='neon'] .pack-console .log,
+:root[data-theme='neon'] .pack-console .run-summary-card:not(.is-err):not(.is-done) {
+  border-radius: 8px;
+  border-color: rgba(0, 240, 255, 0.32);
+  background: rgba(12, 5, 24, 0.82);
+}
+:root[data-theme='neon'] .pack-console .btn-inline:not(.danger):not(:disabled),
+:root[data-theme='neon'] .ocr-panel .ocr-btn:not(.ocr-btn-primary):not(:disabled),
+:root[data-theme='neon'] .mail-panel button:not(.dismiss):not(.copied):not(:disabled),
+:root[data-theme='neon'] .approval button:not(.allow):not(.deny):not(.delegate):not(:disabled),
+:root[data-theme='neon'] .question-form button:not(.submit):not(.delegate):not(:disabled) {
+  border-radius: 8px;
+  border-color: rgba(255, 43, 214, 0.36);
+  background: rgba(22, 10, 42, 0.82);
+}
+:root[data-theme='neon'] .pack-console .btn-primary:not(:disabled),
+:root[data-theme='neon'] .pack-console .btn-run:not(.is-remote):not(:disabled),
+:root[data-theme='neon'] .ocr-panel .ocr-btn-primary:not(:disabled),
+:root[data-theme='neon'] .approval .allow:not(:disabled),
+:root[data-theme='neon'] .question-form .submit:not(:disabled) {
+  background: linear-gradient(90deg, #ff2bd6, #7c3aed, #00f0ff);
+  color: #ffffff;
+  border-color: #00f0ff;
+  box-shadow: 0 0 12px rgba(255, 43, 214, 0.42);
+}
+:root[data-theme='neon'] .mail-panel .code {
+  border-color: #00f0ff;
+  background: rgba(0, 240, 255, 0.14);
+  color: #00f0ff;
+}
+:root[data-theme='neon'] .question-form .choice:has(input:checked) {
+  border-color: #00f0ff;
+  background: rgba(0, 240, 255, 0.14);
 }

@@ -164,6 +164,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding-bottom: 5px;
   color: var(--text);
 }
 .ocr-head {
