@@ -154,7 +154,8 @@ const contours = computed(() => {
   }
 
   if (v === 'mecha') {
-    const cut = Math.min(expanded ? 13 : line ? 2 : 8, h / 2 - .5, w / 2 - .5)
+    // 基于实际高度平滑插值倒角尺寸，避免展开/收起临界高度切角阶跃。
+    const cut = Math.min(line ? 2 : 8 + 5 * expandRatio, h / 2 - .5, w / 2 - .5)
     const face = `M ${cut} .75 H ${w - cut} L ${w - .75} ${cut} V ${h - cut} L ${w - cut} ${h - .75} H ${cut} L .75 ${h - cut} V ${cut} Z`
     const sheen = `M ${cut + 2} 1.8 H ${Math.max(cut + 2, w - cut - 2)}`
     const hem = `M ${cut + 6} ${h - 1.5} H ${Math.max(cut + 6, w - cut - 6)}`

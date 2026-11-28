@@ -38,6 +38,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .bar-root {
   display: block;
+  width: 100%;
   background: transparent;
 }
 </style>

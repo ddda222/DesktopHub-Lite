@@ -57,8 +57,9 @@ body {
 }
 
 :root[data-shell='bar'] #app {
-  /* 不能参与行盒基线对齐，否则 14px 高的热区会被推离窗口顶边。 */
+  /* 不能参与行盒基线对齐，否则 14px 高的热区会被推离窗口顶边；满宽用于配合居中停靠零闪跳。 */
   display: block;
+  width: 100%;
 }
 
 :root[data-shell='settings'] #app {

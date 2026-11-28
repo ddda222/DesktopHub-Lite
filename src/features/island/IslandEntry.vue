@@ -88,7 +88,7 @@ const windowDrag = useWindowDrag(viewport, {
   },
   onEnd: () => {
     pressed.value = false
-    if (!hovering.value) leave()
+    if (!hovering.value && leftAfterExpand) leave()
   },
   onError: error => pushToast(`无法拖动窗口：${String(error)}`, 'error')
 })
@@ -401,11 +401,12 @@ const paneTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION 
 const contentRevealTransition = computed(() => {
   if (motionReduced.value) return INSTANT_TRANSITION
   if (expanded.value) return motionPreset.value.contentRevealTransition
-  if (motionMode.value === 'flicker') return { duration: 0.035, delay: 0, ease: 'none' }
+  if (motionMode.value === 'flicker') return { duration: 0.03, delay: 0, ease: 'none' }
+  // 收起时正文与工具栏快速干净退场（强缓出前段迅速降透明），避免收缩外壳底边残留淡淡灰字与叠层。
   return {
-    duration: Math.min(0.2, Math.max(0.14, (collapseMs.value / 1000) * 0.68)),
+    duration: Math.min(0.11, Math.max(0.07, (collapseMs.value / 1000) * 0.36)),
     delay: 0,
-    ease: 'power1.inOut'
+    ease: 'power2.out'
   }
 })
 const contentHiddenPose = computed(() => {
@@ -431,9 +432,15 @@ const paneInitial = computed(() => {
 })
 const capsuleTextTransition = computed(() => {
   if (motionReduced.value) return INSTANT_TRANSITION
+  if (motionMode.value === 'flicker') return { duration: 0.035, delay: 0, ease: 'none' }
+  // 收起时等顶部工具栏基本淡出后再浮现胶囊读数，避免两者同帧上下重叠。
   return expanded.value
-    ? { duration: 0.09, ease: 'power3.out' }
-    : { duration: 0.14, delay: 0.08, ease: 'power3.out' }
+    ? { duration: 0.08, ease: 'power3.out' }
+    : {
+        duration: 0.13,
+        delay: Math.min(0.12, Math.max(0.08, (collapseMs.value / 1000) * 0.42)),
+        ease: 'power3.out'
+      }
 })
 const actionHoverPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.tileHover))
 const actionTapPose = computed(() => (motionReduced.value ? undefined : motionPreset.value.buttonTap))
@@ -515,10 +522,23 @@ const cornerRadius = computed(() => {
 })
 const bounds = computed(() => ({
   width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (suppressed.value ? 0 : 4)),
-  height: Math.max(14, visibleHeight.value + (expanded.value ? 24 : suppressed.value ? 0 : 4))
+  // 展开态与收起态共用 2px 顶部边距，底部保留 14px 余量以容纳弹性微过冲，开合零上下跳动。
+  height: Math.max(14, visibleHeight.value + (expanded.value ? 16 : suppressed.value ? 0 : 4))
 }))
-// 原生窗口只在动画前扩容、结束后收紧；动画由透明窗口内的 CSS 独立完成。
-const viewportSize = ref({ ...bounds.value })
+const DESKTOP_MIN_STAGE_HEIGHT = 560
+/** 计算桌面端稳态定帧窗口尺寸：固定为展开最大宽与高水位高度，日常开合与切页不改原生窗口尺寸，仅切换 HRGN。 */
+function computeDesktopStageSize(
+  target: { width: number; height: number },
+  currentHeight = DESKTOP_MIN_STAGE_HEIGHT
+): { width: number; height: number } {
+  const width = Math.max(140, Math.ceil(expandedWidth.value), Math.ceil(target.width))
+  const maxStageH = Math.min(1180, Math.max(DESKTOP_MIN_STAGE_HEIGHT, Math.ceil(maxExpandedHeight.value + 16)))
+  const desiredH = Math.max(DESKTOP_MIN_STAGE_HEIGHT, Math.ceil(target.height))
+  const height = Math.min(maxStageH, Math.max(currentHeight, desiredH))
+  return { width, height }
+}
+// 桌面端使用定帧稳定画布避免跨进程 resize/横移闪烁；浏览器样稿保持贴合内容尺寸。
+const viewportSize = ref(isDesktop ? computeDesktopStageSize(bounds.value) : { ...bounds.value })
 const viewportStyle = computed(() => ({
   width: `${viewportSize.value.width}px`, height: `${viewportSize.value.height}px`
 }))
@@ -572,6 +592,17 @@ let closeTimer: ReturnType<typeof setTimeout> | undefined
 let manualCollapseUntil = 0
 let closeCommitted = false
 let reenterAfterClose = false
+/** 标记本次展开后指针是否确实从灵动岛区域移出过，避免非悬停展开在岛内操作时被误自动收起。 */
+let leftAfterExpand = false
+/** 标记悬停触发的展开正处于 IPC 在途或首帧静默准备期，指针快速移开时直接撤销避免闪展黑影。 */
+let hoverExpanding = false
+/** 桌面端两阶段无闪黑扩容标志：窗口已扩容但 HRGN 暂锁在旧面板轮廓内，待 WebView2 提交透明新帧后再放开。 */
+let expandStaging = false
+let expandStageGen = 0
+let expandStageFrameA = 0
+let expandStageFrameB = 0
+/** 标记当前几何动画处于收缩方向：桌面定帧窗口下直接复用展开态 HRGN，收缩启动零 Win32 调用。 */
+let geometryShrinking = false
 let clockTimer: ReturnType<typeof setTimeout> | undefined
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
 let quickOcrTimer: ReturnType<typeof setTimeout> | undefined
@@ -608,7 +639,7 @@ let observer: ResizeObserver | undefined
 let contentObserver: ResizeObserver | undefined
 let frame = 0
 let measureFrame = 0
-let sending = false
+let sendingPromise: Promise<void> | null = null
 let disposed = false
 let queued: { width: number; height: number; regions: BarRegion[] } | undefined
 let sent = ''
@@ -765,43 +796,110 @@ function updateTheme(): void {
 }
 
 watch(() => state.settings.theme, updateTheme)
-watch(geometryMoving, queueGeometry, { flush: 'post' })
+watch(geometryMoving, () => queueGeometry(), { flush: 'post' })
+
+function cancelExpandStaging(): void {
+  expandStageGen++
+  expandStaging = false
+  if (expandStageFrameA) {
+    cancelAnimationFrame(expandStageFrameA)
+    expandStageFrameA = 0
+  }
+  if (expandStageFrameB) {
+    cancelAnimationFrame(expandStageFrameB)
+    expandStageFrameB = 0
+  }
+}
 
 function settleGeometry(): void {
   clearTimeout(geometryTimer)
   geometryTimer = undefined
-  viewportSize.value = { ...bounds.value }
+  cancelExpandStaging()
+  geometryShrinking = false
+  viewportSize.value = isDesktop
+    ? computeDesktopStageSize(bounds.value, viewportSize.value.height)
+    : { ...bounds.value }
   geometryMoving.value = false
   queueGeometry()
 }
 
-function reserveGeometry(): void {
+function reserveGeometry(prevWidth?: number, prevHeight?: number): void {
   clearTimeout(geometryTimer)
+  cancelExpandStaging()
   const target = bounds.value
   if ((isDesktop && tucked.value) || state.ui.islandReducedMotion || reducedMotion.value) {
     geometryMoving.value = false
-    viewportSize.value = { ...target }
+    geometryShrinking = false
+    viewportSize.value = isDesktop
+      ? computeDesktopStageSize(target, viewportSize.value.height)
+      : { ...target }
     queueGeometry()
     return
   }
-  const headroom = expanded.value ? motionPreset.value.bounceHeadroom : 0
-  geometryMoving.value = true
-  viewportSize.value = {
-    width: Math.max(viewportSize.value.width, target.width + headroom),
-    height: Math.max(viewportSize.value.height, target.height + headroom)
+  const headroom = expanded.value && !pageSwitching.value ? motionPreset.value.bounceHeadroom : 0
+  if (isDesktop) {
+    const stage = computeDesktopStageSize(
+      { width: target.width + headroom, height: target.height + headroom },
+      viewportSize.value.height
+    )
+    const stageGrowing = stage.width > viewportSize.value.width || stage.height > viewportSize.value.height
+    const isShrinking = !stageGrowing &&
+      prevWidth !== undefined &&
+      prevHeight !== undefined &&
+      target.width <= prevWidth &&
+      target.height <= prevHeight
+    geometryMoving.value = true
+    geometryShrinking = isShrinking
+    viewportSize.value = stage
+    if (stageGrowing) {
+      // 仅在极少数超高面板突破定帧水位时执行两阶段无黑影扩容。
+      stageDesktopExpandGeometry(stage.width, stage.height)
+    } else if (!isShrinking) {
+      // 定帧窗口尺寸不变：展开/增高时直接同步放开目标包络 HRGN，零延迟且零 SetWindowPos。
+      sendDesktopExpandRegionNow(stage.width, stage.height, target.width + headroom, target.height + headroom)
+    }
+    // 收缩方向（isShrinking === true）：当前展开态 HRGN 已完全包含收缩轨迹，不触发任何 Win32 调用。
+  } else {
+    const nextWidth = Math.max(viewportSize.value.width, target.width + headroom)
+    const nextHeight = Math.max(viewportSize.value.height, target.height + headroom)
+    geometryMoving.value = true
+    geometryShrinking = false
+    viewportSize.value = { width: nextWidth, height: nextHeight }
   }
   const durationMs = Math.max(
     expanded.value ? expandMs.value : collapseMs.value,
     pageSwitching.value ? pageSwitchDuration() : 0
   )
-  geometryTimer = setTimeout(settleGeometry, durationMs + 140)
+  geometryTimer = setTimeout(settleGeometry, durationMs + 180)
 }
 
 function onShellAnimationComplete(): void {
   if (geometryMoving.value && !dismissSession) settleGeometry()
 }
 
-watch([bounds, expanded, () => state.ui.islandReducedMotion, reducedMotion], reserveGeometry, { flush: 'sync' })
+// 仅监听数值标量而非 bounds 对象引用，防止展开稳态下无关重算重复触发窗口扩容或闪跳。
+watch(
+  [() => bounds.value.width, () => bounds.value.height, expanded, () => state.ui.islandReducedMotion, reducedMotion],
+  ([w, h, exp, redA, redB], [prevW, prevH, prevExp, prevRedA, prevRedB]) => {
+    if (
+      w === prevW &&
+      h === prevH &&
+      exp === prevExp &&
+      redA === prevRedA &&
+      redB === prevRedB
+    ) {
+      return
+    }
+    reserveGeometry(prevW, prevH)
+  },
+  { flush: 'sync' }
+)
+// 缩放比例或屏幕宽度变化时同步更新桌面定帧窗口宽度。
+watch(expandedWidth, () => {
+  if (!isDesktop) return
+  viewportSize.value = computeDesktopStageSize(bounds.value, viewportSize.value.height)
+  queueGeometry()
+}, { flush: 'post' })
 function updateMotion(): void { reducedMotion.value = systemMotion.matches }
 
 function cancelHover(): void { clearTimeout(hoverTimer) }
@@ -815,7 +913,7 @@ watch(keepTaskOpen, keep => {
   if (keep) {
     clearTimeout(leaveTimer)
     if (!closeCommitted) cancelHoverClose()
-  } else if (hostExpanded.value && !hovering.value) leave()
+  } else if (hostExpanded.value && !hovering.value && leftAfterExpand) leave()
 }, { flush: 'sync' })
 
 watch(() => approval.value?.id, id => {
@@ -830,6 +928,7 @@ function expand(value: boolean, focus = false): void {
     if (!hostExpanded.value) mailSelected.value = newMail.value.length > 0
     closeCommitted = false
     reenterAfterClose = false
+    leftAfterExpand = false
     cancelHoverClose()
   } else {
     if (closeCommitted) return
@@ -1026,7 +1125,7 @@ function endDismissDrag(event: PointerEvent, cancelled = false): void {
 
   suppressDismissClick = session.moved
   startDismissSnapBack(velocityPxPerSec)
-  if (!hovering.value) leave()
+  if (!hovering.value && leftAfterExpand) leave()
 }
 
 function onDismissClick(): void {
@@ -1093,12 +1192,22 @@ function scheduleHoverOpen(): void {
       : state.ui.islandHoverMs
   hoverTimer = setTimeout(() => {
     hoverTimer = undefined
-    if (hovering.value && !pressed.value && !quickMenuOpen.value && !hoveringQuickAction.value && performance.now() >= manualCollapseUntil) expand(true)
+    // 触发前再次校验真实 :hover，避免指针快速滑出顶边偶发 mouseleave 滞后导致误展开。
+    const stillHovering = hovering.value && (!element.value || element.value.matches(':hover'))
+    if (!stillHovering) {
+      hovering.value = false
+      return
+    }
+    if (!pressed.value && !quickMenuOpen.value && !hoveringQuickAction.value && performance.now() >= manualCollapseUntil) {
+      hoverExpanding = true
+      expand(true)
+    }
   }, delayMs)
 }
 
 function enter(): void {
   hovering.value = true
+  leftAfterExpand = false
   availableWidth.value = window.screen.availWidth
   cancelHover()
   clearTimeout(leaveTimer)
@@ -1110,6 +1219,21 @@ function enter(): void {
   }
   if (hoverClosing.value) cancelHoverClose()
   if (!hostExpanded.value && !quickMenuOpen.value && !hoveringQuickAction.value) scheduleHoverOpen()
+}
+
+function onMouseLeave(): void {
+  if (hostExpanded.value || hoverExpanding) leftAfterExpand = true
+  // 悬停展开尚在 IPC 途中或静默准备阶段，指针已快速移开则立即撤回，杜绝展开黑影一闪而过。
+  if (hoverExpanding && (!hostExpanded.value || expandStaging)) {
+    hoverExpanding = false
+    hovering.value = false
+    cancelHover()
+    clearTimeout(leaveTimer)
+    cancelExpandStaging()
+    expand(false)
+    return
+  }
+  leave()
 }
 
 function editing(): boolean {
@@ -1154,14 +1278,21 @@ function leave(): void {
 }
 
 function handlePointerUp(): void {
+  const wasPressed = pressed.value
   pressed.value = false
-  if (!hovering.value) leave()
+  if (wasPressed && !hovering.value && leftAfterExpand) leave()
 }
 
-function focusout(): void {
+function focusout(event: FocusEvent): void {
+  const nextFocused = event.relatedTarget as Node | null
+  // 焦点仍在灵动岛内部流转（如点击分类、切换标签或按钮获焦），不视为离开。
+  if (nextFocused && element.value?.contains(nextFocused)) return
   queueMicrotask(() => {
     if (!document.hasFocus()) composing.value = false
-    if (!hovering.value) leave()
+    const active = document.activeElement
+    if (active instanceof Node && element.value?.contains(active)) return
+    // 仅当指针此前确实移出过灵动岛（被输入态暂缓收起）时，失焦后补触发收起。
+    if (!hovering.value && leftAfterExpand) leave()
   })
 }
 
@@ -1170,15 +1301,27 @@ watch(hostExpanded, value => {
   closeCommitted = false
   reenterAfterClose = false
   cancelHoverClose()
-  if (!value) {
-    closeAnyOpenThemedSelect(element.value)
-    clearDismissVisual()
-    mailSelected.value = false
-    cancelHover()
-    clearTimeout(leaveTimer)
-    composing.value = false
-    pressed.value = false
-    if (shouldReopen && !quickMenuOpen.value && !hoveringQuickAction.value) expand(true)
+  if (value) {
+    // 悬停展开的宿主广播返回时，若指针已提前移开，直接静默撤回而不展示空壳动画。
+    if (hoverExpanding && !hovering.value) {
+      hoverExpanding = false
+      cancelExpandStaging()
+      expand(false)
+    }
+    return
+  }
+  hoverExpanding = false
+  leftAfterExpand = false
+  closeAnyOpenThemedSelect(element.value)
+  clearDismissVisual()
+  mailSelected.value = false
+  cancelHover()
+  clearTimeout(leaveTimer)
+  composing.value = false
+  pressed.value = false
+  if (shouldReopen && !quickMenuOpen.value && !hoveringQuickAction.value) {
+    hoverExpanding = true
+    expand(true)
   }
 })
 
@@ -1229,7 +1372,7 @@ watch(() => state.ui.islandAnchor, () => { if (!isDesktop) windowDrag.reset() })
 watch(() => shelf.busy, busy => {
   if (!busy) {
     pressed.value = false
-    if (!hovering.value) leave()
+    if (!hovering.value && leftAfterExpand) leave()
   }
 })
 
@@ -1362,46 +1505,167 @@ function scrollWheel(event: WheelEvent): void {
   }
 }
 
+/** 计算当前可见外壳在目标新视口坐标系中的精确贴合区域，用于扩容首帧遮罩未渲染的透明区。 */
+function computeLockedPanelRegion(viewportW: number, viewportH: number): BarRegion | null {
+  const surface = panel.value
+  if (!surface) return null
+  const box = surface.getBoundingClientRect()
+  const w = Math.min(Math.ceil(box.width), Math.ceil(viewportW))
+  const h = Math.min(Math.ceil(box.height), Math.ceil(viewportH))
+  if (w <= 0 || h <= 0) return null
+  const anchor = state.ui.islandAnchor
+  const x = anchor === 'left'
+    ? 0
+    : anchor === 'right'
+      ? Math.max(0, Math.round(viewportW - w))
+      : Math.max(0, Math.round((viewportW - w) / 2))
+  const y = Math.min(suppressed.value ? 0 : 2, Math.max(0, Math.ceil(viewportH) - h))
+  const radius = Math.min(parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0, w / 2, h / 2)
+  return { x, y, width: Math.min(w, Math.ceil(viewportW) - x), height: Math.min(h, Math.ceil(viewportH) - y), radius }
+}
+
+/**
+ * 桌面端两阶段无黑影扩容：
+ * 1. 先以旧面板紧贴区域作为 HRGN 扩大原生窗口，外部未提交的新区域被系统完全裁掉；
+ * 2. 等待扩容 IPC 落地并经过两帧 rAF，确保 WebView2 透明合成帧就绪后再放开 HRGN 并启动展开动效。
+ */
+function stageDesktopExpandGeometry(width: number, height: number): void {
+  if (disposed) return
+  if (frame) {
+    cancelAnimationFrame(frame)
+    frame = 0
+  }
+  const w = Math.ceil(width)
+  const h = Math.ceil(height)
+  const locked = computeLockedPanelRegion(w, h)
+  if (!locked) {
+    queued = { width: w, height: h, regions: [{ x: 0, y: 0, width: w, height: h, radius: 0 }] }
+    void sendGeometry()
+    return
+  }
+  const gen = ++expandStageGen
+  expandStaging = true
+  queued = { width: w, height: h, regions: [locked] }
+  void sendGeometry().then(() => {
+    if (gen !== expandStageGen || disposed) return
+    expandStageFrameA = requestAnimationFrame(() => {
+      expandStageFrameA = 0
+      if (gen !== expandStageGen || disposed) return
+      expandStageFrameB = requestAnimationFrame(() => {
+        expandStageFrameB = 0
+        if (gen !== expandStageGen || disposed) return
+        if (hoverExpanding && !hovering.value) {
+          hoverExpanding = false
+          expandStaging = false
+          expand(false)
+          settleGeometry()
+          return
+        }
+        hoverExpanding = false
+        expandStaging = false
+        queued = { width: w, height: h, regions: [{ x: 0, y: 0, width: w, height: h, radius: 0 }] }
+        void sendGeometry()
+        runShellResize()
+      })
+    })
+  })
+}
+
+/** 计算动画扩张期间在定帧窗口内的最小包围盒，只放开动画需要覆盖的区域。 */
+function computeMovingEnvelopeRegion(stageW: number, stageH: number, targetW: number, targetH: number): BarRegion {
+  const w = Math.min(Math.ceil(stageW), Math.max(1, Math.ceil(targetW)))
+  const h = Math.min(Math.ceil(stageH), Math.max(1, Math.ceil(targetH)))
+  const anchor = state.ui.islandAnchor
+  const x = anchor === 'left'
+    ? 0
+    : anchor === 'right'
+      ? Math.max(0, Math.ceil(stageW) - w)
+      : Math.max(0, Math.round((stageW - w) / 2))
+  return { x, y: 0, width: Math.min(w, Math.ceil(stageW) - x), height: h, radius: 0 }
+}
+
+/** 定帧窗口尺寸不变时，展开瞬间同步放开目标动画包络 HRGN，避免等待 rAF 产生裁切。 */
+function sendDesktopExpandRegionNow(stageW: number, stageH: number, targetW: number, targetH: number): void {
+  if (disposed) return
+  if (frame) {
+    cancelAnimationFrame(frame)
+    frame = 0
+  }
+  const w = Math.ceil(stageW)
+  const h = Math.ceil(stageH)
+  queued = {
+    width: w,
+    height: h,
+    regions: [computeMovingEnvelopeRegion(w, h, targetW, targetH)]
+  }
+  void sendGeometry()
+}
+
 function queueGeometry(): void {
-  if (frame || disposed) return
+  if (frame || disposed || expandStaging) return
+  if (isDesktop && geometryMoving.value && geometryShrinking) return
   frame = requestAnimationFrame(() => {
     frame = 0
+    if (expandStaging) return
+    if (isDesktop && geometryMoving.value && geometryShrinking) return
     const rect = viewport.value?.getBoundingClientRect()
     if (!rect) return
+    const rectW = Math.ceil(rect.width)
+    const rectH = Math.ceil(rect.height)
     const regions: BarRegion[] = []
     if (geometryMoving.value) {
-      // 仅在这块小浮窗内临时预留动画空间；不逐帧调用 SetWindowRgn，避免裁切追帧。
-      regions.push({ x: 0, y: 0, width: Math.ceil(rect.width), height: Math.ceil(rect.height), radius: 0 })
-    } else if (!tucked.value) {
+      // 仅放开本次动画包络区域，避免不必要地放开整块大矩形。
+      regions.push(computeMovingEnvelopeRegion(rectW, rectH, bounds.value.width, bounds.value.height))
+    } else if (tucked.value) {
+      // 全屏避让细线态：用 HRGN 精准裁切为顶部 140×14 热区，其余透明区域完全穿透给全屏应用。
+      const hit = element.value?.getBoundingClientRect()
+      if (hit && hit.width > 0 && hit.height > 0) {
+        const x = Math.max(0, Math.round(hit.left - rect.left))
+        const y = Math.max(0, Math.round(hit.top - rect.top))
+        const width = Math.min(Math.ceil(hit.width), rectW - x)
+        const height = Math.min(Math.ceil(hit.height), rectH - y)
+        if (width > 0 && height > 0) regions.push({ x, y, width, height, radius: 0 })
+      }
+    } else {
       for (const surface of [panel.value]) {
         if (!surface) continue
         const box = surface.getBoundingClientRect()
         const x = Math.max(0, Math.round(box.left - rect.left))
         const y = Math.max(0, Math.round(box.top - rect.top))
-        const width = Math.min(Math.ceil(box.width), Math.ceil(rect.width) - x)
-        const height = Math.min(Math.ceil(box.height), Math.ceil(rect.height) - y)
+        const width = Math.min(Math.ceil(box.width), rectW - x)
+        const height = Math.min(Math.ceil(box.height), rectH - y)
         if (width > 0 && height > 0) regions.push({ x, y, width, height,
           radius: Math.min(parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0, width / 2, height / 2) })
       }
     }
-    queued = { width: Math.ceil(rect.width), height: Math.ceil(rect.height), regions }
+    queued = { width: rectW, height: rectH, regions }
     void sendGeometry()
   })
 }
 
-async function sendGeometry(): Promise<void> {
-  if (sending || !queued || disposed) return
-  const next = queued
-  queued = undefined
-  const key = JSON.stringify(next)
-  if (sent === key) return
-  sending = true
-  try { await resizeBar(next.width, next.height, next.regions); sent = key }
-  catch { sent = '' }
-  finally {
-    sending = false
-    if (queued) void sendGeometry()
-  }
+function sendGeometry(): Promise<void> {
+  if (disposed) return Promise.resolve()
+  if (sendingPromise) return sendingPromise
+  if (!queued) return Promise.resolve()
+  sendingPromise = (async () => {
+    try {
+      while (queued && !disposed) {
+        const next = queued
+        queued = undefined
+        const key = JSON.stringify(next)
+        if (sent === key) continue
+        try {
+          await resizeBar(next.width, next.height, next.regions)
+          sent = key
+        } catch {
+          sent = ''
+        }
+      }
+    } finally {
+      sendingPromise = null
+    }
+  })()
+  return sendingPromise
 }
 
 function measureContent(): void {
@@ -1420,13 +1684,14 @@ watch([ocrPanelOpen, () => state.ocr.status, () => state.ocr.text, page], () => 
 
 function runShellResize(): void {
   const el = panel.value
-  if (!el) return
+  if (!el || expandStaging) return
   shellTween?.kill()
   shellTween = null
   const targetW = `${visibleWidth.value}px`
   const targetH = `${visibleHeight.value}px`
+  const targetRadius = `${cornerRadius.value}px`
   if ((isDesktop && tucked.value) || motionReduced.value) {
-    gsap.set(el, { width: targetW, height: targetH })
+    gsap.set(el, { width: targetW, height: targetH, borderRadius: targetRadius })
     onShellAnimationComplete()
     return
   }
@@ -1438,13 +1703,13 @@ function runShellResize(): void {
       }
     })
     if (expanded.value) {
-      // 粘液蠕虫特征：先横向拉开，慢半拍再垂展高度
-      tl.to(el, { width: targetW, duration: 0.28, ease: 'back.out(1.45)' }, 0)
-        .to(el, { height: targetH, duration: 0.42, ease: 'elastic.out(0.95, 0.62)' }, 0.085)
+      // 粘液蠕虫特征：先横向拉开，慢半拍再垂展高度，圆角随同一时间轴过渡
+      tl.to(el, { width: targetW, borderRadius: targetRadius, duration: 0.28, ease: 'back.out(1.25)' }, 0)
+        .to(el, { height: targetH, duration: 0.36, ease: 'back.out(1.2)' }, 0.085)
     } else {
       // 收起先压扁，再缩窄
       tl.to(el, { height: targetH, duration: 0.16, ease: 'power3.inOut' }, 0)
-        .to(el, { width: targetW, duration: 0.22, ease: 'power3.out' }, 0.065)
+        .to(el, { width: targetW, borderRadius: targetRadius, duration: 0.22, ease: 'power3.out' }, 0.065)
     }
     shellTween = tl
     return
@@ -1453,6 +1718,7 @@ function runShellResize(): void {
   shellTween = gsap.to(el, {
     width: targetW,
     height: targetH,
+    borderRadius: targetRadius,
     duration: Math.max(0.001, spec.duration),
     ease: spec.ease,
     onComplete: () => {
@@ -1463,6 +1729,11 @@ function runShellResize(): void {
 }
 
 watch([visibleWidth, visibleHeight], runShellResize, { flush: 'post' })
+watch(cornerRadius, radius => {
+  if (!shellTween && panel.value) {
+    gsap.set(panel.value, { borderRadius: `${radius}px` })
+  }
+}, { flush: 'post' })
 
 watch([expanded, isNoticeStatus], ([open, notice]) => {
   const el = capsuleTextEl.value
@@ -1536,12 +1807,13 @@ watch(expanded, (open) => {
   }
 
   if (ch) {
+    // 顶部工具栏贴近胶囊区，收起时略快退场以避开胶囊文字浮现。
     chromeTween = gsap.to(ch, {
       opacity: 0,
       y: -4,
       scaleX: 0.98,
       scaleY: 0.98,
-      duration: Math.max(0.001, spec.duration),
+      duration: Math.max(0.001, spec.duration * 0.8),
       ease: spec.ease
     })
   }
@@ -1597,7 +1869,11 @@ watch([page, expanded, viewingMail, ocrPanelOpen], () => {
 
 onMounted(() => {
   if (panel.value) {
-    gsap.set(panel.value, { width: `${visibleWidth.value}px`, height: `${visibleHeight.value}px` })
+    gsap.set(panel.value, {
+      width: `${visibleWidth.value}px`,
+      height: `${visibleHeight.value}px`,
+      borderRadius: `${cornerRadius.value}px`
+    })
   }
   if (capsuleTextEl.value) {
     const hide = expanded.value && !isNoticeStatus.value
@@ -1689,6 +1965,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true
+  cancelExpandStaging()
   shellTween?.kill()
   capsuleTween?.kill()
   chromeTween?.kill()
@@ -1728,11 +2005,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="viewport" class="island-viewport" :class="`anchor-${state.ui.islandAnchor}`" :style="viewportStyle">
+  <div ref="viewport" class="island-viewport" :class="[`anchor-${state.ui.islandAnchor}`, { 'desktop-shell': isDesktop }]" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
     :class="[{ expanded, 'page-switching': pageSwitching, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed, 'has-quick-menu': quickMenuOpen && !expanded }, `variant-${variant}`, `motion-${motionMode}`]"
     :style="rootStyle" aria-label="顶部灵动岛"
-    @mouseenter="enter" @mouseleave="leave" @pointermove="trackPointerSpeed" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
+    @mouseenter="enter" @mouseleave="onMouseLeave" @pointermove="trackPointerSpeed" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
     <button v-if="!revealed" class="tuck-trigger" type="button" aria-label="展开灵动岛" @click="expand(true, true)" />
     <div
@@ -2063,6 +2340,9 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 材质作用于主浮层；顶部图标导航与内容共用外壳。 */
 .island-viewport { position: relative; z-index: 2; flex: none; background: transparent; }
+/* 桌面态居中/右停靠时随真实原生窗口宽度自动对齐，杜绝收起尾帧窗口缩容前的瞬间水平闪跳。 */
+.island-viewport.desktop-shell.anchor-center { margin-inline: auto; }
+.island-viewport.desktop-shell.anchor-right { margin-left: auto; }
 .island-viewport > .island-hit-area { position: absolute; top: 0; left: 50%; transform: translateX(-50%); }
 .island-viewport.anchor-left > .island-hit-area { left: 0; transform: none; }
 .island-viewport.anchor-right > .island-hit-area { left: auto; right: 0; transform: none; }
@@ -2086,7 +2366,8 @@ onBeforeUnmount(() => {
   --glass-backdrop: none;
   --island-drop-shadow: inset 0 1px 0 var(--island-top-sheen), inset 0 0 0 1px var(--island-rim, var(--island-outline));
 }
-.island-hit-area.expanded { --surface-inset: 12px; }
+/* 展开态与收起态保持统一的 2px 顶部边距，消除开合瞬间 10px 纵向跳动。 */
+.island-hit-area.expanded { --surface-inset: 2px; }
 /* 从细线展开时顶边不下移，避免窗口裁切热区后把原位置的鼠标判为移出。 */
 .island-hit-area.desktop.avoiding { --surface-inset: 0px; }
 .island-hit-area:not(.expanded) { --geometry-time: var(--collapse-time); --geometry-ease: var(--ease-drawer); }
@@ -2115,7 +2396,6 @@ onBeforeUnmount(() => {
   position: absolute; top: var(--surface-inset); left: -320px; right: -320px; margin-inline: auto; transform-origin: 50% 0;
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   box-shadow: inset 0 1px 0 var(--island-top-sheen);
-  transition: top var(--geometry-time) var(--geometry-ease), border-radius var(--geometry-time) var(--geometry-ease);
 }
 .island-viewport.anchor-left > .island-hit-area > .island { left: 0; right: auto; margin-inline: 0; transform-origin: 0 0; }
 .island-viewport.anchor-right > .island-hit-area > .island { left: auto; right: 0; margin-inline: 0; transform-origin: 100% 0; }
@@ -2247,21 +2527,20 @@ onBeforeUnmount(() => {
   overflow: clip; padding: 0 var(--content-gutter) 18px;
 }
 .expanded .expanded-content.can-scroll { overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
+.expanded .expanded-content.can-scroll .island-chrome,
 .expanded .expanded-content.can-scroll .island-content { max-width: 100%; }
-.moving :deep(::-webkit-scrollbar-thumb),
-.page-switching :deep(::-webkit-scrollbar-thumb) { background: transparent !important; }
-.moving .feature-pane,
-.moving .app-grid,
-.page-switching .feature-pane { scrollbar-color: transparent transparent; }
+/* 仅在收起动画期间隐去内部滚动条；展开时让滚动条随正文透明度自然浮现，避免尾帧突兀闪现。 */
+.island-hit-area:not(.expanded).moving :deep(::-webkit-scrollbar-thumb) { background: transparent !important; }
+.island-hit-area:not(.expanded).moving .feature-pane,
+.island-hit-area:not(.expanded).moving .app-grid { scrollbar-color: transparent transparent; }
 .moving .island-chrome,
 .moving .island-content { will-change: transform, opacity; }
+/* 工具栏与正文共同锁定展开态最终内容宽并水平居中，收起动画中途不被外壳挤压、不触发导航栏滚动条。 */
 .island-chrome {
+  position: relative; left: 50%; translate: -50% 0;
   display: flow-root;
   width: calc(var(--content-width) - 2 * var(--content-gutter));
-  max-width: 100%;
-  margin-inline: auto;
 }
-/* 工具栏随外壳分配可用宽度，正文维持最终列宽，开合途中不会反复换行。 */
 .island-content {
   position: relative; left: 50%; translate: -50% 0;
   width: calc(var(--content-width) - 2 * var(--content-gutter));
@@ -2372,15 +2651,20 @@ onBeforeUnmount(() => {
 .mode-nav {
   position: relative; display: flex; flex: 1; align-items: center; gap: 2px;
   min-width: 0; width: auto; height: 38px; padding: 3px;
-  overflow-x: auto; overflow-y: hidden; scrollbar-width: none; color: var(--text);
+  overflow-x: auto; overflow-y: hidden; color: var(--text);
   border-radius: 12px;
+}
+/* 显式压过各主题通配符的 scrollbar-width: thin，确保顶部导航栏永不露出原生横向滚动条。 */
+.island .mode-nav {
+  scrollbar-width: none !important;
+  scrollbar-color: transparent transparent !important;
 }
 .variant-standard .mode-nav {
   background: var(--well-bg);
   box-shadow: var(--well-shadow);
   border: 1px solid var(--line);
 }
-.island .mode-nav::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.island .mode-nav::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
 .mode-selection {
   position: absolute; inset: 0; z-index: 0;
   border-radius: 9px;

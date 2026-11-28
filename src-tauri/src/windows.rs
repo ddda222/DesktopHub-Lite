@@ -57,6 +57,7 @@ pub struct WindowsHandle {
     bar_size: Mutex<(f64, f64)>,
     bar_regions: Mutex<Vec<BarRegion>>,
     bar_regions_changed: Mutex<bool>,
+    bar_regions_expanded: Mutex<bool>,
     pop_size: Mutex<(f64, f64)>,
     /// 弹层相对图标条的水平对齐：center / left / right
     pop_align: Mutex<String>,
@@ -80,6 +81,7 @@ impl WindowsHandle {
             bar_size: Mutex::new((140.0, 14.0)),
             bar_regions: Mutex::new(Vec::new()),
             bar_regions_changed: Mutex::new(false),
+            bar_regions_expanded: Mutex::new(false),
             pop_size: Mutex::new((384.0, 480.0)),
             pop_align: Mutex::new("center".to_string()),
             toast_size: Mutex::new((360.0, 40.0)),
@@ -168,8 +170,15 @@ impl WindowsHandle {
     pub fn set_bar_regions(&self, regions: Vec<BarRegion>) {
         let mut current = self.bar_regions.lock().unwrap_or_else(|e| e.into_inner());
         if *current != regions {
+            let area = |list: &[BarRegion]| -> f64 {
+                list.iter().map(|r| r.width * r.height).sum()
+            };
+            let expanded = regions.is_empty() || area(&regions) > area(&current) + 1.0;
             *current = regions;
             *self.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            if expanded {
+                *self.bar_regions_expanded.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            }
         }
     }
 
@@ -270,7 +279,8 @@ pub fn install_bar_frame_guard(app: &AppHandle) {
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
-        GWL_STYLE, STYLESTRUCT, WM_NCACTIVATE, WM_NCDESTROY, WM_NCPAINT, WM_STYLECHANGING,
+        GWL_STYLE, STYLESTRUCT, WM_ERASEBKGND, WM_NCACTIVATE, WM_NCDESTROY, WM_NCPAINT,
+        WM_STYLECHANGING,
     };
     unsafe extern "system" fn frame_proc(
         hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, id: usize, _: usize,
@@ -280,6 +290,8 @@ pub fn install_bar_frame_guard(app: &AppHandle) {
                 let styles = &mut *(lparam.0 as *mut STYLESTRUCT);
                 styles.styleNew = bar_style(styles.styleNew);
             }
+            // 阻止系统在透明窗口扩容或重设 HRGN 时用 GDI 背景画刷擦除客户区，消除扩容瞬间的闪黑块。
+            WM_ERASEBKGND => return LRESULT(1),
             WM_NCPAINT => return LRESULT(0),
             // 让 Tao 正常更新激活与焦点状态，同时要求 DefWindowProc 跳过标题重绘。
             WM_NCACTIVATE => return DefSubclassProc(hwnd, msg, wparam, LPARAM(-1)),
@@ -327,11 +339,15 @@ pub fn enforce_bar_frameless(app: &AppHandle) {
 #[cfg(windows)]
 pub fn restore_bar_region(app: &AppHandle, handle: &WindowsHandle) {
     *handle.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()) = true;
-    place_bar(app, handle);
+    place_bar_inner(app, handle, true);
 }
 
 /// 恢复或计算图标条位置，并让窗口尺寸等于图标条尺寸。
 pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
+    place_bar_inner(app, handle, false);
+}
+
+fn place_bar_inner(app: &AppHandle, handle: &WindowsHandle, force_redraw: bool) {
     #[cfg(windows)]
     enforce_bar_frameless(app);
     let Some(window) = app.get_webview_window(BAR) else {
@@ -351,8 +367,13 @@ pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
             }
         }
     }
+    let previous_size = window.inner_size().ok();
+    let growing = previous_size
+        .map(|prev| target.width > prev.width || target.height > prev.height)
+        .unwrap_or(false);
     let regions_changed = std::mem::take(&mut *handle.bar_regions_changed.lock().unwrap_or_else(|e| e.into_inner()));
-    let bounds_changed = window.inner_size().ok() != Some(target) ||
+    let regions_expanded = std::mem::take(&mut *handle.bar_regions_expanded.lock().unwrap_or_else(|e| e.into_inner()));
+    let bounds_changed = previous_size != Some(target) ||
         window.outer_position().ok() != Some(PhysicalPosition::new(x, y));
     if !regions_changed && !bounds_changed { return; }
 
@@ -361,18 +382,27 @@ pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
     if let Ok(native) = window.hwnd() {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
-        use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER};
+        use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOREDRAW, SWP_NOZORDER};
         let hwnd = HWND(native.0);
+        // 扩容时延迟至 SetWindowRgn 落地再重绘，避免新扩出区域在裁切更新前暴露未绘制底色；
+        // 缩容时保留正常重绘，保证下方刚露出的桌面区域即时刷新。
+        let swp_flags = if growing {
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW
+        } else {
+            SWP_NOACTIVATE | SWP_NOZORDER
+        };
         // CSS 动画期间只改变轮廓，不重复发送 WM_SIZE / WM_WINDOWPOSCHANGED。
         let moved = if bounds_changed {
-            unsafe { SetWindowPos(hwnd, None, x, y, target.width as i32, target.height as i32,
-                SWP_NOACTIVATE | SWP_NOZORDER) }
+            unsafe { SetWindowPos(hwnd, None, x, y, target.width as i32, target.height as i32, swp_flags) }
         } else { Ok(()) };
         if moved.is_ok() {
+            // 窗口尺寸变化、隐藏恢复或 HRGN 扩大时同步刷新（兼顾无动画模式即时显示）；
+            // 仅收缩 HRGN 释放透明穿透区时传 false，不触发 WM_WINDOWPOSCHANGED，消除收缩尾帧闪烁。
+            let redraw_rgn = bounds_changed || force_redraw || regions_expanded;
             // 收起仍保留完整热区。展开后让透明圆角外的像素不截获鼠标。
             unsafe {
                 let shapes = handle.bar_regions.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                if height <= 15.0 { SetWindowRgn(hwnd, None, true); }
+                if height <= 15.0 { SetWindowRgn(hwnd, None, redraw_rgn); }
                 else if !shapes.is_empty() {
                     let combined = CreateRectRgn(0, 0, 0, 0);
                     if !combined.0.is_null() {
@@ -391,7 +421,7 @@ pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
                             if result.0 == 0 { valid = false; break; }
                         }
                         // SetWindowRgn 成功后由系统接管 region，失败时仍由本程序释放。
-                        if !valid || SetWindowRgn(hwnd, Some(combined), true) == 0 {
+                        if !valid || SetWindowRgn(hwnd, Some(combined), redraw_rgn) == 0 {
                             let _ = DeleteObject(combined.into());
                             crate::log_warn!("灵动岛可见区域更新失败");
                         }
@@ -400,7 +430,7 @@ pub fn place_bar(app: &AppHandle, handle: &WindowsHandle) {
                 else {
                     let curve = ((height * 0.36).clamp(10.0, 28.0) * scale).round() as i32;
                     let region = CreateRoundRectRgn(0, 0, target.width as i32 + 1, target.height as i32 + 1, curve, curve);
-                    if !region.0.is_null() && SetWindowRgn(hwnd, Some(region), true) == 0 {
+                    if !region.0.is_null() && SetWindowRgn(hwnd, Some(region), redraw_rgn) == 0 {
                         let _ = DeleteObject(region.into());
                     }
                 }
