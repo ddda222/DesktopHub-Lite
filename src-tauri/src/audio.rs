@@ -1,9 +1,10 @@
 //! 应用播放会话控制。所有 COM 接口只在创建它们的 MTA 线程内使用，不记录进程路径或会话内容。
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const PROFILES_FILE: &str = "audio-profiles.json";
+pub const AUDIO_DEVICES_CHANGED_EVENT: &str = "audio-devices-changed";
 #[derive(Default)]
 pub struct AudioState {
     operations: tokio::sync::Mutex<()>,
@@ -132,6 +133,20 @@ pub fn save_audio_profile(app: AppHandle, audio: State<'_, AudioState>, mut prof
     Ok(profiles)
 }
 #[tauri::command]
+pub fn delete_audio_profile(app: AppHandle, audio: State<'_, AudioState>, name: String) -> Result<Vec<Profile>, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() { return Err("请指定要删除的声音配置".into()); }
+    let _guard = audio.profiles.lock().map_err(|_| "声音配置暂时不可用")?;
+    let mut profiles = read_profiles(&app)?;
+    let before = profiles.len();
+    profiles.retain(|p| p.name != trimmed);
+    if profiles.len() == before {
+        return Err("未找到对应的声音配置".into());
+    }
+    app.state::<crate::AppState>().store.write(PROFILES_FILE, &profiles)?;
+    Ok(profiles)
+}
+#[tauri::command]
 pub async fn apply_audio_profile(app: AppHandle, audio: State<'_, AudioState>, name: String) -> Result<ApplyResult, String> {
     let profile = {
         let _guard = audio.profiles.lock().map_err(|_| "声音配置暂时不可用")?;
@@ -141,7 +156,13 @@ pub async fn apply_audio_profile(app: AppHandle, audio: State<'_, AudioState>, n
     run(move || {
         let snapshot = platform::snapshot()?;
         let mut applied = 0; let mut skipped = 0; let mut failed = Vec::new();
+        let mut offline_devices = 0usize;
         for setting in profile.settings {
+            if !snapshot.devices.iter().any(|d| d.id == setting.device_id) {
+                offline_devices += 1;
+                skipped += 1;
+                continue;
+            }
             let matches: Vec<_> = snapshot.sessions.iter().filter(|s| s.app_key.as_deref() == Some(&setting.app_key) && s.device_id == setting.device_id).collect();
             if matches.is_empty() { skipped += 1; continue; }
             for session in matches {
@@ -152,9 +173,41 @@ pub async fn apply_audio_profile(app: AppHandle, audio: State<'_, AudioState>, n
             }
         }
         // 写入后即使刷新失败，也保留已执行的结果，不能把部分操作描述成未执行。
-        let snapshot = platform::snapshot().unwrap_or_else(|error| Snapshot { devices: vec![], sessions: vec![], warnings: vec![format!("操作后刷新失败：{error}")] });
+        let mut snapshot = platform::snapshot().unwrap_or_else(|error| Snapshot { devices: vec![], sessions: vec![], warnings: vec![format!("操作后刷新失败：{error}")] });
+        if offline_devices > 0 {
+            snapshot.warnings.push(format!("预设中有 {offline_devices} 项对应的播放设备当前已断开或未连接"));
+        }
         Ok(ApplyResult { applied, skipped, failed, snapshot })
     }).await
+}
+
+/// 轻量监测 Windows 默认输出设备切换或热插拔变化，及时推送给灵动岛与调音台同步选中态。
+pub fn start_device_watch(app: AppHandle) {
+    #[cfg(windows)]
+    {
+        let _ = std::thread::Builder::new()
+            .name("audio-device-watch".into())
+            .spawn(move || {
+                let _: Result<(), String> = platform::with_com(|| {
+                    let mut last_sig: Option<String> = None;
+                    loop {
+                        if let Ok(sig) = platform::device_signature() {
+                            if let Some(ref prev) = last_sig {
+                                if prev != &sig {
+                                    let _ = app.emit(AUDIO_DEVICES_CHANGED_EVENT, ());
+                                }
+                            }
+                            last_sig = Some(sig);
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1800));
+                    }
+                });
+            });
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
 }
 
 #[cfg(windows)]
@@ -266,6 +319,34 @@ mod platform {
             sessions: result.entries.into_iter().map(|e| e.info).collect(),
             warnings: result.warnings,
         })
+    }
+
+    /// 轻量读取当前默认播放设备与活跃设备集合指纹（不激活会话管理器，极低开销）。
+    pub fn device_signature() -> Result<String, String> {
+        unsafe {
+            let enumerator: IMMDeviceEnumerator =
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|_| "Windows 音频服务不可用")?;
+            let default_id = enumerator
+                .GetDefaultAudioEndpoint(eRender, eConsole)
+                .ok()
+                .and_then(|dev| dev.GetId().ok().map(|raw| owned_string(raw)))
+                .unwrap_or_default();
+            let devices = enumerator
+                .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+                .map_err(|_| "无法枚举播放设备")?;
+            let count = devices.GetCount().unwrap_or(0);
+            let mut ids = Vec::with_capacity(count as usize);
+            for index in 0..count {
+                if let Ok(dev) = devices.Item(index) {
+                    if let Ok(raw) = dev.GetId() {
+                        ids.push(owned_string(raw));
+                    }
+                }
+            }
+            ids.sort();
+            Ok(format!("{default_id}|{}", ids.join(",")))
+        }
     }
     pub fn update(id: &str, volume: Option<f32>, muted: Option<bool>) -> Result<Session, String> {
         let entry = enumerate()?.entries.into_iter().find(|e| e.info.id == id);

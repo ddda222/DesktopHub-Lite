@@ -12,6 +12,7 @@ import { addShelfFiles, refreshShelf, removeShelfFiles, undoShelfRemove, openShe
 defineProps<{ dragOver: boolean }>()
 const selected = ref<string[]>([])
 const availableSelected = computed(() => selected.value.filter(id => shelf.entries.some(e => e.id === id && e.available)))
+const missingIds = computed(() => shelf.entries.filter(e => !e.available).map(e => e.id))
 const root = ref<HTMLElement | null>(null)
 const addButton = ref<HTMLButtonElement | null>(null)
 let returnId: string | undefined
@@ -120,6 +121,7 @@ onBeforeUnmount(() => {
       <span class="shelf-count">{{ dragOver ? '松开，放入中转' : `${shelf.entries.length} 项暂存` }}</span>
       <div>
         <button ref="addButton" type="button" :disabled="shelf.busy" @click="pick">添加文件</button>
+        <button v-if="missingIds.length" type="button" :disabled="shelf.busy" @click="remove(missingIds)">清理失效 ({{ missingIds.length }})</button>
         <button v-if="selected.length" type="button" :disabled="shelf.busy" @click="remove(selected)">移出所选</button>
       </div>
     </div>

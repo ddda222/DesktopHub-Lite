@@ -77,6 +77,7 @@ import {
   applyOcrError,
   applyOcrResult,
   closeOcrPanel,
+  openOcrPanel,
   type OcrResultEvent,
   runClipboardOcr,
   startScreenOcr,
@@ -880,6 +881,7 @@ let stopWindowBlur: (() => void) | undefined
 let stopOcrResult: (() => void) | undefined
 let stopOcrError: (() => void) | undefined
 let stopQuickImageOcr: (() => void) | undefined
+let stopAudioDevices: (() => void) | undefined
 const dismissHandle = ref<HTMLButtonElement | null>(null)
 const ordinaryPaneEl = ref<HTMLElement | null>(null)
 const dismissProxy = { y: 0, scaleY: 1 }
@@ -2900,6 +2902,12 @@ onMounted(() => {
     else stopQuickImageOcr = off
   }).catch(() => {})
   if (isDesktop) {
+    void listenHost<void>('audio-devices-changed', () => {
+      if (!disposed && quickMenuOpen.value) void refreshQuickAudioDevices()
+    }).then(off => {
+      if (disposed) off()
+      else stopAudioDevices = off
+    }).catch(() => {})
     void listenHost<void>('island-window-blur', handleWindowBlur).then(off => {
       if (disposed) off()
       else stopWindowBlur = off
@@ -2954,6 +2962,7 @@ onBeforeUnmount(() => {
   stopOcrResult?.()
   stopOcrError?.()
   stopQuickImageOcr?.()
+  stopAudioDevices?.()
   stopWindowBlur?.()
   stopFileDrop?.()
   stopShelf?.()
@@ -3285,6 +3294,15 @@ onBeforeUnmount(() => {
                 <span v-if="runTask.stage === 'running'" class="pill-time">{{ clock(runElapsed) }}</span>
               </button>
               <button v-if="mailNotices.length" v-gsap-press="actionTapPose" class="round-action" type="button" :title="viewingMail ? '返回当前功能' : mailSummary || '查看最近邮件'" aria-label="最近邮件" :aria-pressed="viewingMail" @click="closeOcrPanel(); mailSelected = !viewingMail"><Icon name="mail" :size="16" /></button>
+              <button
+                v-if="!ocrPanelOpen && state.ocr.status === 'done' && state.ocr.text.trim()"
+                v-gsap-press="actionTapPose"
+                class="round-action has-ocr-cache"
+                type="button"
+                title="回看上次截图识字结果"
+                aria-label="回看上次识字结果"
+                @click="mailSelected = false; openOcrPanel()"
+              ><Icon name="text" :size="15" /><i class="ocr-cache-dot" aria-hidden="true" /></button>
               <button v-gsap-press="actionTapPose" class="round-action" type="button" :title="`截图识字（${state.shortcuts.ocr || 'Ctrl+Shift+O'}）`" aria-label="截图识字" :aria-pressed="ocrPanelOpen" @click="startScreenOcr"><Icon name="scan-text" :size="16" /></button>
               <button v-if="!viewingMail && !ocrPanelOpen && page === 'translation'" v-gsap-press="actionTapPose" class="round-action" type="button" title="独立翻译窗口" aria-label="独立翻译窗口" @click="openSeparateTranslation"><Icon name="external" :size="16" /></button>
               <button v-gsap-press="actionTapPose" class="round-action pin-action" type="button" :title="pinned ? '已钉住展开（点击或按 Esc 取消）' : '钉住展开，移开鼠标不自动收起（Alt+P）'" aria-label="钉住灵动岛" :aria-pressed="pinned" @click="pinned = !pinned"><Icon name="pin" :size="15" /></button>
@@ -3380,11 +3398,13 @@ onBeforeUnmount(() => {
                   v-gsap-hover="actionHoverPose"
                   v-gsap-press="tileTapPose"
                   class="app-tile"
+                  :class="{ 'is-broken': !!app.broken }"
                   type="button"
-                  :title="app.name"
-                  :aria-label="app.name"
+                  :title="app.broken ? `${app.name}（目标已失效，可在设置中修复或移除）` : app.name"
+                  :aria-label="app.broken ? `${app.name}（目标已失效）` : app.name"
                   @click="launch(app.id)"
                 >
+                  <span v-if="app.broken" class="broken-dot" aria-hidden="true" />
                   <img v-if="iconFor(app.target)" :src="iconFor(app.target)" alt="" />
                   <span v-else class="fallback" :style="{ background: app.color }">{{ app.initials }}</span>
                   <span v-if="showAppNames" class="app-name">{{ app.name }}</span>
@@ -3936,9 +3956,15 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; opacity: .88;
 }
 .round-action {
+  position: relative;
   display: grid; place-items: center; flex: none; width: 28px; height: 28px;
   border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text-3);
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+.round-action.has-ocr-cache { color: var(--accent); }
+.ocr-cache-dot {
+  position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 6px var(--accent); pointer-events: none;
 }
 .collapse-action svg { transform: rotate(180deg); }
 .round-action:hover { background: var(--tile-surface); border-color: var(--line); color: var(--text); box-shadow: var(--tile-shadow); }
@@ -3980,10 +4006,21 @@ onBeforeUnmount(() => {
   max-height: 220px;
 }
 .app-tile {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   width: 100%; height: 100%; padding: 6px;
   border-radius: 12px; border: 1px solid transparent; min-width: 0;
   transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.app-tile.is-broken img,
+.app-tile.is-broken .fallback {
+  filter: grayscale(0.75);
+  opacity: 0.58;
+}
+.app-tile.is-broken .app-name { color: var(--text-3); }
+.broken-dot {
+  position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--danger); box-shadow: 0 0 0 1.5px var(--surface); pointer-events: none; z-index: 2;
 }
 .variant-standard .app-tile {
   background: var(--tile-surface);

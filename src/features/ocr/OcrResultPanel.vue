@@ -5,6 +5,7 @@ import Icon from '@/components/Icon.vue'
 import { vGsapPress } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import {
+  clearOcrResult,
   closeOcrPanel,
   copyOcrText,
   sendOcrToTranslation,
@@ -19,12 +20,21 @@ let copyTimer: ReturnType<typeof setTimeout> | undefined
 watch(
   () => [state.ocr.text, state.ocr.status],
   () => {
-    draftText.value = state.ocr.text
+    if (draftText.value !== state.ocr.text) {
+      draftText.value = state.ocr.text
+    }
     copied.value = false
     clearTimeout(copyTimer)
   },
   { immediate: true }
 )
+
+watch(draftText, (val) => {
+  // 实时回写校对修改到 store，切去翻译/剪贴板后再切回来不会丢失编辑内容。
+  if (state.ocr.status === 'done' && state.ocr.text !== val) {
+    state.ocr.text = val
+  }
+})
 
 const sourceLabel = computed(() =>
   state.ocr.source === 'clipboard' ? '剪贴板图片' : '屏幕截图'
@@ -73,9 +83,9 @@ onBeforeUnmount(() => {
       <button
         class="ocr-close-btn"
         type="button"
-        title="返回原页面"
-        aria-label="关闭识字结果"
-        @click="closeOcrPanel"
+        title="暂时返回原页面（保留结果可回看）"
+        aria-label="暂时收起识字结果"
+        @click="closeOcrPanel(false)"
       >
         <Icon name="close" :size="14" />
       </button>
@@ -152,6 +162,15 @@ onBeforeUnmount(() => {
           >
             <Icon name="scan-text" :size="14" />
             重新截图
+          </button>
+          <button
+            v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+            class="ocr-btn"
+            type="button"
+            title="清空当前识字结果并返回"
+            @click="clearOcrResult()"
+          >
+            清空
           </button>
         </div>
       </div>

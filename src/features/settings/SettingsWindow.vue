@@ -36,6 +36,9 @@ import {
   setPaused,
   setMotion,
   setTheme,
+  auditApplications,
+  refreshDiscoveredApps,
+  scanDiscoveredApps,
   state,
 } from '@/store'
 import type { ThemeMode, TranslateDirection } from '@/lib/desktop/types'
@@ -386,6 +389,11 @@ function handleKeys(event: KeyboardEvent): void {
 onMounted(() => {
   returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   windowEl.value?.querySelector<HTMLButtonElement>('.nav-item.is-active')?.focus()
+  if (isDesktop) {
+    void refreshDiscoveredApps()
+    void scanDiscoveredApps(false)
+    void auditApplications()
+  }
   if (windowEl.value && !state.ui.islandReducedMotion) {
     const preset = activeMotionPreset.value
     gsap.fromTo(
@@ -393,6 +401,13 @@ onMounted(() => {
       { opacity: 0, scale: 0.965, y: 8 },
       { opacity: 1, scale: 1, y: 0, duration: preset.popTransition.duration, ease: preset.popTransition.ease, clearProps: 'transform,opacity' }
     )
+  }
+})
+watch(() => state.ui.settingsOpen, open => {
+  if (open && isDesktop) {
+    void refreshDiscoveredApps()
+    void scanDiscoveredApps(false)
+    void auditApplications()
   }
 })
 onBeforeUnmount(() => {
@@ -446,7 +461,12 @@ onBeforeUnmount(() => {
               class="nav-worm"
               aria-hidden="true"
             />
-            {{ item.label }}
+            <span class="nav-label">{{ item.label }}</span>
+            <span
+              v-if="item.id === 'apps' && state.discovery.pending.length"
+              class="nav-badge"
+              :title="`发现 ${state.discovery.pending.length} 个新安装应用待分类`"
+            >{{ state.discovery.pending.length > 99 ? '99+' : state.discovery.pending.length }}</span>
           </button>
         </nav>
 

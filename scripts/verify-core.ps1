@@ -27,7 +27,10 @@ if (Test-Path (Join-Path $project 'src-tauri\src\config_format.rs')) {
     $ocr = Get-Content (Join-Path $project 'src-tauri\src\ocr.rs') -Raw
     $ocrCore = (Section $ocr '//! 屏幕截图捕获' '// === TAURI_COMMANDS ===') + "`n" + (Section $ocr '// === TESTS ===' '')
     $ocrCore | Set-Content (Join-Path $target 'src\ocr.rs') -Encoding utf8
-    $source += "mod state; mod config_format; mod telemetry; mod data_location; mod ocr;`n"
+    $discovery = Get-Content (Join-Path $project 'src-tauri\src\app_discovery.rs') -Raw
+    $discoveryCore = (Section $discovery '//! 新安装应用增量发现' '// === TAURI_COMMANDS ===') + "`n" + (Section $discovery '// === TESTS ===' '')
+    $discoveryCore | Set-Content (Join-Path $target 'src\app_discovery.rs') -Encoding utf8
+    $source += "mod state; mod config_format; mod telemetry; mod data_location; mod ocr; mod app_discovery;`n"
 }
 $source | Set-Content (Join-Path $target 'src\lib.rs') -Encoding utf8
 @'

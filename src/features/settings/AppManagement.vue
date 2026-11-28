@@ -8,19 +8,43 @@ import { captureFlipSnapshot, playFlipSnapshot } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import { isDesktop } from '@/lib/desktop/desktop'
 import type { HubApp } from '@/lib/desktop/types'
-import { addAppByTarget, addAppFromPicker, deleteApp, iconFor, importShortcuts, reorderVisibleApps,
-  saveAppCategory, setAppCategory, state, toggleAppHidden, updateApp } from '@/store'
+import {
+  acceptDiscoveredApp,
+  addAppByTarget,
+  addAppFromPicker,
+  auditApplications,
+  deleteApp,
+  dismissAllDiscoveredApps,
+  dismissDiscoveredApp,
+  iconFor,
+  importShortcuts,
+  refreshDiscoveredApps,
+  removeBrokenApplications,
+  reorderVisibleApps,
+  restoreDismissedApp,
+  saveAppCategory,
+  scanDiscoveredApps,
+  setAppCategory,
+  state,
+  toggleAppHidden,
+  updateApp
+} from '@/store'
 
-// null 只代表「全部」筛选；all 沿用旧配置的未分类标记，不新增实际分类。
+// null 代表「全部」，'__broken__' 代表「仅看失效应用」，'all' 沿用未分类标记。
 const filter = ref<string | null>(null)
 const query = ref('')
 const categories = computed(() => state.categories.filter(item => item.id !== 'all'))
 const categoryKey = (app: HubApp) => categories.value.some(item => item.id === app.categoryId) ? app.categoryId : 'all'
-const categoryName = (id: string) => categories.value.find(item => item.id === id)?.name ?? '未分类'
+const categoryName = (id: string) => {
+  if (id === '__broken__') return '失效应用'
+  return categories.value.find(item => item.id === id)?.name ?? '未分类'
+}
+const brokenApps = computed(() => state.apps.filter(app => Boolean(app.broken)))
 const filters = computed(() => [
   { id: null, name: '全部', count: state.apps.length },
   { id: 'all', name: '未分类', count: state.apps.filter(app => categoryKey(app) === 'all').length },
-  ...categories.value.map(cat => ({ ...cat, count: state.apps.filter(app => categoryKey(app) === cat.id).length }))
+  ...categories.value.map(cat => ({ ...cat, count: state.apps.filter(app => categoryKey(app) === cat.id).length })),
+  ...(brokenApps.value.length ? [{ id: '__broken__', name: '失效应用', count: brokenApps.value.length }] : [])
 ])
 const filterName = computed(() => filter.value === null ? '全部应用' : categoryName(filter.value))
 const categorySelectOptions = computed(() => [
@@ -29,9 +53,93 @@ const categorySelectOptions = computed(() => [
 ])
 const visible = computed(() => {
   const term = query.value.trim().toLocaleLowerCase()
-  return state.apps.filter(app => (filter.value === null || categoryKey(app) === filter.value) &&
-    (!term || `${app.name}\n${app.target}\n${categoryName(categoryKey(app))}`.toLocaleLowerCase().includes(term)))
+  return state.apps.filter(app => {
+    const matchFilter = filter.value === null
+      ? true
+      : filter.value === '__broken__'
+        ? Boolean(app.broken)
+        : categoryKey(app) === filter.value
+    return matchFilter && (!term || `${app.name}\n${app.target}\n${categoryName(categoryKey(app))}`.toLocaleLowerCase().includes(term))
+  })
 })
+watch(() => brokenApps.value.length, count => {
+  if (count === 0 && filter.value === '__broken__') filter.value = null
+})
+
+/* ---------- 新安装应用待分类引导（LG-01）与失效项一键清理（LG-04） ---------- */
+const discoveryExpanded = ref(true)
+const showDismissed = ref(false)
+const discoveryChoices = ref<Record<string, string>>({})
+const discoveryBusyTarget = ref('')
+const confirmCleanBroken = ref(false)
+const cleaningBroken = ref(false)
+
+watch(
+  () => state.discovery.pending,
+  items => {
+    const next: Record<string, string> = { ...discoveryChoices.value }
+    for (const item of items) {
+      if (!next[item.target]) {
+        const valid = item.suggestedCategoryId === 'all' || categories.value.some(c => c.id === item.suggestedCategoryId)
+        next[item.target] = valid ? item.suggestedCategoryId : (categories.value[0]?.id ?? 'all')
+      }
+    }
+    discoveryChoices.value = next
+  },
+  { immediate: true, deep: true }
+)
+
+function formatDiscoveredTime(ms: number): string {
+  if (!ms) return '刚刚发现'
+  const date = new Date(ms)
+  const now = new Date()
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  if (date.toDateString() === now.toDateString()) return `今天 ${hh}:${mm}`
+  return `${date.getMonth() + 1}/${date.getDate()} ${hh}:${mm}`
+}
+
+async function handleAcceptDiscovered(target: string, name: string): Promise<void> {
+  if (discoveryBusyTarget.value) return
+  discoveryBusyTarget.value = target
+  try {
+    const catId = discoveryChoices.value[target] || categories.value[0]?.id || 'all'
+    await acceptDiscoveredApp(target, name, catId)
+  } finally {
+    discoveryBusyTarget.value = ''
+  }
+}
+
+async function handleDismissDiscovered(target: string): Promise<void> {
+  if (discoveryBusyTarget.value) return
+  discoveryBusyTarget.value = target
+  try {
+    await dismissDiscoveredApp(target)
+  } finally {
+    discoveryBusyTarget.value = ''
+  }
+}
+
+async function handleCleanBroken(): Promise<void> {
+  if (cleaningBroken.value) return
+  if (!confirmCleanBroken.value) {
+    confirmCleanBroken.value = true
+    return
+  }
+  confirmCleanBroken.value = false
+  cleaningBroken.value = true
+  try {
+    const removed = await removeBrokenApplications()
+    if (removed > 0) notify(true, `已清理 ${removed} 个失效应用`)
+  } finally {
+    cleaningBroken.value = false
+  }
+}
+
+if (isDesktop) {
+  void refreshDiscoveredApps()
+  void auditApplications()
+}
 const groups = computed(() => [...categories.value, { id: 'all', name: '未分类' }]
   .map(cat => ({ ...cat, apps: visible.value.filter(app => categoryKey(app) === cat.id) }))
   .filter(group => group.apps.length))
@@ -192,8 +300,92 @@ async function removeApp(id: string): Promise<void> {
   <div ref="root" class="panel app-management">
     <header class="page-heading">
       <div><h3 class="panel-title">应用管理</h3><p class="page-description">按分类整理，快速找到每个应用。</p></div>
-      <button class="btn btn-primary" :disabled="busy" :aria-expanded="adding" aria-controls="add-app-options" @click="adding = !adding">{{ adding ? '收起添加' : '＋ 添加应用' }}</button>
+      <div class="heading-actions">
+        <button class="btn" type="button" :disabled="busy || state.discovery.scanning || !isDesktop" @click="scanDiscoveredApps(true)">
+          {{ state.discovery.scanning ? '检查中…' : '检查新装应用' }}
+        </button>
+        <button class="btn btn-primary" :disabled="busy" :aria-expanded="adding" aria-controls="add-app-options" @click="adding = !adding">{{ adding ? '收起添加' : '＋ 添加应用' }}</button>
+      </div>
     </header>
+
+    <!-- 新安装应用待分类高亮引导卡片（仅增量新装，绝不倾倒系统预装） -->
+    <section
+      v-if="state.discovery.pending.length || state.discovery.dismissed.length"
+      class="discovery-card"
+      :class="{ 'has-pending': state.discovery.pending.length > 0 }"
+      aria-label="新安装应用待分类引导"
+    >
+      <div class="discovery-head">
+        <div class="discovery-title">
+          <span class="discovery-dot" aria-hidden="true" />
+          <strong v-if="state.discovery.pending.length">
+            发现 {{ state.discovery.pending.length }} 个新安装的应用，选择分类一键加入
+          </strong>
+          <strong v-else>暂无待分类的新安装应用</strong>
+        </div>
+        <div class="discovery-head-actions">
+          <button
+            v-if="state.discovery.pending.length"
+            type="button"
+            class="btn btn-sm"
+            :disabled="state.discovery.scanning"
+            @click="dismissAllDiscoveredApps()"
+          >全部忽略</button>
+          <button
+            v-if="state.discovery.pending.length"
+            type="button"
+            class="btn btn-sm"
+            @click="discoveryExpanded = !discoveryExpanded"
+          >{{ discoveryExpanded ? '折叠' : '展开' }}</button>
+        </div>
+      </div>
+
+      <ul v-if="state.discovery.pending.length && discoveryExpanded" class="discovery-list">
+        <li v-for="item in state.discovery.pending" :key="item.target" class="discovery-row">
+          <img v-if="iconFor(item.target)" :src="iconFor(item.target)" alt="" class="discovery-icon" />
+          <span v-else class="app-initials discovery-icon" aria-hidden="true">{{ item.name.slice(0, 1).toUpperCase() }}</span>
+          <div class="discovery-info">
+            <span class="discovery-name" :title="item.name">{{ item.name }}</span>
+            <small class="discovery-meta" :title="item.target">{{ formatDiscoveredTime(item.discoveredAtMs) }}</small>
+          </div>
+          <div class="discovery-select">
+            <ThemedSelect
+              :model-value="discoveryChoices[item.target] ?? 'all'"
+              :options="categorySelectOptions"
+              size="sm"
+              :disabled="discoveryBusyTarget === item.target"
+              :aria-label="`为 ${item.name} 选择分类`"
+              @update:model-value="val => { discoveryChoices[item.target] = String(val) }"
+            />
+          </div>
+          <button
+            type="button"
+            class="btn btn-sm btn-primary"
+            :disabled="discoveryBusyTarget === item.target"
+            @click="handleAcceptDiscovered(item.target, item.name)"
+          >加入分类</button>
+          <button
+            type="button"
+            class="btn btn-sm"
+            :disabled="discoveryBusyTarget === item.target"
+            @click="handleDismissDiscovered(item.target)"
+          >忽略</button>
+        </li>
+      </ul>
+
+      <div v-if="state.discovery.dismissed.length" class="discovery-dismissed-wrap">
+        <button type="button" class="dismissed-toggle" @click="showDismissed = !showDismissed">
+          {{ showDismissed ? '收起' : '查看' }}已忽略的新应用（{{ state.discovery.dismissed.length }}）
+        </button>
+        <ul v-if="showDismissed" class="dismissed-list">
+          <li v-for="item in state.discovery.dismissed" :key="item.target" class="dismissed-row">
+            <span :title="item.target">{{ item.name }}</span>
+            <button type="button" class="btn btn-sm" @click="restoreDismissedApp(item.target)">恢复到待分类</button>
+          </li>
+        </ul>
+      </div>
+    </section>
+
     <div class="app-tools">
       <label class="field search-field" for="app-search"><span class="field-label">搜索应用</span><span class="search-control"><Icon name="search" :size="16" /><input id="app-search" v-model="query" class="control" type="search" placeholder="名称、目标或分类" /><button v-if="query" class="search-clear" type="button" aria-label="清空搜索" @click="query = ''"><Icon name="close" :size="12" /></button></span></label>
       <button class="btn" :aria-expanded="managing" aria-controls="category-manager" @click="managing = !managing">管理分类</button>
@@ -265,7 +457,22 @@ async function removeApp(id: string): Promise<void> {
         <span>{{ cat.name }}</span><span class="count">{{ cat.count }}</span>
       </button>
     </div>
-    <div class="result-summary"><p role="status">{{ filterName }}<span> · {{ visible.length }} 个{{ query.trim() ? '结果' : '应用' }}</span></p><span class="hint">含隐藏应用</span></div>
+    <div class="result-summary">
+      <p role="status">{{ filterName }}<span> · {{ visible.length }} 个{{ query.trim() ? '结果' : '应用' }}</span></p>
+      <div class="summary-right">
+        <template v-if="brokenApps.length">
+          <button
+            type="button"
+            class="btn btn-sm btn-danger"
+            :class="{ 'is-confirming': confirmCleanBroken }"
+            :disabled="cleaningBroken"
+            @click="handleCleanBroken"
+          >{{ confirmCleanBroken ? `确认清理 ${brokenApps.length} 个失效项` : `一键清理失效项 (${brokenApps.length})` }}</button>
+          <button v-if="confirmCleanBroken" type="button" class="btn btn-sm" @click="confirmCleanBroken = false">取消</button>
+        </template>
+        <span class="hint">含隐藏应用</span>
+      </div>
+    </div>
     <p v-if="feedback" class="inline-feedback" :class="{ error: failed }" role="status">{{ feedback }}</p>
     <div v-if="!visible.length" class="empty-state" role="status"><strong>{{ query.trim() ? '没有匹配的应用' : '这个分类还没有应用' }}</strong><p>{{ query.trim() ? '试试其他名称、目标或分类。' : '添加应用，或将已有应用移到这里。' }}</p><button v-if="query.trim()" class="btn" @click="query = ''">清空搜索</button><button v-else class="btn" @click="adding = true">添加应用</button></div>
     <section v-for="group in groups" :key="group.id" class="app-group" :aria-label="group.name">
@@ -324,6 +531,44 @@ async function removeApp(id: string): Promise<void> {
 </template>
 
 <style scoped>
+.heading-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.discovery-card {
+  margin: 16px 0 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.discovery-card.has-pending {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent-weak) 45%, var(--surface-2));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.discovery-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.discovery-title { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.discovery-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.discovery-card:not(.has-pending) .discovery-dot { background: var(--text-3); }
+.discovery-head-actions { display: inline-flex; align-items: center; gap: 6px; }
+.discovery-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.discovery-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface);
+  flex-wrap: wrap;
+}
+.discovery-icon { width: 26px; height: 26px; flex: none; object-fit: contain; font-size: 12px; }
+.discovery-info { flex: 1 1 130px; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.discovery-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discovery-meta { font-size: 11px; color: var(--text-3); }
+.discovery-select { width: 118px; flex: none; }
+.discovery-dismissed-wrap { border-top: 1px dashed var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dismissed-toggle { align-self: flex-start; font-size: 12px; color: var(--text-2); padding: 2px 4px; border-radius: 5px; }
+.dismissed-toggle:hover { color: var(--text); background: var(--hover); }
+.dismissed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dismissed-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2); padding: 4px 6px; border-radius: 6px; background: var(--surface); }
+.summary-right { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .app-tools { display: flex; align-items: end; gap: 12px; margin: 20px 0 16px; }
 .search-field { flex: 1; }
 .search-control { position: relative; display: block; }

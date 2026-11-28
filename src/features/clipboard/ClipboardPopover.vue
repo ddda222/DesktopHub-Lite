@@ -308,14 +308,26 @@ async function confirmDeletion(): Promise<void> {
   }
 }
 
-async function saveNote(clip: ClipItem, favorite = clip.favorite ?? false): Promise<void> {
+async function saveNote(clip: ClipItem, favorite = clip.favorite ?? false, quiet = false): Promise<void> {
   if (savingNote.value) return
   savingNote.value = true
   try {
     await editClip(clip, favorite, noteDraft.value)
+    if (quiet) pushToast('已自动保存备注', 'info')
   } finally {
     savingNote.value = false
   }
+}
+
+async function autoSaveNoteIfDirty(clip: ClipItem | null): Promise<void> {
+  if (!clip || savingNote.value) return
+  if (noteDraft.value.trim() === (clip.note ?? '').trim()) return
+  await saveNote(clip, clip.favorite ?? false, true)
+}
+
+async function leaveDetail(): Promise<void> {
+  await autoSaveNoteIfDirty(detailClip.value)
+  closeDetail()
 }
 
 async function onSaveAsSnippet(clip: ClipItem | null): Promise<void> {
@@ -822,6 +834,10 @@ function onKeydown(event: KeyboardEvent): void {
       stopSelecting()
       return
     }
+    if (detailClip.value) {
+      void leaveDetail()
+      return
+    }
     closePanel()
     return
   }
@@ -980,6 +996,12 @@ function inspectClipKind(clip: ClipItem): ClipBadgeInfo | null {
 
 function openDetectedUrl(url: string): void {
   if (!URL_RE.test(url)) return
+  if (isDesktop) {
+    void invokeHost('open_external_url', { url }).catch((error) => {
+      pushToast(String(error), 'error')
+    })
+    return
+  }
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 </script>
@@ -1195,7 +1217,7 @@ function openDetectedUrl(url: string): void {
       </section>
       <section v-else-if="detailClip" class="detail" aria-label="记录详情">
         <div class="detail-head">
-          <button class="back" type="button" @click="closeDetail()">
+          <button class="back" type="button" @click="leaveDetail()">
             <Icon name="back" :size="14" />
             <span>返回列表</span>
           </button>
@@ -1276,7 +1298,9 @@ function openDetectedUrl(url: string): void {
             v-model="noteDraft"
             maxlength="200"
             aria-label="剪贴板备注"
-            placeholder="添加备注（最多 200 字）"
+            placeholder="添加备注，回车或返回自动保存（最多 200 字）"
+            @keydown.enter.prevent="saveNote(detailClip)"
+            @blur="autoSaveNoteIfDirty(detailClip)"
           />
           <button
             class="chip"

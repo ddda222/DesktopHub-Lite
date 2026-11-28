@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { vGsapPress, vGsapPulse } from '@/lib/gsapMotion'
 import { activeMotionPreset } from '@/lib/motionPresets'
-import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
+import { invokeHost, isDesktop, listenHost } from '@/lib/desktop/desktop'
 import type { AudioDevice, AudioSession as Session, AudioSnapshot as Snapshot } from '@/lib/desktop/types'
 import { state } from '@/store'
 import { mockDevices, mockProfiles, mockSessions } from './mock'
@@ -33,6 +33,7 @@ function compactDeviceLabel(name: string): string {
 }
 const profiles = ref<Profile[]>(isDesktop ? [] : mockProfiles)
 const profileName = ref('')
+const confirmDeleteProfile = ref('')
 const notice = ref('')
 const error = ref('')
 const readError = ref('')
@@ -45,6 +46,15 @@ const queuedUpdates = new Map<string, { volume?: number; muted?: boolean; revisi
 let writingSession = false
 let disposed = false, sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
+let noticeTimer: ReturnType<typeof setTimeout> | undefined
+let stopAudioWatch: (() => void) | undefined
+function setNotice(text: string): void {
+  notice.value = text
+  clearTimeout(noticeTimer)
+  if (text) {
+    noticeTimer = setTimeout(() => { notice.value = '' }, 4200)
+  }
+}
 watch(visibleSessions, rows => {
   // 在另一个窗口隐藏正拖动的行时，滑块可能收不到 change，释放草稿以继续轮询。
   for (const id of Object.keys(drafts.value)) {
@@ -86,11 +96,11 @@ async function switchOutputDevice(device: AudioDevice): Promise<void> {
         devices.value = snapshot.devices
         sessions.value = snapshot.sessions
         warnings.value = snapshot.warnings
-        notice.value = `已切换默认输出：${device.name}`
+        setNotice(`已切换默认输出：${device.name}`)
       }
     } else {
       devices.value = devices.value.map(d => ({ ...d, isDefault: d.id === device.id }))
-      notice.value = `已在网页中模拟切换输出：${device.name}`
+      setNotice(`已在网页中模拟切换输出：${device.name}`)
     }
   } catch (e) {
     if (!disposed) error.value = String(e)
@@ -139,13 +149,32 @@ async function apply(index: number): Promise<void> {
   try {
     if (isDesktop) {
       const result = await invokeHost<{ applied: number; skipped: number; failed: string[]; snapshot: Snapshot }>('apply_audio_profile', { name: profile.name })
+      devices.value = result.snapshot.devices
       sessions.value = result.snapshot.sessions; warnings.value = result.snapshot.warnings
-      notice.value = `「${profile.name}」：成功 ${result.applied} 个会话，跳过 ${result.skipped} 个未运行应用/设备，失败 ${result.failed.length} 个。`
+      setNotice(`「${profile.name}」：成功 ${result.applied} 个会话，跳过 ${result.skipped} 个未运行应用/设备${result.failed.length ? `，失败 ${result.failed.length} 个` : ''}。`)
       error.value = result.failed.join('；')
     } else {
       for (const setting of profile.settings) for (const row of sessions.value.filter(s => s.appKey === setting.appKey && s.deviceId === setting.deviceId)) { row.volume = setting.volume; row.muted = setting.muted }
-      notice.value = `已在网页中模拟「${profile.name}」，没有改变系统声音。`
+      setNotice(`已在网页中模拟「${profile.name}」，没有改变系统声音。`)
     }
+  } catch (e) { error.value = String(e) }
+  finally { busy.value = false; exclusive.value = false }
+}
+async function deleteProfile(name: string): Promise<void> {
+  if (busy.value) return
+  if (confirmDeleteProfile.value !== name) {
+    confirmDeleteProfile.value = name
+    return
+  }
+  confirmDeleteProfile.value = ''
+  busy.value = true; exclusive.value = true; error.value = ''
+  try {
+    if (isDesktop) {
+      profiles.value = await invokeHost<Profile[]>('delete_audio_profile', { name })
+    } else {
+      profiles.value = profiles.value.filter(p => p.name !== name)
+    }
+    setNotice(`已删除声音配置「${name}」`)
   } catch (e) { error.value = String(e) }
   finally { busy.value = false; exclusive.value = false }
 }
@@ -166,17 +195,22 @@ async function save(): Promise<void> {
   try {
     if (isDesktop) profiles.value = await invokeHost<Profile[]>('save_audio_profile', { profile })
     else { const index = profiles.value.findIndex(p => p.name === name); if (index >= 0) profiles.value[index] = profile; else if (profiles.value.length < 16) profiles.value.push(profile); else throw new Error('最多保存 16 个配置') }
-    profileName.value = ''; notice.value = `已保存「${name}」${isDesktop ? '到本机' : '到本次网页演示'}。${sessions.value.some(s => !s.appKey) ? '无法识别应用身份的会话未保存。' : ''}`
+    profileName.value = ''; setNotice(`已保存「${name}」${isDesktop ? '到本机' : '到本次网页演示'}。${sessions.value.some(s => !s.appKey) ? '无法识别应用身份的会话未保存。' : ''}`)
   } catch (e) { error.value = String(e) }
   finally { busy.value = false; exclusive.value = false }
 }
 function poll(): void { if (!document.hidden) void refresh(); timer = setTimeout(poll, 2500) }
 watch(() => props.active, active => { if (active) void refresh() })
 onMounted(async () => {
-  if (isDesktop) { try { const rows = await invokeHost<Profile[]>('list_audio_profiles'); if (!disposed) profiles.value = rows } catch (e) { error.value = String(e) } }
+  if (isDesktop) {
+    try { const rows = await invokeHost<Profile[]>('list_audio_profiles'); if (!disposed) profiles.value = rows } catch (e) { error.value = String(e) }
+    void listenHost<void>('audio-devices-changed', () => {
+      if (!disposed) void refresh()
+    }).then(off => { if (disposed) off(); else stopAudioWatch = off }).catch(() => {})
+  }
   if (!disposed) poll()
 })
-onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clearTimeout(timer) })
+onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clearTimeout(timer); clearTimeout(noticeTimer); stopAudioWatch?.() })
 </script>
 
 <template>
@@ -205,7 +239,27 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
         <span>{{ compactDeviceLabel(dev.name) }}</span>
       </button>
     </div>
-    <div v-if="profiles.length" class="sound-profiles" aria-label="声音配置"><button v-for="(profile, i) in profiles" :key="profile.name" v-gsap-press="busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" :disabled="busy" :aria-pressed="activeProfile === profile.name" @click="apply(i)">{{ profile.name }}</button></div>
+    <div v-if="profiles.length" class="sound-profiles" aria-label="声音配置">
+      <div v-for="(profile, i) in profiles" :key="profile.name" class="profile-chip">
+        <button
+          v-gsap-press="busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+          type="button"
+          class="profile-apply"
+          :disabled="busy"
+          :aria-pressed="activeProfile === profile.name"
+          @click="confirmDeleteProfile = ''; apply(i)"
+        >{{ profile.name }}</button>
+        <button
+          type="button"
+          class="profile-del"
+          :class="{ 'is-confirm': confirmDeleteProfile === profile.name }"
+          :disabled="busy"
+          :title="confirmDeleteProfile === profile.name ? `再次点击确认删除「${profile.name}」` : `删除配置「${profile.name}」`"
+          :aria-label="confirmDeleteProfile === profile.name ? `确认删除 ${profile.name}` : `删除 ${profile.name}`"
+          @click.stop="deleteProfile(profile.name)"
+        >{{ confirmDeleteProfile === profile.name ? '删?' : '×' }}</button>
+      </div>
+    </div>
     <p v-if="!sessions.length" class="mixer-notice">{{ readError ? '暂时无法取得会话，请重试。' : '暂时没有音频会话。先让应用播放声音，再刷新。' }}</p>
     <p v-else-if="!visibleSessions.length" class="mixer-notice">当前声音条目均已隐藏，可在「设置 → 调音台」中重新显示。</p>
     <div v-for="session in visibleSessions" :key="session.id" class="sound-channel" :class="{ muted: session.muted }">
@@ -229,6 +283,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
       </div>
     </div>
     <form class="save-profile" @submit.prevent="save"><input v-model="profileName" maxlength="20" placeholder="保存当前为预设，如：开会、游戏…" aria-label="声音配置名称" /><button type="submit" :disabled="busy || !sessions.length">保存配置</button></form>
+    <p v-if="notice" class="mixer-feedback" role="status">{{ notice }}</p>
     <p v-if="error" class="mixer-error" role="alert">{{ error }}</p><p v-if="readError" class="mixer-error" role="alert">{{ readError }}</p><p v-for="warning in warnings" :key="warning" class="mixer-notice">{{ warning }}</p>
   </section>
 </template>
@@ -249,9 +304,14 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
 .device-chip.active .dev-dot { background:var(--accent); box-shadow:0 0 6px var(--accent); opacity:1; }
 .device-chip.switching { opacity:.65; cursor:wait; }
 .sound-profiles { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
-.sound-profiles button { padding:4px 10px; border:1px solid var(--line); border-radius:7px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out),transform 70ms var(--ease-out); }
-.sound-profiles button:hover:not([aria-pressed=true]):not(:disabled) { background:var(--hover); border-color:var(--line-strong); color:var(--text); }
-.sound-profiles button[aria-pressed=true] { background:var(--accent-weak); color:var(--accent); border-color:var(--accent); font-weight:600; }
+.profile-chip { display:inline-flex; align-items:stretch; }
+.sound-profiles .profile-apply { padding:4px 9px; border:1px solid var(--line); border-right:0; border-radius:7px 0 0 7px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out),transform 70ms var(--ease-out); }
+.sound-profiles .profile-apply:hover:not([aria-pressed=true]):not(:disabled) { background:var(--hover); border-color:var(--line-strong); color:var(--text); }
+.sound-profiles .profile-apply[aria-pressed=true] { background:var(--accent-weak); color:var(--accent); border-color:var(--accent); font-weight:600; }
+.sound-profiles .profile-del { padding:0 6px; border:1px solid var(--line); border-radius:0 7px 7px 0; background:var(--surface-2); color:var(--text-3); font-size:11px; line-height:1; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out); }
+.sound-profiles .profile-del:hover:not(:disabled) { background:var(--danger-weak); border-color:var(--danger); color:var(--danger); }
+.sound-profiles .profile-del.is-confirm { background:var(--danger); border-color:var(--danger); color:var(--danger-text); font-weight:650; }
+.mixer-feedback { font-size:11px; color:var(--accent); line-height:1.55; margin:6px 0 0; }
 .sound-channel { display:flex; flex-direction:column; gap:3px; padding:8px 0; border-top:1px solid var(--line); }
 .channel-top { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
 .channel-info { display:flex; align-items:center; gap:6px; flex:1; min-width:0; padding-left:4px; }

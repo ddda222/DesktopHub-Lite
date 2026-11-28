@@ -131,6 +131,16 @@ function onCopy(): void {
   void copyTranslation()
 }
 
+function useResultAsSource(): void {
+  if (!resultText.value.trim()) return
+  const text = resultText.value
+  const dir = state.translation.direction === 'auto' ? state.translation.result?.direction : state.translation.direction
+  if (dir === 'zh-en' || dir === 'en-zh') {
+    setTranslationDirection(dir === 'zh-en' ? 'en-zh' : 'zh-en')
+  }
+  setTranslationSource(text)
+}
+
 function onPanelKeydown(event: KeyboardEvent): void {
   // 中文输入法候选确认期间（isComposing / keyCode 229），Enter 与 Escape 都属于输入法，
   // 不能当成提交或关闭，否则会把候选词吞掉。
@@ -272,6 +282,16 @@ function onPanelKeydown(event: KeyboardEvent): void {
               样稿模拟结果
             </span>
             <span class="head-spacer" />
+            <button
+              v-if="status === 'done' && resultText.trim()"
+              v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+              class="ghost"
+              type="button"
+              title="将当前译文回填到原文框并反转方向，方便回译校验"
+              @click="useResultAsSource"
+            >
+              回填原文
+            </button>
             <button
               v-if="status === 'done'"
               v-gsap-press="state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"

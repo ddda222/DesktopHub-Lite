@@ -8,6 +8,7 @@
 //! 剪贴板与翻译只登记契约，不读写真实数据、不发真实请求（阶段 3 / 4）。
 
 mod adb;
+mod app_discovery;
 mod app_pack;
 mod applications;
 mod approvals;
@@ -698,6 +699,106 @@ fn remove_application(app: AppHandle, id: String) -> Result<AppConfig, String> {
     Ok(snapshot)
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveBrokenResult {
+    removed: usize,
+    config: AppConfig,
+}
+
+/// 主动巡检所有已收录应用的目标路径/系统应用有效性，同步更新 broken 状态并广播。
+#[tauri::command]
+async fn audit_applications(app: AppHandle) -> Result<AppConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || audit_applications_sync(&app))
+        .await
+        .map_err(|_| "应用健康巡检中断".to_string())?
+}
+
+fn audit_applications_sync(app: &AppHandle) -> Result<AppConfig, String> {
+    let state = app.state::<AppState>();
+    let targets: Vec<(String, String)> = {
+        let config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
+        config
+            .apps
+            .iter()
+            .map(|a| (a.id.clone(), a.target.clone()))
+            .collect()
+    };
+    let mut exists_map = std::collections::HashMap::with_capacity(targets.len());
+    for (id, target) in targets {
+        exists_map.insert(id, launcher::exists(&target));
+    }
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
+    let (snapshot, changed) = {
+        let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
+        let mut preview = config.apps.clone();
+        let diff = app_discovery::reconcile_broken_apps(&mut preview, |target| {
+            config
+                .apps
+                .iter()
+                .find(|a| a.target == target)
+                .and_then(|a| exists_map.get(&a.id).copied())
+                .unwrap_or(true)
+        });
+        if diff == 0 {
+            (config.clone(), 0)
+        } else {
+            let saved = state.store.update(applications::CONFIG_FILE, &mut *config, |next| {
+                for app_item in &mut next.apps {
+                    if let Some(&ok) = exists_map.get(&app_item.id) {
+                        app_item.broken = if ok { None } else { Some(true) };
+                    }
+                }
+            })?;
+            (saved, diff)
+        }
+    };
+    if changed > 0 {
+        broadcast_apps(app, &snapshot);
+    }
+    Ok(snapshot)
+}
+
+/// 一键清理所有标记为失效（broken == Some(true)）的应用条目。
+#[tauri::command]
+fn remove_broken_applications(app: AppHandle) -> Result<RemoveBrokenResult, String> {
+    let state = app.state::<AppState>();
+    let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
+    let (snapshot, removed) = {
+        let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
+        let broken_count = config.apps.iter().filter(|a| a.broken == Some(true)).count();
+        if broken_count == 0 {
+            (config.clone(), 0)
+        } else {
+            let saved = state.store.update(applications::CONFIG_FILE, &mut *config, |next| {
+                next.apps.retain(|a| a.broken != Some(true));
+            })?;
+            (saved, broken_count)
+        }
+    };
+    if removed > 0 {
+        broadcast_apps(&app, &snapshot);
+    }
+    Ok(RemoveBrokenResult {
+        removed,
+        config: snapshot,
+    })
+}
+
+/// 安全使用系统默认浏览器打开外部 http/https 网址（供剪贴板链接等复用）。
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://"))
+        || trimmed.len() > 4096
+        || trimmed.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("仅支持打开合法的 http/https 网址".into());
+    }
+    launcher::launch(trimmed)
+}
+
 #[tauri::command]
 fn reorder_applications(app: AppHandle, ids: Vec<String>) -> Result<AppConfig, String> {
     let state = app.state::<AppState>();
@@ -1239,6 +1340,7 @@ pub fn run() {
             app.manage(approvals::Approvals::default());
             app.manage(mail::Mail::load(&store));
             app.manage(audio::AudioState::default());
+            app.manage(app_discovery::DiscoveryManager::default());
             app.manage(ocr::OcrState::default());
             app.manage(config_transfer::ConfigurationTransfers::default());
             app.manage(data_location::DataLocationState::new(
@@ -1308,6 +1410,15 @@ pub fn run() {
             peripherals::start(handle.clone());
             approvals::start(handle.clone());
             mail::start(handle.clone());
+            audio::start_device_watch(handle.clone());
+            app_discovery::start(handle.clone());
+            {
+                let audit_app = handle.clone();
+                let _ = std::thread::Builder::new().name("app-health-audit".into()).spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    let _ = audit_applications_sync(&audit_app);
+                });
+            }
             if app.state::<AppState>().ui.snapshot().island_appearance.auto_check_updates {
                 let update_app = handle.clone();
                 tauri::async_runtime::spawn(async move {
@@ -1449,6 +1560,7 @@ pub fn run() {
             audio::update_audio_session,
             audio::list_audio_profiles,
             audio::save_audio_profile,
+            audio::delete_audio_profile,
             audio::apply_audio_profile,
             file_shelf::list_shelf_files,
             file_shelf::add_shelf_files,
@@ -1527,6 +1639,15 @@ pub fn run() {
             save_application,
             save_application_category,
             remove_application,
+            audit_applications,
+            remove_broken_applications,
+            open_external_url,
+            app_discovery::list_discovered_apps,
+            app_discovery::scan_discovered_apps,
+            app_discovery::accept_discovered_app,
+            app_discovery::dismiss_discovered_app,
+            app_discovery::dismiss_all_discovered_apps,
+            app_discovery::restore_dismissed_app,
             reorder_applications,
             pick_application_target,
             import_desktop_shortcuts,

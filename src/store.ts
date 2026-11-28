@@ -57,6 +57,26 @@ import type {
 export type PanelName = 'clipboard' | 'translation' | 'files' | 'audio' | 'pack' | 'category' | 'overflow' | null
 export type { SettingsSection } from '@/lib/desktop/desktop'
 
+export interface DiscoveredAppItem {
+  name: string
+  target: string
+  suggestedCategoryId: string
+  discoveredAtMs: number
+}
+
+export interface DismissedAppItem {
+  name: string
+  target: string
+  dismissedAtMs: number
+}
+
+export interface DiscoverySnapshot {
+  initialized: boolean
+  lastScanMs: number
+  pending: DiscoveredAppItem[]
+  dismissed: DismissedAppItem[]
+}
+
 export const state = reactive({
   /** 数据是否已经从宿主加载过；false 时界面显示占位而不是假装有数据 */
   ready: false,
@@ -103,6 +123,13 @@ export const state = reactive({
     filledFromClip: false
   },
   toasts: [] as Toast[],
+  discovery: {
+    initialized: false,
+    lastScanMs: 0,
+    pending: [] as DiscoveredAppItem[],
+    dismissed: [] as DismissedAppItem[],
+    scanning: false
+  },
   /** 目标路径 → 图标 data URI。读不到就不放进来，界面回退到首字母色块。 */
   icons: {} as Record<string, string>,
   ui: {
@@ -243,11 +270,14 @@ function applyApps(config: AppConfig): void {
  * 避免每次列表变化都把全部目标重读一遍。读失败的目标不写入，
  * 界面据此回退首字母色块——不伪造图标。
  */
-async function loadMissingIcons(): Promise<void> {
+async function loadMissingIcons(extraTargets: string[] = []): Promise<void> {
   if (!isDesktop) return
   const targets = [
-    ...new Set(state.apps.filter((app) => !app.hidden && !app.broken).map((app) => app.target))
-  ].filter((target) => !state.icons[target])
+    ...new Set([
+      ...state.apps.filter((app) => !app.hidden && !app.broken).map((app) => app.target),
+      ...extraTargets
+    ])
+  ].filter((target) => target && !state.icons[target])
   if (targets.length === 0) return
   const payloads = await readAppIcons(targets)
   const next = { ...state.icons }
@@ -457,6 +487,7 @@ export async function subscribeHostEvents(): Promise<() => void> {
       })
     }),
     listenHost<SnippetPayload>('snippets-changed', (payload) => applySnippets(payload)),
+    listenHost<DiscoverySnapshot>('app-discovery-changed', (payload) => applyDiscovery(payload)),
     listenHost<string>('clipboard-notice', (message) => {
       if (handleGlobalNotice) pushToast(message, 'error')
     }),
@@ -1048,11 +1079,15 @@ export function setTranslationSource(value: string): void {
 
 export function setTranslationDirection(direction: TranslateDirection): void {
   if (state.translation.direction === direction) return
-  cancelTranslation()
+  if (state.translation.status === 'loading') {
+    cancelTranslation()
+  }
   state.translation.direction = direction
-  state.translation.status = 'idle'
-  state.translation.result = null
-  state.translation.error = ''
+  // 切换翻译方向时保留已有译文上下文，仅清理旧错误提示。
+  if (state.translation.status === 'error') {
+    state.translation.status = state.translation.result ? 'done' : 'idle'
+    state.translation.error = ''
+  }
 }
 
 export async function submitTranslation(): Promise<void> {
@@ -1671,14 +1706,160 @@ export async function saveAppCategory(id: string, name: string | null): Promise<
   } catch (error) { pushToast(String(error), 'error'); return false }
 }
 
-watch(() => state.ui.panel, (panel, previous) => {
+watch(() => state.ui.panel, (panel) => {
   if (!isDesktop) return
   if (panel === 'clipboard') {
     void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error'))
     void refreshSnippets().catch(() => pushToast('读取常用短语失败', 'error'))
   }
-  if (windowLabel !== 'translation' && previous === 'translation' && panel !== 'translation') cancelTranslation()
 })
+
+/* ---------- 新装应用增量发现与失效应用健康巡检 ---------- */
+
+function applyDiscovery(snapshot: DiscoverySnapshot): void {
+  state.discovery.initialized = snapshot.initialized
+  state.discovery.lastScanMs = snapshot.lastScanMs
+  state.discovery.pending = snapshot.pending
+  state.discovery.dismissed = snapshot.dismissed
+  const targets = snapshot.pending.map((item) => item.target)
+  if (targets.length) void loadMissingIcons(targets)
+}
+
+export async function refreshDiscoveredApps(): Promise<void> {
+  if (!isDesktop) return
+  try {
+    const snap = await invokeHost<DiscoverySnapshot>('list_discovered_apps')
+    applyDiscovery(snap)
+  } catch {
+    // 读取失败不影响设置主流程
+  }
+}
+
+export async function scanDiscoveredApps(force = false): Promise<DiscoverySnapshot | null> {
+  if (!isDesktop) {
+    if (force) pushToast('扫描新安装应用请在桌面版中使用', 'info')
+    return null
+  }
+  if (state.discovery.scanning) return null
+  state.discovery.scanning = true
+  try {
+    const snap = await invokeHost<DiscoverySnapshot>('scan_discovered_apps', { force })
+    applyDiscovery(snap)
+    if (force) {
+      pushToast(
+        snap.pending.length ? `已检查完成，当前有 ${snap.pending.length} 个新装应用待分类` : '已检查完成，暂未发现新安装的应用',
+        'info'
+      )
+    }
+    return snap
+  } catch (error) {
+    if (force) pushToast(String(error), 'error')
+    return null
+  } finally {
+    state.discovery.scanning = false
+  }
+}
+
+export async function acceptDiscoveredApp(
+  target: string,
+  name: string,
+  categoryId: string
+): Promise<boolean> {
+  if (!isDesktop) {
+    state.discovery.pending = state.discovery.pending.filter((item) => item.target !== target)
+    return true
+  }
+  try {
+    const res = await invokeHost<{ config: AppConfig; discovery: DiscoverySnapshot }>('accept_discovered_app', {
+      target,
+      name,
+      categoryId
+    })
+    applyApps(res.config)
+    applyDiscovery(res.discovery)
+    const catLabel = state.categories.find((c) => c.id === categoryId)?.name ?? '未分类'
+    pushToast(`已将「${name}」加入「${catLabel}」`, 'success')
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
+export async function dismissDiscoveredApp(target: string): Promise<boolean> {
+  if (!isDesktop) {
+    state.discovery.pending = state.discovery.pending.filter((item) => item.target !== target)
+    return true
+  }
+  try {
+    const snap = await invokeHost<DiscoverySnapshot>('dismiss_discovered_app', { target })
+    applyDiscovery(snap)
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
+export async function dismissAllDiscoveredApps(): Promise<boolean> {
+  if (!isDesktop) {
+    state.discovery.pending = []
+    return true
+  }
+  try {
+    const snap = await invokeHost<DiscoverySnapshot>('dismiss_all_discovered_apps')
+    applyDiscovery(snap)
+    pushToast('已忽略当前全部待分类新应用', 'info')
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
+export async function restoreDismissedApp(target: string): Promise<boolean> {
+  if (!isDesktop) return false
+  try {
+    const snap = await invokeHost<DiscoverySnapshot>('restore_dismissed_app', { target })
+    applyDiscovery(snap)
+    pushToast('已恢复到待分类列表', 'success')
+    return true
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return false
+  }
+}
+
+export async function auditApplications(): Promise<void> {
+  if (!isDesktop) return
+  try {
+    const next = await invokeHost<AppConfig>('audit_applications')
+    applyApps(next)
+  } catch {
+    // 静默健康巡检失败不打扰用户
+  }
+}
+
+export async function removeBrokenApplications(): Promise<number> {
+  if (!isDesktop) {
+    const before = state.apps.length
+    state.apps = state.apps.filter((app) => !app.broken)
+    return before - state.apps.length
+  }
+  try {
+    const res = await invokeHost<{ removed: number; config: AppConfig }>('remove_broken_applications')
+    applyApps(res.config)
+    if (res.removed > 0) {
+      pushToast(`已清理 ${res.removed} 个失效应用`, 'success')
+    } else {
+      pushToast('当前没有失效应用', 'info')
+    }
+    return res.removed
+  } catch (error) {
+    pushToast(String(error), 'error')
+    return 0
+  }
+}
 
 export interface OcrResultEvent {
   text: string
@@ -1775,14 +1956,31 @@ export async function copyOcrText(text: string): Promise<boolean> {
   }
 }
 
-export function closeOcrPanel(): void {
+export function openOcrPanel(): void {
+  if (state.ocr.status === 'idle' && !state.ocr.text.trim()) return
+  state.ocr.open = true
+  state.ui.islandExpanded = true
+}
+
+export function closeOcrPanel(clear = false): void {
   state.ocr.open = false
-  state.ocr.status = 'idle'
-  state.ocr.error = ''
+  if (clear) {
+    state.ocr.status = 'idle'
+    state.ocr.text = ''
+    state.ocr.lineCount = 0
+    state.ocr.charCount = 0
+    state.ocr.language = ''
+    state.ocr.elapsedMs = 0
+    state.ocr.error = ''
+  }
+}
+
+export function clearOcrResult(): void {
+  closeOcrPanel(true)
 }
 
 export function sendOcrToTranslation(text: string): void {
-  closeOcrPanel()
+  closeOcrPanel(false)
   state.ui.islandPage = 'translation'
   state.ui.islandExpanded = true
   openTranslation(text, false)

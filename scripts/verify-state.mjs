@@ -738,4 +738,57 @@ await test('展开→全屏细线态收起及途中 suppressed=true 不跳过动
     true
   )
 })
+
+await test('翻译切换方向保留已有译文上下文，OCR 收起保留结果可回看且支持显式清空', () => {
+  const state = {
+    translation: {
+      source: '你好',
+      direction: 'zh-en',
+      status: 'done',
+      result: { text: 'Hello', direction: 'zh-en', provider: 'test', model: 'm', elapsedMs: 100 },
+      error: '',
+      requestSeq: 1,
+      filledFromClip: false
+    },
+    ocr: {
+      open: true,
+      status: 'done',
+      text: '识别出的重要文本',
+      lineCount: 1,
+      charCount: 8,
+      language: 'zh-Hans-CN',
+      elapsedMs: 30,
+      source: 'screen',
+      error: ''
+    },
+    ui: { islandExpanded: true }
+  }
+  let cancelled = 0
+  const api = subject(
+    ['setTranslationDirection', 'closeOcrPanel', 'openOcrPanel', 'clearOcrResult'],
+    { state, cancelTranslation: () => { cancelled++ } }
+  )
+  // 切换翻译方向保留已有译文结果，不无条件清空
+  api.setTranslationDirection('en-zh')
+  assert.equal(state.translation.direction, 'en-zh')
+  assert.equal(state.translation.result?.text, 'Hello')
+  assert.equal(state.translation.status, 'done')
+  assert.equal(cancelled, 0)
+  // 若正在请求中切方向，才中止旧请求
+  state.translation.status = 'loading'
+  api.setTranslationDirection('zh-en')
+  assert.equal(cancelled, 1)
+
+  // OCR 收起默认保留结果，可重新打开回看；显式清空后复位 idle
+  api.closeOcrPanel()
+  assert.equal(state.ocr.open, false)
+  assert.equal(state.ocr.status, 'done')
+  assert.equal(state.ocr.text, '识别出的重要文本')
+  api.openOcrPanel()
+  assert.equal(state.ocr.open, true)
+  api.clearOcrResult()
+  assert.equal(state.ocr.open, false)
+  assert.equal(state.ocr.status, 'idle')
+  assert.equal(state.ocr.text, '')
+})
 if(failed)process.exitCode=1

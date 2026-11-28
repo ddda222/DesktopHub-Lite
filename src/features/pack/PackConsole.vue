@@ -240,6 +240,24 @@ onBeforeUnmount(() => {
 
 /* ---------- ADB ---------- */
 
+async function persistReversePort(port: number): Promise<void> {
+  if (!isDesktop || !settings.value || settings.value.reversePort === port) return
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return
+  try {
+    const next: PackSettings = { ...settings.value, reversePort: port }
+    const saved = await invokeHost<PackSettings>('save_pack_settings', { settings: next })
+    applyPackSettings(saved)
+  } catch {
+    // 端口持久化失败不阻断本次转发流程
+  }
+}
+
+async function onPortCommit(): Promise<void> {
+  const port = Math.trunc(Number(reversePort.value))
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return
+  await persistReversePort(port)
+}
+
 async function reversePortNow(): Promise<void> {
   if (!isDesktop || adbBusy.value) return
   const port = Math.trunc(Number(reversePort.value))
@@ -250,6 +268,7 @@ async function reversePortNow(): Promise<void> {
   adbBusy.value = true
   try {
     adb.value = await invokeHost<AdbStatus>('adb_reverse', { port })
+    await persistReversePort(port)
     pushToast(`已建立 tcp:${port} 端口映射`, 'success')
   } catch (error) {
     pushToast(String(error), 'error')
@@ -339,6 +358,7 @@ async function removeScript(id: string): Promise<void> {
   if (!isDesktop) return
   try {
     scripts.value = await invokeHost<PackScript[]>('delete_pack_script', { id })
+    pushToast('已删除脚本', 'success')
   } catch (error) {
     pushToast(String(error), 'error')
   }
@@ -584,6 +604,8 @@ function openPackSettings(): void {
               min="1"
               max="65535"
               aria-label="ADB 转发端口"
+              @blur="onPortCommit"
+              @keydown.enter.prevent="onPortCommit"
             />
           </label>
           <button
