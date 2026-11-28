@@ -291,13 +291,13 @@ onBeforeUnmount(() => {
         </span>
         <textarea
           :value="ignoreFilesText"
-          class="control ignore-textarea"
+          class="control control-textarea"
           rows="3"
           spellcheck="false"
           placeholder="例如：&#10;src/api/gov-auth.js&#10;src/config/area/areaConfig.json"
           @input="onIgnoreTextInput(($event.target as HTMLTextAreaElement).value)"
         />
-        <span class="hint ignore-hint">
+        <span class="hint hint-flush">
           仅「远程联调」云打包生效：上传前临时恢复为 Git HEAD（不改暂存区），进入云端排队后自动还原你的本地修改；若 HEAD 仍含 localhost 会拦截提醒。
         </span>
       </label>
@@ -448,22 +448,6 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-}
-.btn-sm {
-  min-height: 28px !important;
-  padding: 2px 10px !important;
-  font-size: 12px !important;
-}
-.ignore-textarea {
-  min-height: 76px !important;
-  padding: 8px 12px !important;
-  font-family: var(--font-mono, ui-monospace, monospace) !important;
-  font-size: 12px !important;
-  line-height: 1.55;
-  resize: vertical;
-}
-.ignore-hint {
-  margin: 0 !important;
 }
 .auto-install-card {
   margin-top: 16px;

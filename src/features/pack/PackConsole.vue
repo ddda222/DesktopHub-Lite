@@ -824,7 +824,7 @@ function openPackSettings(): void {
         title="关闭时只保存 APK 到输出目录，不覆盖手机上已安装的应用"
         @click="toggleAutoInstall"
       >
-        <MotionSwitch :checked="autoInstall" as-decorative />
+        <MotionSwitch :checked="autoInstall" size="sm" as-decorative />
         <span>自动装机</span>
       </button>
 
@@ -904,7 +904,7 @@ function openPackSettings(): void {
 }
 .btn-run.is-remote:hover:not(:disabled) {
   background: var(--danger);
-  color: #fff;
+  color: var(--danger-text);
   border-color: var(--danger);
 }
 .btn-inline:disabled,
@@ -1021,7 +1021,7 @@ function openPackSettings(): void {
   box-shadow: 0 0 6px var(--accent);
 }
 .run-dot.is-done {
-  background: var(--success, #3fb950);
+  background: var(--success);
 }
 .run-dot.is-error {
   background: var(--danger);
@@ -1051,11 +1051,11 @@ function openPackSettings(): void {
   color: var(--accent);
 }
 .phase-pill.is-done {
-  background: color-mix(in srgb, #10b981 14%, transparent);
-  color: #10b981;
+  background: var(--success-weak);
+  color: var(--success);
 }
 .phase-pill.is-error {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  background: var(--danger-weak);
   color: var(--danger);
 }
 .phase-pill.is-cancelled {
@@ -1091,10 +1091,10 @@ function openPackSettings(): void {
 }
 .step-item.is-done {
   color: var(--text-2);
-  background: color-mix(in srgb, #10b981 10%, transparent);
+  background: var(--success-weak);
 }
 .step-item.is-done .step-dot {
-  background: #10b981;
+  background: var(--success);
   opacity: 1;
 }
 .step-item.is-current {
@@ -1132,8 +1132,8 @@ function openPackSettings(): void {
   color: var(--danger);
 }
 .run-summary-card.is-done {
-  border-color: color-mix(in srgb, #10b981 36%, var(--line));
-  background: color-mix(in srgb, #10b981 8%, transparent);
+  border-color: color-mix(in srgb, var(--success) 38%, var(--line));
+  background: color-mix(in srgb, var(--success) 8%, transparent);
 }
 .summary-badge {
   flex: none;
@@ -1146,12 +1146,12 @@ function openPackSettings(): void {
   color: var(--accent);
 }
 .run-summary-card.is-err .summary-badge {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  background: var(--danger-weak);
   color: var(--danger);
 }
 .run-summary-card.is-done .summary-badge {
-  background: color-mix(in srgb, #10b981 16%, transparent);
-  color: #10b981;
+  background: var(--success-weak);
+  color: var(--success);
 }
 .run-summary-card.is-stop .summary-badge {
   background: color-mix(in srgb, var(--text-3) 16%, transparent);
@@ -1179,7 +1179,7 @@ function openPackSettings(): void {
   transition: width 360ms ease;
 }
 .progress.is-done > span {
-  background: var(--success, #3fb950);
+  background: var(--success);
 }
 .progress.is-error > span {
   background: var(--danger);
@@ -1290,7 +1290,7 @@ function openPackSettings(): void {
   background: var(--text-3);
 }
 .status-dot.is-on {
-  background: var(--success, #3fb950);
+  background: var(--success);
 }
 .status-dot.is-err {
   background: var(--danger);
@@ -1642,31 +1642,6 @@ function openPackSettings(): void {
 .toggle:disabled {
   opacity: .5;
   cursor: not-allowed;
-}
-.switch {
-  position: relative;
-  width: 26px;
-  height: 14px;
-  border-radius: 999px;
-  background: var(--line-strong, var(--line));
-  transition: background 150ms ease;
-}
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--surface);
-  transition: transform 150ms ease;
-}
-.switch.is-on {
-  background: var(--accent);
-}
-.switch.is-on::after {
-  transform: translateX(12px);
 }
 .config-link {
   display: inline-flex;

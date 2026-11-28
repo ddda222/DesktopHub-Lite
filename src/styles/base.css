@@ -215,6 +215,67 @@ textarea::placeholder {
   }
 }
 
+/* 通用动效开关基线样式：保证设置页、打包台及独立浮层均有一致的几何与层次表现 */
+.motion-switch {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  background: var(--well-bg, var(--surface-3));
+  box-shadow: var(--well-shadow, none);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 160ms var(--ease-out), border-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+}
+.motion-switch:hover:not(:disabled):not(.is-on) {
+  border-color: var(--text-3);
+}
+.motion-switch::after {
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+.motion-switch .switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-2);
+  box-shadow: var(--switch-knob-shadow, 0 1px 2px rgb(0 0 0 / .24));
+  transition: background 160ms var(--ease-out);
+}
+.motion-switch.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: none;
+}
+.motion-switch.is-on .switch-knob {
+  left: 19px;
+  background: var(--accent-text);
+}
+.motion-switch.size-sm {
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+}
+.motion-switch.size-sm::after {
+  inset: -4px 0;
+}
+.motion-switch.size-sm .switch-knob {
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+}
+.motion-switch.size-sm.is-on .switch-knob {
+  left: 15px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

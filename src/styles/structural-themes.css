@@ -134,6 +134,98 @@
   border-radius: 1px; font-family: var(--font-mono);
   clip-path: polygon(3px 0, 100% 0, 100% 100%, 0 100%, 0 3px);
 }
+/* 琥珀重工：通用开关、分页条与近期面板统一 45° 倒角与钨钢凹槽质感 */
+:root[data-theme='mecha'] .motion-switch {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.34); background: var(--well-bg); box-shadow: var(--well-shadow);
+}
+:root[data-theme='mecha'] .motion-switch .switch-knob { border-radius: 1px; }
+:root[data-theme='mecha'] .motion-switch.is-on { background: var(--accent); border-color: var(--accent); box-shadow: none; }
+:root[data-theme='mecha'] .motion-switch.is-on .switch-knob { background: #111318; }
+:root[data-theme='mecha'] .pop .pager-btn {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.28); background: var(--tile-surface); font-family: var(--font-mono);
+  clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+}
+:root[data-theme='mecha'] .pop .pager-btn.is-on {
+  background: var(--accent); color: #111318; border-color: var(--accent);
+}
+:root[data-theme='mecha'] .pack-console .run-focus,
+:root[data-theme='mecha'] .pack-console .editor,
+:root[data-theme='mecha'] .pack-console .confirm-bar {
+  border-radius: 3px; border-color: rgba(245, 158, 11, 0.34); background: var(--tile-surface); box-shadow: var(--tile-shadow);
+}
+:root[data-theme='mecha'] .pack-console .run-summary-card,
+:root[data-theme='mecha'] .pack-console .log,
+:root[data-theme='mecha'] .pack-console .port-box,
+:root[data-theme='mecha'] .pack-console .editor input {
+  border-radius: 3px; border-color: rgba(245, 158, 11, 0.24); background: var(--well-bg); box-shadow: var(--well-shadow);
+}
+:root[data-theme='mecha'] .pack-console .btn-inline,
+:root[data-theme='mecha'] .pack-console .btn-primary,
+:root[data-theme='mecha'] .pack-console .btn-run {
+  border-radius: 2px;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .pack-console .icon-action,
+:root[data-theme='mecha'] .pack-console .config-link { border-radius: 2px; }
+:root[data-theme='mecha'] .pack-console .risk-tag,
+:root[data-theme='mecha'] .pack-console .phase-pill,
+:root[data-theme='mecha'] .pack-console .step-item {
+  border-radius: 2px; font-family: var(--font-mono);
+}
+:root[data-theme='mecha'] .pack-console .progress,
+:root[data-theme='mecha'] .pack-console .progress > span { border-radius: 1px; }
+:root[data-theme='mecha'] .pack-console .script-row:hover { box-shadow: inset 3px 0 0 rgba(245, 158, 11, 0.62); }
+
+:root[data-theme='mecha'] .ocr-panel .ocr-state-box,
+:root[data-theme='mecha'] .ocr-panel .ocr-textarea {
+  border-radius: 3px; border-color: rgba(245, 158, 11, 0.3); background: var(--well-bg); box-shadow: var(--well-shadow);
+}
+:root[data-theme='mecha'] .ocr-panel .ocr-btn,
+:root[data-theme='mecha'] .ocr-panel .ocr-close-btn {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.34); background: var(--tile-surface);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .ocr-panel .ocr-btn-primary {
+  background: var(--accent); color: #111318; border-color: var(--accent);
+}
+
+:root[data-theme='mecha'] .mail-panel button {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.3); background: var(--tile-surface);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .mail-panel button.dismiss {
+  background: transparent; border-color: transparent; clip-path: none;
+}
+:root[data-theme='mecha'] .mail-panel .code {
+  background: var(--accent-weak); border-color: var(--accent); color: var(--accent);
+}
+:root[data-theme='mecha'] .mail-panel .code:hover:enabled {
+  background: var(--accent); color: #111318;
+}
+
+:root[data-theme='mecha'] .approval .approval-body,
+:root[data-theme='mecha'] .question-form textarea {
+  border-radius: 3px; border-color: rgba(245, 158, 11, 0.3); background: var(--well-bg); box-shadow: var(--well-shadow);
+}
+:root[data-theme='mecha'] .approval button,
+:root[data-theme='mecha'] .question-form button {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.34); background: var(--tile-surface);
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .approval button.delegate,
+:root[data-theme='mecha'] .question-form button.delegate {
+  background: transparent; border-color: transparent; clip-path: none;
+}
+:root[data-theme='mecha'] .approval .allow,
+:root[data-theme='mecha'] .question-form .submit:not(:disabled) {
+  background: var(--accent); color: #111318; border-color: var(--accent);
+}
+:root[data-theme='mecha'] .question-form .choice {
+  border-radius: 3px; border-color: rgba(245, 158, 11, 0.2); background: rgba(22, 25, 33, 0.72);
+}
+:root[data-theme='mecha'] .question-form .choice:has(input:checked) {
+  border-color: var(--accent); background: var(--accent-weak); box-shadow: inset 3px 0 0 var(--accent);
+}
 
 
 /* ============================================================================
@@ -200,7 +292,8 @@
 }
 :root[data-theme='pixel'] .settings-ui .win {
   border-radius: 0; background: #35304f;
-  border: 3px solid #0f0d1a; box-shadow: 6px 6px 0 #0f0d1a;
+  border: 3px solid #0f0d1a; outline: 1px solid var(--island-rim);
+  box-shadow: 6px 6px 0 #0f0d1a;
 }
 :root[data-theme='pixel'] .settings-ui .win-head {
   background: #2b2742; border-bottom: 3px solid #0f0d1a;
@@ -283,4 +376,148 @@
 }
 :root[data-theme='pixel'] .pop .tag-dynamic {
   border-radius: 0; background: #facc15; color: #0f0d1a; font-weight: 700;
+}
+/* 像素掌机：通用开关、剪贴板分页条与近期面板统一 0px 硬边框与 3D 实体按键 */
+:root[data-theme='pixel'] .motion-switch {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; height: 24px; box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+:root[data-theme='pixel'] .motion-switch .switch-knob {
+  border-radius: 0; top: 2px; left: 2px; width: 16px; height: 16px; background: #94a3b8; border: 2px solid #0f0d1a; box-shadow: none;
+}
+:root[data-theme='pixel'] .motion-switch.is-on { background: var(--accent); border-color: #0f0d1a; }
+:root[data-theme='pixel'] .motion-switch.is-on .switch-knob { background: #facc15; left: 16px; }
+:root[data-theme='pixel'] .motion-switch.size-sm {
+  width: 32px; height: 20px;
+}
+:root[data-theme='pixel'] .motion-switch.size-sm .switch-knob {
+  top: 2px; left: 2px; width: 12px; height: 12px; border-width: 2px;
+}
+:root[data-theme='pixel'] .motion-switch.size-sm.is-on .switch-knob {
+  left: 14px;
+}
+:root[data-theme='pixel'] .pop .clip-pager {
+  background: var(--pane-surface); border-top: 2px solid #0f0d1a; font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .pop .pager-btn {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc;
+  box-shadow: 0 2px 0 #0f0d1a; font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .pop .pager-btn:hover:not(:disabled):not(.is-on) {
+  background: #5b5282; color: #ffffff;
+}
+:root[data-theme='pixel'] .pop .pager-btn.is-on {
+  background: var(--accent); color: #0f0d1a; border-color: #0f0d1a; font-weight: 700; box-shadow: 0 1px 0 #0f0d1a;
+}
+
+:root[data-theme='pixel'] .pack-console,
+:root[data-theme='pixel'] .ocr-panel,
+:root[data-theme='pixel'] .mail-panel,
+:root[data-theme='pixel'] .approval,
+:root[data-theme='pixel'] .question-form {
+  font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .pack-console .run-focus,
+:root[data-theme='pixel'] .pack-console .editor,
+:root[data-theme='pixel'] .pack-console .confirm-bar {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #252e27; box-shadow: 2px 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .pack-console .run-summary-card,
+:root[data-theme='pixel'] .pack-console .log,
+:root[data-theme='pixel'] .pack-console .log-toggle,
+:root[data-theme='pixel'] .pack-console .port-box,
+:root[data-theme='pixel'] .pack-console .editor input {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+:root[data-theme='pixel'] .pack-console .btn-inline,
+:root[data-theme='pixel'] .pack-console .icon-action {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc; box-shadow: 0 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .pack-console .btn-inline:hover:not(:disabled),
+:root[data-theme='pixel'] .pack-console .icon-action:hover:not(:disabled) {
+  background: #5b5282; color: #ffffff;
+}
+:root[data-theme='pixel'] .pack-console .btn-primary,
+:root[data-theme='pixel'] .pack-console .btn-run {
+  border-radius: 0; border: 2px solid #0f0d1a; background: var(--accent); color: #0f0d1a;
+  font-weight: 700; box-shadow: 0 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .pack-console .btn-run.is-remote {
+  background: #252e27; color: var(--danger); border-color: var(--danger); box-shadow: 0 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .pack-console .btn-run.is-remote:hover:not(:disabled) {
+  background: var(--danger); color: var(--danger-text); border-color: #0f0d1a;
+}
+:root[data-theme='pixel'] .pack-console .btn-inline:active:not(:disabled),
+:root[data-theme='pixel'] .pack-console .btn-primary:active:not(:disabled),
+:root[data-theme='pixel'] .pack-console .btn-run:active:not(:disabled) {
+  transform: translateY(2px); box-shadow: none;
+}
+:root[data-theme='pixel'] .pack-console .risk-tag,
+:root[data-theme='pixel'] .pack-console .phase-pill,
+:root[data-theme='pixel'] .pack-console .step-item,
+:root[data-theme='pixel'] .pack-console .summary-badge,
+:root[data-theme='pixel'] .pack-console .script-row,
+:root[data-theme='pixel'] .pack-console .config-link {
+  border-radius: 0;
+}
+:root[data-theme='pixel'] .pack-console .progress,
+:root[data-theme='pixel'] .pack-console .progress > span {
+  border-radius: 0;
+}
+:root[data-theme='pixel'] .pack-console .progress {
+  height: 6px; border: 1px solid #0f0d1a; background: #141915;
+}
+
+:root[data-theme='pixel'] .ocr-panel .ocr-state-box,
+:root[data-theme='pixel'] .ocr-panel .ocr-textarea {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+:root[data-theme='pixel'] .ocr-panel .ocr-btn,
+:root[data-theme='pixel'] .ocr-panel .ocr-close-btn {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc; box-shadow: 0 3px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .ocr-panel .ocr-btn-primary {
+  background: var(--accent); color: #0f0d1a; font-weight: 700;
+}
+
+:root[data-theme='pixel'] .mail-panel button {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc; box-shadow: 0 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .mail-panel button.dismiss {
+  background: transparent; border-color: transparent; box-shadow: none;
+}
+:root[data-theme='pixel'] .mail-panel .code {
+  background: #141915; border: 2px solid var(--accent); color: #facc15; box-shadow: 0 2px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .mail-panel .code:hover:enabled {
+  background: var(--accent); color: #0f0d1a; border-color: #0f0d1a;
+}
+
+:root[data-theme='pixel'] .approval .approval-body,
+:root[data-theme='pixel'] .question-form textarea {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45);
+}
+:root[data-theme='pixel'] .approval button,
+:root[data-theme='pixel'] .question-form button {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc; box-shadow: 0 3px 0 #0f0d1a;
+}
+:root[data-theme='pixel'] .approval button.delegate,
+:root[data-theme='pixel'] .question-form button.delegate {
+  background: transparent; border-color: transparent; box-shadow: none;
+}
+:root[data-theme='pixel'] .approval .allow,
+:root[data-theme='pixel'] .question-form .submit:not(:disabled) {
+  background: var(--accent); color: #0f0d1a; font-weight: 700;
+}
+:root[data-theme='pixel'] .approval .deny {
+  background: #252e27; color: var(--danger); border-color: var(--danger);
+}
+:root[data-theme='pixel'] .approval .deny:hover:enabled {
+  background: var(--danger); color: var(--danger-text); border-color: #0f0d1a;
+}
+:root[data-theme='pixel'] .question-form .choice {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #252e27;
+}
+:root[data-theme='pixel'] .question-form .choice:has(input:checked) {
+  border-color: var(--accent); background: rgba(163, 230, 53, 0.18);
 }

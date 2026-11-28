@@ -453,8 +453,8 @@ watch(() => state.ui.settingsOpen, open => {
   transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 .settings-ui .general-actions.is-stuck {
-  background: var(--surface-2);
-  background: color-mix(in srgb, var(--surface) 92%, var(--page-bg));
+  background: var(--pane-surface, var(--surface-2));
+  background: color-mix(in srgb, var(--pane-surface, var(--surface)) 94%, var(--page-bg));
   backdrop-filter: blur(14px);
   border-bottom-color: var(--line-strong);
   box-shadow: 0 8px 20px -12px rgb(0 0 0 / 0.28);
@@ -474,9 +474,9 @@ watch(() => state.ui.settingsOpen, open => {
   height: 40px;
   padding: 4px;
   border-radius: 12px;
-  background: var(--recess-bg, var(--surface-2));
+  background: var(--well-bg, var(--surface-2));
   border: 1px solid var(--line);
-  box-shadow: var(--recess-shadow, none);
+  box-shadow: var(--well-shadow, none);
   overflow: hidden;
 }
 .anchor-slot {

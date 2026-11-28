@@ -52,13 +52,13 @@ const SHAPES: Record<string, { d: string; arc: string; spin: boolean; color: str
     d: 'M6.8 12.2 L8.8 10.2 L11 12.4 L15.8 7.6 L17.6 9.4 L11 16 Z',
     arc: '0% 100%',
     spin: false,
-    color: '#10b981'
+    color: 'var(--success)'
   },
   error: {
     d: 'M13.2 5.5 L7.5 13 H12 L10.8 18.5 L16.5 11 H12 Z',
     arc: '0% 100%',
     spin: false,
-    color: 'var(--danger, #ef4444)'
+    color: 'var(--danger)'
   }
 }
 

@@ -130,8 +130,9 @@ const contours = computed(() => {
     const marks = cross(i, i) + cross(w - i, i) + cross(i, h - i) + cross(w - i, h - i)
     let ruler = ''
     if (expanded) {
-      const y = h - 8, x1 = 16, x2 = Math.max(x1 + 20, w - 16), gap = 34, cx = w / 2
-      ruler = `M ${x1} ${y - 4} V ${y + 4} M ${x2} ${y - 4} V ${y + 4} ` +
+      // 尺寸标注线放在底部拉条上方独立带（h - 22），彻底错开底部 dismiss-handle（h - 8）
+      const y = h - 22, x1 = 16, x2 = Math.max(x1 + 20, w - 16), gap = 38, cx = w / 2
+      ruler = `M ${x1} ${y - 3.5} V ${y + 3.5} M ${x2} ${y - 3.5} V ${y + 3.5} ` +
         `M ${x1} ${y} H ${cx - gap} M ${cx + gap} ${y} H ${x2} ` +
         `M ${x1 + 5} ${y - 2.5} L ${x1} ${y} L ${x1 + 5} ${y + 2.5} M ${x2 - 5} ${y - 2.5} L ${x2} ${y} L ${x2 - 5} ${y + 2.5}`
     } else {
@@ -237,10 +238,10 @@ const contours = computed(() => {
       <rect :x="Math.max(16, drawnSize.width - 11)" :y="drawnSize.height / 2 - 2" width="5" height="4" fill="#a3e635" />
     </template>
 
-    <!-- 蓝晒图纸套准十字、比例尺与展开尺寸标注 -->
+    <!-- 蓝晒图纸套准十字、比例尺与展开尺寸标注（上移避开底部收起拉条） -->
     <path v-if="props.variant === 'blueprint' && props.shape !== 'line'" class="bp-marks" :d="contours.extra" />
     <path v-if="props.variant === 'blueprint'" class="bp-ruler" :class="{ 'is-line': props.shape === 'line' }" :d="contours.ruler" />
-    <text v-if="props.variant === 'blueprint' && props.shape === 'expanded'" :x="drawnSize.width / 2" :y="drawnSize.height - 5" text-anchor="middle" class="bp-dim">{{ Math.round(props.width) }} × {{ Math.round(props.height) }}</text>
+    <text v-if="props.variant === 'blueprint' && props.shape === 'expanded'" :x="drawnSize.width / 2" :y="drawnSize.height - 19" text-anchor="middle" class="bp-dim">{{ Math.round(props.width) }} × {{ Math.round(props.height) }}</text>
 
     <!-- 霓虹夜行双色灯管与细线流光 -->
     <path v-if="props.variant === 'neon' && props.shape !== 'line'" ref="neonTubeEl" class="neon-tube" :stroke="`url(#${neonGradient})`" :d="contours.extra" />
@@ -255,7 +256,7 @@ const contours = computed(() => {
 .variant-standard .skin { fill:transparent; stroke:none; }
 .variant-mecha .skin { stroke-width:1.4px; }
 .variant-pixel { shape-rendering:crispEdges; }
-.variant-pixel .skin { stroke:#0f0d1a; stroke-width:2px; }
+.variant-pixel .skin { stroke:var(--island-rim, #7c72ad); stroke-width:2px; }
 .variant-blueprint .skin { stroke:rgba(219, 238, 255, .72); stroke-width:1.25px; stroke-dasharray:7 3; }
 .variant-neon .skin { stroke-width:1.8px; }
 .sheen { fill:none; stroke:var(--island-top-sheen); stroke-width:1px; opacity:.85; }

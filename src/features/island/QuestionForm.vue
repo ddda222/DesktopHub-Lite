@@ -43,7 +43,7 @@ function submit() {
 </script>
 
 <template>
-  <form @submit.prevent="submit">
+  <form class="question-form" @submit.prevent="submit">
     <div class="questions scroll-y">
       <fieldset v-for="(q, i) in questions" :key="q.id">
         <legend>

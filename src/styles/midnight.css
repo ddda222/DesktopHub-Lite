@@ -442,3 +442,177 @@
 :root[data-theme='midnight'] .image-preview-window .zoom-value {
   font-family: var(--font-mono);
 }
+
+/* 7. 通用开关、分页与近期面板（PackConsole / OcrResultPanel / MailNotices / ApprovalPrompt / QuestionForm） */
+:root[data-theme='midnight'] .motion-switch {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.28);
+  background: rgba(11, 18, 31, 0.9);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='midnight'] .motion-switch .switch-knob {
+  border-radius: 4px;
+  background: var(--text-3);
+}
+:root[data-theme='midnight'] .motion-switch.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(109, 182, 255, 0.34);
+}
+:root[data-theme='midnight'] .motion-switch.is-on .switch-knob {
+  background: var(--accent-text);
+}
+:root[data-theme='midnight'] .motion-switch.size-sm {
+  border-radius: 5px;
+}
+:root[data-theme='midnight'] .motion-switch.size-sm .switch-knob {
+  border-radius: 3px;
+}
+
+:root[data-theme='midnight'] .pop .clip-pager {
+  border-top-color: rgba(109, 182, 255, 0.16);
+}
+:root[data-theme='midnight'] .pop .pager-btn {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.22);
+  background: var(--tile-surface);
+  font-family: var(--font-mono);
+}
+:root[data-theme='midnight'] .pop .pager-btn.is-on {
+  box-shadow: 0 0 10px rgba(109, 182, 255, 0.3);
+}
+
+:root[data-theme='midnight'] .pack-console .run-focus,
+:root[data-theme='midnight'] .pack-console .editor,
+:root[data-theme='midnight'] .pack-console .confirm-bar {
+  border-radius: 8px;
+  border-color: rgba(109, 182, 255, 0.24);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .pack-console .run-summary-card,
+:root[data-theme='midnight'] .pack-console .log,
+:root[data-theme='midnight'] .pack-console .port-box,
+:root[data-theme='midnight'] .pack-console .editor input {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.22);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='midnight'] .pack-console .btn-inline,
+:root[data-theme='midnight'] .pack-console .btn-primary,
+:root[data-theme='midnight'] .pack-console .btn-run,
+:root[data-theme='midnight'] .pack-console .icon-action,
+:root[data-theme='midnight'] .pack-console .config-link {
+  border-radius: 6px;
+}
+:root[data-theme='midnight'] .pack-console .btn-inline {
+  border-color: rgba(109, 182, 255, 0.24);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .pack-console .btn-inline:hover:not(:disabled) {
+  border-color: rgba(109, 182, 255, 0.52);
+  box-shadow: var(--tile-hover-shadow);
+}
+:root[data-theme='midnight'] .pack-console .btn-primary:hover:not(:disabled),
+:root[data-theme='midnight'] .pack-console .btn-run:not(.is-remote):hover:not(:disabled) {
+  box-shadow: 0 0 12px rgba(109, 182, 255, 0.34);
+}
+:root[data-theme='midnight'] .pack-console .risk-tag,
+:root[data-theme='midnight'] .pack-console .phase-pill,
+:root[data-theme='midnight'] .pack-console .step-item {
+  border-radius: 5px;
+  font-family: var(--font-mono);
+}
+:root[data-theme='midnight'] .pack-console .script-row:hover {
+  box-shadow: inset 2px 0 0 rgba(109, 182, 255, 0.55);
+}
+
+:root[data-theme='midnight'] .ocr-panel .ocr-state-box,
+:root[data-theme='midnight'] .ocr-panel .ocr-textarea {
+  border-radius: 8px;
+  border-color: rgba(109, 182, 255, 0.24);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='midnight'] .ocr-panel .ocr-textarea:focus-visible {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(109, 182, 255, 0.22);
+}
+:root[data-theme='midnight'] .ocr-panel .ocr-btn,
+:root[data-theme='midnight'] .ocr-panel .ocr-close-btn {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.24);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .ocr-panel .ocr-btn:hover:not(:disabled) {
+  border-color: rgba(109, 182, 255, 0.52);
+  box-shadow: var(--tile-hover-shadow);
+}
+:root[data-theme='midnight'] .ocr-panel .ocr-btn-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(109, 182, 255, 0.28);
+}
+
+:root[data-theme='midnight'] .mail-panel button {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.24);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .mail-panel button.dismiss {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+:root[data-theme='midnight'] .mail-panel .code {
+  background: var(--accent-weak);
+  border-color: rgba(109, 182, 255, 0.45);
+  box-shadow: 0 0 10px rgba(109, 182, 255, 0.16);
+}
+:root[data-theme='midnight'] .mail-panel .code:hover:enabled {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 0 14px rgba(109, 182, 255, 0.34);
+}
+
+:root[data-theme='midnight'] .approval .approval-body,
+:root[data-theme='midnight'] .question-form textarea {
+  border-radius: 8px;
+  border-color: rgba(109, 182, 255, 0.24);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='midnight'] .approval button,
+:root[data-theme='midnight'] .question-form button {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.26);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .approval button.delegate,
+:root[data-theme='midnight'] .question-form button.delegate {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+:root[data-theme='midnight'] .approval .allow,
+:root[data-theme='midnight'] .question-form .submit:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(109, 182, 255, 0.28);
+}
+:root[data-theme='midnight'] .question-form .choice {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.16);
+  background: rgba(15, 23, 38, 0.56);
+}
+:root[data-theme='midnight'] .question-form .choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  box-shadow: inset 2px 0 0 var(--accent);
+}

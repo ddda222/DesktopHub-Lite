@@ -209,6 +209,198 @@
   border-radius: 1px;
   box-shadow: none;
 }
+/* 蓝晒图纸：通用开关、分页条与近期面板统一工程粉笔虚线与柠檬黄高亮 */
+:root[data-theme='blueprint'] .motion-switch {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.7);
+  background: rgba(7, 25, 47, 0.85);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='blueprint'] .motion-switch .switch-knob {
+  border-radius: 0;
+  background: #bae6fd;
+}
+:root[data-theme='blueprint'] .motion-switch.is-on {
+  background: rgba(253, 224, 71, 0.25);
+  border: 1px solid #fde047;
+}
+:root[data-theme='blueprint'] .motion-switch.is-on .switch-knob {
+  background: #fde047;
+}
+:root[data-theme='blueprint'] .pop .clip-pager {
+  border-top: 1px dashed rgba(186, 230, 253, 0.42);
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .pop .pager-btn {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.52);
+  background: rgba(14, 52, 96, 0.65);
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .pop .pager-btn.is-on {
+  background: #fde047;
+  color: #08203e;
+  border: 1px solid #fef08a;
+  font-weight: 700;
+}
+
+:root[data-theme='blueprint'] .pack-console,
+:root[data-theme='blueprint'] .ocr-panel,
+:root[data-theme='blueprint'] .mail-panel,
+:root[data-theme='blueprint'] .approval,
+:root[data-theme='blueprint'] .question-form {
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .pack-console .run-focus,
+:root[data-theme='blueprint'] .pack-console .editor,
+:root[data-theme='blueprint'] .pack-console .confirm-bar {
+  border-radius: 2px;
+  border: 1px dashed rgba(224, 242, 254, 0.52);
+  background: var(--tile-surface);
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='blueprint'] .pack-console .run-summary-card,
+:root[data-theme='blueprint'] .pack-console .log,
+:root[data-theme='blueprint'] .pack-console .log-toggle,
+:root[data-theme='blueprint'] .pack-console .port-box,
+:root[data-theme='blueprint'] .pack-console .editor input {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.46);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='blueprint'] .pack-console .adb-strip {
+  border-bottom-style: dashed;
+}
+:root[data-theme='blueprint'] .pack-console .script-row,
+:root[data-theme='blueprint'] .pack-console .pack-footer {
+  border-top-style: dashed;
+}
+:root[data-theme='blueprint'] .pack-console .btn-inline,
+:root[data-theme='blueprint'] .pack-console .btn-primary,
+:root[data-theme='blueprint'] .pack-console .btn-run,
+:root[data-theme='blueprint'] .pack-console .icon-action,
+:root[data-theme='blueprint'] .pack-console .config-link,
+:root[data-theme='blueprint'] .pack-console .risk-tag,
+:root[data-theme='blueprint'] .pack-console .phase-pill,
+:root[data-theme='blueprint'] .pack-console .step-item,
+:root[data-theme='blueprint'] .pack-console .summary-badge {
+  border-radius: 1px;
+}
+:root[data-theme='blueprint'] .pack-console .btn-inline {
+  border: 1px dashed rgba(224, 242, 254, 0.52);
+  background: rgba(14, 52, 96, 0.62);
+}
+:root[data-theme='blueprint'] .pack-console .btn-primary,
+:root[data-theme='blueprint'] .pack-console .btn-run:not(.is-remote) {
+  border: 1px dashed #fde047;
+  background: rgba(253, 224, 71, 0.16);
+  color: #fde047;
+}
+:root[data-theme='blueprint'] .pack-console .btn-primary:hover:not(:disabled),
+:root[data-theme='blueprint'] .pack-console .btn-run:not(.is-remote):hover:not(:disabled) {
+  border-style: solid;
+  background: #fde047;
+  color: #08203e;
+}
+:root[data-theme='blueprint'] .pack-console .btn-run.is-remote {
+  border-style: dashed;
+}
+:root[data-theme='blueprint'] .pack-console .progress,
+:root[data-theme='blueprint'] .pack-console .progress > span {
+  border-radius: 0;
+}
+
+:root[data-theme='blueprint'] .ocr-panel .ocr-state-box,
+:root[data-theme='blueprint'] .ocr-panel .ocr-textarea {
+  border-radius: 2px;
+  border: 1px dashed rgba(224, 242, 254, 0.56);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='blueprint'] .ocr-panel .ocr-btn,
+:root[data-theme='blueprint'] .ocr-panel .ocr-close-btn {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.55);
+  background: rgba(14, 52, 96, 0.65);
+}
+:root[data-theme='blueprint'] .ocr-panel .ocr-btn-primary {
+  background: #fde047;
+  color: #08203e;
+  border: 1px solid #fef08a;
+  font-weight: 700;
+}
+
+:root[data-theme='blueprint'] .mail-panel .mail-heading {
+  border-bottom-style: dashed;
+}
+:root[data-theme='blueprint'] .mail-panel .mail-item + .mail-item,
+:root[data-theme='blueprint'] .mail-panel .mail-link + .mail-link {
+  border-top-style: dashed;
+}
+:root[data-theme='blueprint'] .mail-panel button {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.52);
+  background: rgba(14, 52, 96, 0.65);
+}
+:root[data-theme='blueprint'] .mail-panel button.dismiss {
+  background: transparent;
+  border-color: transparent;
+}
+:root[data-theme='blueprint'] .mail-panel .code {
+  border: 1px dashed #fde047;
+  background: rgba(253, 224, 71, 0.16);
+  color: #fde047;
+}
+:root[data-theme='blueprint'] .mail-panel .code:hover:enabled {
+  border-style: solid;
+  background: #fde047;
+  color: #08203e;
+}
+
+:root[data-theme='blueprint'] .approval .approval-body,
+:root[data-theme='blueprint'] .question-form textarea {
+  border-radius: 2px;
+  border: 1px dashed rgba(224, 242, 254, 0.56);
+  background: var(--well-bg);
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='blueprint'] .approval footer,
+:root[data-theme='blueprint'] .question-form footer {
+  border-top-style: dashed;
+}
+:root[data-theme='blueprint'] .approval button,
+:root[data-theme='blueprint'] .question-form button {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.55);
+  background: rgba(14, 52, 96, 0.65);
+}
+:root[data-theme='blueprint'] .approval button.delegate,
+:root[data-theme='blueprint'] .question-form button.delegate {
+  background: transparent;
+  border-color: transparent;
+}
+:root[data-theme='blueprint'] .approval .allow,
+:root[data-theme='blueprint'] .question-form .submit:not(:disabled) {
+  background: #fde047;
+  color: #08203e;
+  border: 1px solid #fef08a;
+  font-weight: 700;
+}
+:root[data-theme='blueprint'] .approval .deny {
+  border-style: dashed;
+  border-color: var(--danger);
+}
+:root[data-theme='blueprint'] .question-form .choice {
+  border-radius: 1px;
+  border: 1px dashed rgba(186, 230, 253, 0.36);
+}
+:root[data-theme='blueprint'] .question-form .choice:has(input:checked) {
+  border: 1px solid #fde047;
+  background:
+    repeating-linear-gradient(-45deg, rgba(253, 224, 71, 0.16) 0 4px, transparent 4px 8px),
+    rgba(253, 224, 71, 0.12);
+}
 
 /* ============================================================================
  * 06 霓虹夜行（data-theme="neon"）：双色电光渐变灯管、斜切街机灯牌与发光推子
@@ -381,4 +573,17 @@
   color: #ffffff;
   border-color: #00f0ff;
   box-shadow: 0 0 10px rgba(255, 43, 214, 0.45);
+}
+:root[data-theme='neon'] .motion-switch {
+  border-color: rgba(255, 43, 214, 0.5);
+  background: #180b30;
+}
+:root[data-theme='neon'] .motion-switch.is-on {
+  background: linear-gradient(90deg, #ff2bd6, #00f0ff);
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+}
+:root[data-theme='neon'] .motion-switch.is-on .switch-knob {
+  background: #ffffff;
+  box-shadow: 0 0 6px #ffffff;
 }

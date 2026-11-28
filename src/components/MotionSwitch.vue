@@ -9,10 +9,12 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   label?: string
   asDecorative?: boolean
+  size?: 'default' | 'sm'
 }>(), {
   disabled: false,
   label: undefined,
-  asDecorative: false
+  asDecorative: false,
+  size: 'default'
 })
 
 const emit = defineEmits<{
@@ -53,7 +55,7 @@ watch(
   <span
     v-if="asDecorative"
     class="switch motion-switch"
-    :class="{ 'is-on': checked }"
+    :class="[`size-${size}`, { 'is-on': checked }]"
     aria-hidden="true"
   >
     <span ref="knobEl" class="switch-knob" />
@@ -63,7 +65,7 @@ watch(
     class="switch motion-switch"
     type="button"
     role="switch"
-    :class="{ 'is-on': checked }"
+    :class="[`size-${size}`, { 'is-on': checked }]"
     :aria-label="label"
     :aria-checked="checked"
     :disabled="disabled"
