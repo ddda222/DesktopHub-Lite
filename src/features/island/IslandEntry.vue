@@ -548,8 +548,9 @@ const expandedWidth = computed(() => Math.max(280, Math.min(504 * scale.value, a
 const tuckedWidth = computed(() => variant.value !== 'standard' ? Math.min(134, 118 * scale.value) : 80 * scale.value)
 function estimateBadgeWidth(text: string): number {
   let textPx = 0
-  for (const ch of text) textPx += ch.charCodeAt(0) > 127 ? 11 : 6.6
-  return Math.ceil(textPx + 28)
+  for (const ch of text) textPx += ch.charCodeAt(0) > 127 ? 11.5 : 6.8
+  // 包含图标、左右内边距、描边以及徽标间距，防止重工/像素/蓝图主题下多徽标右侧被裁切。
+  return Math.ceil(textPx + 34)
 }
 
 const visibleWidth = computed(() => {
@@ -580,7 +581,8 @@ const visibleWidth = computed(() => {
     const barUnit = count >= 4 ? 27 : 34
     const stylePerMetric = telemetryStyle.value === 'bar' ? barUnit : telemetryStyle.value === 'ring' ? 18 : telemetryStyle.value === 'pulse' ? 20 : 0
     const styleExtra = visualCount * stylePerMetric * scale.value
-    const capMax = Math.min(availableWidth.value - 24, expandedWidth.value - 24)
+    // 4 项遥测叠加 Orca 与无线键鼠电量徽标时允许收起胶囊按内容平滑拓宽，避免右侧徽标溢出裁切。
+    const capMax = Math.min(availableWidth.value - 24, Math.max(expandedWidth.value - 24, Math.round(700 * scale.value)))
     return Math.min(capMax, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra + styleExtra)))
   }
   const idle = capsuleStatus.value.kind === 'idle'
@@ -604,7 +606,7 @@ const visibleWidth = computed(() => {
   if (showPackStrip.value) {
     baseWidth = Math.max(baseWidth, 392 * scale.value)
   }
-  const capMax = Math.min(availableWidth.value - 24, expandedWidth.value - 24)
+  const capMax = Math.min(availableWidth.value - 24, Math.max(expandedWidth.value - 24, Math.round(580 * scale.value)))
   return Math.min(capMax, Math.max(menuFloor, Math.round(baseWidth + badgeExtra)))
 })
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
@@ -645,12 +647,15 @@ const bounds = computed(() => ({
 }))
 // 覆盖剪贴板面板（420）+ 导航栏 + 微信提醒条与底部余量，日常开合与切页零 SetWindowPos 扩容。
 const DESKTOP_MIN_STAGE_HEIGHT = 620
-/** 计算桌面端稳态定帧窗口尺寸：固定为展开最大宽与高水位高度，日常开合与切页不改原生窗口尺寸，仅切换 HRGN。 */
+/** 计算桌面端稳态定帧窗口尺寸：按宽高双高水位稳定画布，日常开合与多徽标切换仅改 HRGN 不触发 SetWindowPos 闪跳。 */
 function computeDesktopStageSize(
   target: { width: number; height: number },
-  currentHeight = DESKTOP_MIN_STAGE_HEIGHT
+  currentHeight = DESKTOP_MIN_STAGE_HEIGHT,
+  currentWidth = 0
 ): { width: number; height: number } {
-  const width = Math.max(140, Math.ceil(expandedWidth.value), Math.ceil(target.width))
+  const maxStageW = Math.max(140, Math.min(1560, availableWidth.value))
+  const desiredW = Math.max(140, Math.ceil(expandedWidth.value), Math.ceil(target.width))
+  const width = Math.min(maxStageW, Math.max(currentWidth, desiredW))
   const maxStageH = Math.min(1180, Math.max(DESKTOP_MIN_STAGE_HEIGHT, Math.ceil(maxExpandedHeight.value + 16)))
   const desiredH = Math.max(DESKTOP_MIN_STAGE_HEIGHT, Math.ceil(target.height))
   const height = Math.min(maxStageH, Math.max(currentHeight, desiredH))
@@ -1034,7 +1039,7 @@ function settleGeometry(): void {
     })
   }
   viewportSize.value = isDesktop
-    ? computeDesktopStageSize(bounds.value, viewportSize.value.height)
+    ? computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
     : { ...bounds.value }
   geometryMoving.value = false
   queueGeometry()
@@ -1048,7 +1053,7 @@ function reserveGeometry(prevWidth?: number, prevHeight?: number): void {
     geometryMoving.value = false
     geometryShrinking = false
     viewportSize.value = isDesktop
-      ? computeDesktopStageSize(target, viewportSize.value.height)
+      ? computeDesktopStageSize(target, viewportSize.value.height, viewportSize.value.width)
       : { ...target }
     queueGeometry()
     return
@@ -1057,7 +1062,8 @@ function reserveGeometry(prevWidth?: number, prevHeight?: number): void {
   if (isDesktop) {
     const stage = computeDesktopStageSize(
       { width: target.width + headroom, height: target.height + headroom },
-      viewportSize.value.height
+      viewportSize.value.height,
+      viewportSize.value.width
     )
     const stageGrowing = stage.width > viewportSize.value.width || stage.height > viewportSize.value.height
     const isShrinking = !stageGrowing &&
@@ -2355,10 +2361,10 @@ onBeforeUnmount(() => {
                 <Icon :name="badge.icon" :size="11" />{{ badge.text }}
               </span>
             </span>
-            <span v-if="variant === 'mecha' && !expanded" class="mecha-ribs"><i /><i /><i /></span>
-            <span v-else-if="variant === 'pixel' && !expanded" class="pixel-lv">1UP</span>
-            <span v-else-if="variant === 'blueprint' && !expanded" class="bp-scale">1:1</span>
-            <span v-else-if="variant === 'neon' && !expanded" class="neon-hours">24H</span>
+            <span v-if="variant === 'mecha' && !expanded && !capsuleBadges.length" class="mecha-ribs"><i /><i /><i /></span>
+            <span v-else-if="variant === 'pixel' && !expanded && !capsuleBadges.length" class="pixel-lv">1UP</span>
+            <span v-else-if="variant === 'blueprint' && !expanded && !capsuleBadges.length" class="bp-scale">1:1</span>
+            <span v-else-if="variant === 'neon' && !expanded && !capsuleBadges.length" class="neon-hours">24H</span>
           </span>
           <span class="grip" aria-hidden="true" />
         </button>
