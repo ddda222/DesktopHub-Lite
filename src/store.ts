@@ -274,11 +274,19 @@ function dropIcon(target: string): void {
  */
 const mockPasswordVault = new Map<string, string>()
 let bootstrapPromise: Promise<void> | null = null
+let bootstrapForceQueued = false
 
-/** 幂等且防重入的窗口冷启动初始化：已就绪时直接返回，在途期间复用同一 Promise。 */
+/** 幂等且防重入的窗口冷启动初始化：已就绪时直接返回，在途期间复用同一 Promise；失败后可重试，force=true 在途时也会在当前轮结束后补拉一轮。 */
 export async function bootstrap(force = false): Promise<void> {
   if (!force && state.ready) return
-  if (bootstrapPromise) return bootstrapPromise
+  if (bootstrapPromise) {
+    if (!force) return bootstrapPromise
+    bootstrapForceQueued = true
+    await bootstrapPromise
+    if (bootstrapPromise) return bootstrapPromise
+    if (!bootstrapForceQueued) return
+    bootstrapForceQueued = false
+  }
 
   bootstrapPromise = (async () => {
     if (!isDesktop) {

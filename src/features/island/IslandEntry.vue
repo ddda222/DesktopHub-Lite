@@ -1418,19 +1418,20 @@ async function launch(id: string): Promise<void> {
 }
 
 function keydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented) return
   if (approval.value) return
   if (event.isComposing || event.keyCode === 229) return
+  const onApplicationsPage = page.value === 'applications' && !viewingMail.value && !ocrPanelOpen.value
   if (event.key === 'Escape') {
     event.stopPropagation()
     if (quickMenuOpen.value) { quickMenuOpen.value = false; return }
-    if (page.value === 'applications' && appSearch.value) { appSearch.value = ''; return }
+    if (onApplicationsPage && appSearch.value) { appSearch.value = ''; return }
     collapseNow(true)
     return
   }
   if (!expanded.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
   const inTextField = !!target?.closest('input, textarea, select, [contenteditable="true"]')
-  const onApplicationsPage = page.value === 'applications' && !viewingMail.value && !ocrPanelOpen.value
 
   // 应用页仅允许 Alt+1~N 快捷切页，把普通数字键留给应用首字搜索；其余页面兼容非输入态 1~N 与 Alt+1~N
   const digit = Number(event.key)

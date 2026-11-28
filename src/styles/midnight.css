@@ -478,26 +478,65 @@
   background: var(--tile-surface);
   font-family: var(--font-mono);
 }
+:root[data-theme='midnight'] .pop .pager-btn:hover:not(:disabled):not(.is-on) {
+  border-color: rgba(109, 182, 255, 0.5);
+  background: var(--hover);
+  color: var(--text);
+}
 :root[data-theme='midnight'] .pop .pager-btn.is-on {
   box-shadow: 0 0 10px rgba(109, 182, 255, 0.3);
+}
+:root[data-theme='midnight'] .pop .pager-btn:disabled {
+  background: rgba(15, 23, 38, 0.42);
+  border-color: rgba(109, 182, 255, 0.12);
+  color: var(--text-3);
+  box-shadow: none;
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 :root[data-theme='midnight'] .pack-console .run-focus,
 :root[data-theme='midnight'] .pack-console .editor,
 :root[data-theme='midnight'] .pack-console .confirm-bar {
   border-radius: 8px;
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .pack-console .run-focus:not(.is-error),
+:root[data-theme='midnight'] .pack-console .editor,
+:root[data-theme='midnight'] .pack-console .confirm-bar:not(.is-remote) {
   border-color: rgba(109, 182, 255, 0.24);
   background: var(--tile-surface);
-  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .pack-console .run-focus.is-error {
+  border-color: color-mix(in srgb, var(--danger) 55%, rgba(109, 182, 255, 0.2));
+  background: color-mix(in srgb, var(--danger) 8%, var(--tile-surface));
+}
+:root[data-theme='midnight'] .pack-console .confirm-bar.is-remote {
+  border-color: color-mix(in srgb, var(--danger) 48%, rgba(109, 182, 255, 0.18));
+  background: color-mix(in srgb, var(--danger) 12%, var(--tile-surface));
 }
 :root[data-theme='midnight'] .pack-console .run-summary-card,
 :root[data-theme='midnight'] .pack-console .log,
 :root[data-theme='midnight'] .pack-console .port-box,
 :root[data-theme='midnight'] .pack-console .editor input {
   border-radius: 6px;
+  box-shadow: var(--well-shadow);
+}
+:root[data-theme='midnight'] .pack-console .run-summary-card:not(.is-err):not(.is-done),
+:root[data-theme='midnight'] .pack-console .log,
+:root[data-theme='midnight'] .pack-console .port-box,
+:root[data-theme='midnight'] .pack-console .editor input {
   border-color: rgba(109, 182, 255, 0.22);
   background: var(--well-bg);
-  box-shadow: var(--well-shadow);
+}
+:root[data-theme='midnight'] .pack-console .run-summary-card.is-err {
+  border-color: color-mix(in srgb, var(--danger) 52%, rgba(109, 182, 255, 0.18));
+  background: color-mix(in srgb, var(--danger) 10%, var(--well-bg));
+  color: var(--danger);
+}
+:root[data-theme='midnight'] .pack-console .run-summary-card.is-done {
+  border-color: color-mix(in srgb, var(--success) 48%, rgba(109, 182, 255, 0.18));
+  background: color-mix(in srgb, var(--success) 10%, var(--well-bg));
 }
 :root[data-theme='midnight'] .pack-console .btn-inline,
 :root[data-theme='midnight'] .pack-console .btn-primary,
@@ -506,18 +545,39 @@
 :root[data-theme='midnight'] .pack-console .config-link {
   border-radius: 6px;
 }
-:root[data-theme='midnight'] .pack-console .btn-inline {
+:root[data-theme='midnight'] .pack-console .btn-inline:not(.danger):not(:disabled) {
   border-color: rgba(109, 182, 255, 0.24);
   background: var(--tile-surface);
   box-shadow: var(--tile-shadow);
 }
-:root[data-theme='midnight'] .pack-console .btn-inline:hover:not(:disabled) {
+:root[data-theme='midnight'] .pack-console .btn-inline:not(.danger):hover:not(:disabled) {
   border-color: rgba(109, 182, 255, 0.52);
   box-shadow: var(--tile-hover-shadow);
+}
+:root[data-theme='midnight'] .pack-console .btn-inline.danger:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 46%, rgba(109, 182, 255, 0.18));
+  background: color-mix(in srgb, var(--danger) 8%, var(--tile-surface));
+  box-shadow: var(--tile-shadow);
+}
+:root[data-theme='midnight'] .pack-console .btn-inline.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-weak);
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.22);
 }
 :root[data-theme='midnight'] .pack-console .btn-primary:hover:not(:disabled),
 :root[data-theme='midnight'] .pack-console .btn-run:not(.is-remote):hover:not(:disabled) {
   box-shadow: 0 0 12px rgba(109, 182, 255, 0.34);
+}
+:root[data-theme='midnight'] .pack-console .btn-inline:disabled,
+:root[data-theme='midnight'] .pack-console .btn-primary:disabled,
+:root[data-theme='midnight'] .pack-console .btn-run:disabled {
+  background: rgba(15, 23, 38, 0.42);
+  border-color: rgba(109, 182, 255, 0.14);
+  color: var(--text-3);
+  box-shadow: none;
+  opacity: 0.46;
+  cursor: not-allowed;
 }
 :root[data-theme='midnight'] .pack-console .risk-tag,
 :root[data-theme='midnight'] .pack-console .phase-pill,
@@ -536,6 +596,10 @@
   background: var(--well-bg);
   box-shadow: var(--well-shadow);
 }
+:root[data-theme='midnight'] .ocr-panel .ocr-state-box.is-error {
+  border-color: color-mix(in srgb, var(--danger) 50%, rgba(109, 182, 255, 0.18));
+  background: color-mix(in srgb, var(--danger) 8%, var(--well-bg));
+}
 :root[data-theme='midnight'] .ocr-panel .ocr-textarea:focus-visible {
   box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(109, 182, 255, 0.22);
 }
@@ -546,15 +610,30 @@
   background: var(--tile-surface);
   box-shadow: var(--tile-shadow);
 }
-:root[data-theme='midnight'] .ocr-panel .ocr-btn:hover:not(:disabled) {
+:root[data-theme='midnight'] .ocr-panel .ocr-btn:hover:not(:disabled),
+:root[data-theme='midnight'] .ocr-panel .ocr-close-btn:hover:not(:disabled) {
   border-color: rgba(109, 182, 255, 0.52);
+  background: var(--hover);
   box-shadow: var(--tile-hover-shadow);
 }
-:root[data-theme='midnight'] .ocr-panel .ocr-btn-primary {
+:root[data-theme='midnight'] .ocr-panel .ocr-btn-primary:not(:disabled) {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
   box-shadow: 0 0 12px rgba(109, 182, 255, 0.28);
+}
+:root[data-theme='midnight'] .ocr-panel .ocr-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 16px rgba(109, 182, 255, 0.42);
+}
+:root[data-theme='midnight'] .ocr-panel .ocr-btn:disabled {
+  background: rgba(15, 23, 38, 0.42);
+  border-color: rgba(109, 182, 255, 0.14);
+  color: var(--text-3);
+  box-shadow: none;
+  opacity: 0.48;
 }
 
 :root[data-theme='midnight'] .mail-panel button {
@@ -563,9 +642,21 @@
   background: var(--tile-surface);
   box-shadow: var(--tile-shadow);
 }
+:root[data-theme='midnight'] .mail-panel button:hover:enabled {
+  background: var(--hover);
+  border-color: rgba(109, 182, 255, 0.52);
+  color: var(--text);
+  box-shadow: var(--tile-hover-shadow);
+}
 :root[data-theme='midnight'] .mail-panel button.dismiss {
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
+}
+:root[data-theme='midnight'] .mail-panel button.dismiss:hover:enabled {
+  background: var(--hover);
+  border-color: transparent;
+  color: var(--text);
   box-shadow: none;
 }
 :root[data-theme='midnight'] .mail-panel .code {
@@ -576,7 +667,19 @@
 :root[data-theme='midnight'] .mail-panel .code:hover:enabled {
   background: var(--accent);
   color: var(--accent-text);
+  border-color: var(--accent);
   box-shadow: 0 0 14px rgba(109, 182, 255, 0.34);
+}
+:root[data-theme='midnight'] .mail-panel button.copied,
+:root[data-theme='midnight'] .mail-panel button.copied:hover:enabled {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  box-shadow: 0 0 14px rgba(109, 182, 255, 0.36);
+}
+:root[data-theme='midnight'] .mail-panel button:disabled {
+  opacity: 0.5;
+  box-shadow: none;
 }
 
 :root[data-theme='midnight'] .approval .approval-body,
@@ -593,18 +696,58 @@
   background: var(--tile-surface);
   box-shadow: var(--tile-shadow);
 }
+:root[data-theme='midnight'] .approval button:hover:enabled,
+:root[data-theme='midnight'] .question-form button:hover:enabled {
+  background: var(--hover);
+  border-color: rgba(109, 182, 255, 0.54);
+  color: var(--text);
+  box-shadow: var(--tile-hover-shadow);
+}
 :root[data-theme='midnight'] .approval button.delegate,
 :root[data-theme='midnight'] .question-form button.delegate {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
 }
-:root[data-theme='midnight'] .approval .allow,
+:root[data-theme='midnight'] .approval button.delegate:hover:enabled,
+:root[data-theme='midnight'] .question-form button.delegate:hover:enabled {
+  background: var(--hover);
+  border-color: transparent;
+  color: var(--text);
+  box-shadow: none;
+}
+:root[data-theme='midnight'] .approval .allow:not(:disabled),
 :root[data-theme='midnight'] .question-form .submit:not(:disabled) {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
   box-shadow: 0 0 12px rgba(109, 182, 255, 0.28);
+}
+:root[data-theme='midnight'] .approval .allow:hover:enabled,
+:root[data-theme='midnight'] .question-form .submit:hover:enabled {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 16px rgba(109, 182, 255, 0.42);
+}
+:root[data-theme='midnight'] .approval .deny {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 48%, rgba(109, 182, 255, 0.2));
+  background: color-mix(in srgb, var(--danger) 8%, var(--tile-surface));
+}
+:root[data-theme='midnight'] .approval .deny:hover:enabled {
+  background: var(--danger-weak);
+  border-color: var(--danger);
+  color: var(--danger);
+  box-shadow: 0 0 12px rgba(248, 113, 113, 0.24);
+}
+:root[data-theme='midnight'] .approval button:disabled,
+:root[data-theme='midnight'] .question-form button:disabled {
+  background: rgba(15, 23, 38, 0.42);
+  border-color: rgba(109, 182, 255, 0.14);
+  color: var(--text-3);
+  box-shadow: none;
+  opacity: 0.48;
 }
 :root[data-theme='midnight'] .question-form .choice {
   border-radius: 6px;

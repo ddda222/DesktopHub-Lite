@@ -370,7 +370,7 @@ await test('bootstrap 具备幂等与防重入保护，并发与重复调用只�
         return {}
       }
     },
-    'let bootstrapPromise: Promise<void> | null = null'
+    'let bootstrapPromise: Promise<void> | null = null; let bootstrapForceQueued = false;'
   )
   const first = api.bootstrap()
   const second = api.bootstrap()
@@ -380,5 +380,50 @@ await test('bootstrap 具备幂等与防重入保护，并发与重复调用只�
   assert.equal(state.ready, true)
   await api.bootstrap()
   assert.equal(appCalls, 1)
+})
+await test('bootstrap 失败后可再次重试，且支持已就绪与在途期间的 force=true 强制重拉', async () => {
+  let appCalls = 0
+  let inFlightJob = null
+  const state = { ready: false, loadError: '', shortcuts: { bar: '', clipboard: '', translation: '', ocr: '' }, settings: {} }
+  const api = subject(
+    ['bootstrap'],
+    {
+      state,
+      applyApps() {},
+      refreshClipboard: async () => {},
+      refreshSnippets: async () => {},
+      refreshTranslationSettings: async () => {},
+      applyUiState() {},
+      invokeHost: async (command) => {
+        if (command === 'list_applications') {
+          appCalls++
+          if (appCalls === 1) throw new Error('synthetic-bootstrap-fail')
+          if (appCalls === 3 && inFlightJob) return inFlightJob.promise
+          return { categories: [], apps: [] }
+        }
+        if (command === 'get_shortcuts') return { bar: 'Ctrl+Alt+Space', clipboard: 'Ctrl+Shift+V', translation: 'Ctrl+Shift+F', ocr: 'Ctrl+Shift+O', errors: [] }
+        return {}
+      }
+    },
+    'let bootstrapPromise: Promise<void> | null = null; let bootstrapForceQueued = false;'
+  )
+  // 第 1 次失败：保持 ready=false 并记录错误，允许后续重试
+  await api.bootstrap()
+  assert.equal(appCalls, 1)
+  assert.equal(state.ready, false)
+  assert.match(state.loadError, /synthetic-bootstrap-fail/)
+  // 第 2 次重试成功：恢复 ready=true 并清空错误
+  await api.bootstrap()
+  assert.equal(appCalls, 2)
+  assert.equal(state.ready, true)
+  assert.equal(state.loadError, '')
+  // 已就绪后调用 force=true 强制重拉；且在途期间并发再次调用 force=true 会等当前轮结束后补拉一轮
+  inFlightJob = deferred()
+  const forcedFirst = api.bootstrap(true)
+  assert.equal(appCalls, 3)
+  const forcedSecond = api.bootstrap(true)
+  inFlightJob.resolve({ categories: [], apps: [] })
+  await Promise.all([forcedFirst, forcedSecond])
+  assert.equal(appCalls, 4)
 })
 if(failed)process.exitCode=1

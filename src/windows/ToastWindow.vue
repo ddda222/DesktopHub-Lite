@@ -8,7 +8,7 @@
  * 宽度固定、只调高度：如果连宽度也按内容自动调，窗口一变窄文本就换行、
  * 换行后量出的宽度又更窄，会陷进「越量越小、文字被裁」的循环。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import GsapPresence from '@/components/GsapPresence.vue'
 import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import Icon from '@/components/Icon.vue'
@@ -29,6 +29,7 @@ const toastSeq = ref(0)
 const boxEl = ref<HTMLElement | null>(null)
 let unsubscribe: (() => void) | null = null
 let hideTimer: number | null = null
+let dismissFallbackTimer: number | null = null
 let dismissPending = false
 
 const toastTransition = computed(() =>
@@ -48,32 +49,61 @@ function clearTimer(): void {
   }
 }
 
+function clearDismissFallback(): void {
+  if (dismissFallbackTimer !== null) {
+    window.clearTimeout(dismissFallbackTimer)
+    dismissFallbackTimer = null
+  }
+}
+
+function measureAndResize(expectedSeq = toastSeq.value): void {
+  if (expectedSeq !== toastSeq.value) return
+  const el = boxEl.value
+  if (!el) return
+  const height = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight)) + 2
+  void resizeToast(TOAST_WIDTH, height)
+}
+
 function onAfterLeave(): void {
+  clearDismissFallback()
   // 仅当本次退场源自自动过期且未有新提示接替时，再通知宿主隐藏窗口，防止截断退场动画或误关新提示。
   if (!dismissPending || payload.value !== null) return
   dismissPending = false
   void dismissToast()
 }
 
+// mode="out-in" 连续切换轻提示时，等旧节点退场后新节点真正挂载再重测一次高度，避免读到退场旧节点尺寸。
+watch(
+  boxEl,
+  (el) => {
+    if (!el) return
+    const seq = toastSeq.value
+    requestAnimationFrame(() => measureAndResize(seq))
+  },
+  { flush: 'post' }
+)
+
 async function show(next: ToastPayload): Promise<void> {
   clearTimer()
+  clearDismissFallback()
   dismissPending = false
   payload.value = next
   const currentSeq = toastSeq.value + 1
   toastSeq.value = currentSeq
   // 等 DOM 更新后量出真实高度；宽度固定，避免换行与测量互相影响。
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-  if (currentSeq !== toastSeq.value) return
-  const el = boxEl.value
-  if (el) {
-    const height = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight)) + 2
-    void resizeToast(TOAST_WIDTH, height)
-  }
+  measureAndResize(currentSeq)
   hideTimer = window.setTimeout(() => {
     hideTimer = null
     if (currentSeq !== toastSeq.value) return
     dismissPending = true
     payload.value = null
+    // 兜底定时器：若 WebView 休眠导致 after-leave 未及时触发，450ms 后仍安全关闭提示窗。
+    clearDismissFallback()
+    dismissFallbackTimer = window.setTimeout(() => {
+      dismissFallbackTimer = null
+      onAfterLeave()
+    }, 450)
   }, 2400)
 }
 
@@ -86,6 +116,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   unsubscribe?.()
   clearTimer()
+  clearDismissFallback()
 })
 </script>
 
@@ -97,6 +128,7 @@ onBeforeUnmount(() => {
       :animate="{ opacity: 1, y: 0, scale: 1 }"
       :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.96 }"
       :transition="toastTransition"
+      @animation-complete="measureAndResize()"
       @after-leave="onAfterLeave"
     >
       <div

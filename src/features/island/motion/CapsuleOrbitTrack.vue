@@ -34,10 +34,11 @@ let lastTickMs = 0
 let cachedKey = ''
 let cachedRawPath: ReturnType<typeof MotionPathPlugin.getRawPath> | null = null
 let hostObserver: ResizeObserver | null = null
+let hasObservedBox = false
 let cachedBox = {
   w: Math.max(40, props.width),
   h: Math.max(12, props.height),
-  r: Math.max(2, props.cornerRadius)
+  r: Math.max(0, props.cornerRadius)
 }
 
 const PATH_INSET = 1.75
@@ -104,6 +105,7 @@ function attachHostObserver(): void {
     const borderBox = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize
     const nextW = borderBox?.inlineSize || entry.contentRect.width || props.width
     const nextH = borderBox?.blockSize || entry.contentRect.height || props.height
+    hasObservedBox = true
     cachedBox = {
       w: Math.max(40, nextW),
       h: Math.max(12, nextH),
@@ -173,16 +175,28 @@ function stopOrbit(): void {
   }
   hostObserver?.disconnect()
   hostObserver = null
+  hasObservedBox = false
   lastTickMs = 0
 }
 
-watch(() => [props.width, props.height, props.cornerRadius], () => {
-  cachedBox = {
-    w: cachedBox.w || Math.max(40, props.width),
-    h: cachedBox.h || Math.max(12, props.height),
-    r: readInlineCornerRadius(overlayEl.value?.parentElement ?? null)
-  }
-})
+watch(
+  () => [props.width, props.height, props.cornerRadius] as const,
+  ([nextW, nextH, nextR], prev) => {
+    const host = overlayEl.value?.parentElement ?? null
+    const radiusOnlyChanged = !!prev && nextR !== prev[2] && nextW === prev[0] && nextH === prev[1]
+    const inlineR = host ? parseFloat(host.style.borderRadius || host.style.borderTopLeftRadius) : Number.NaN
+    // 使用 post flush 配合静止态圆角兜底：宿主内联圆角已更新则采用宿主值，若尚未写入则直接取新 props.cornerRadius
+    const resolvedR = radiusOnlyChanged
+      ? (Number.isFinite(inlineR) && Math.abs(inlineR - prev[2]) > 0.01 ? inlineR : Math.max(0, nextR))
+      : readInlineCornerRadius(host)
+    cachedBox = {
+      w: hasObservedBox && host && host.clientWidth > 0 ? Math.max(40, host.clientWidth) : Math.max(40, nextW),
+      h: hasObservedBox && host && host.clientHeight > 0 ? Math.max(12, host.clientHeight) : Math.max(12, nextH),
+      r: resolvedR
+    }
+  },
+  { flush: 'post' }
+)
 watch(() => [props.active, props.reduced], startOrbit, { flush: 'post' })
 onMounted(startOrbit)
 onBeforeUnmount(stopOrbit)

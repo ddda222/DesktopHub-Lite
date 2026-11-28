@@ -43,16 +43,27 @@ const pixelBadge = computed(() => {
   return `${pw} × ${ph} px`
 })
 
+/** 四块遮罩按整数像素对齐，减少高分屏小数缩放造成的 1px 透光细缝。 */
+const maskRect = computed(() => {
+  const rect = boxRect.value
+  if (!rect) return null
+  const left = Math.floor(rect.left)
+  const top = Math.floor(rect.top)
+  const right = Math.ceil(rect.left + rect.width)
+  const bottom = Math.ceil(rect.top + rect.height)
+  return { left, top, right, bottom, height: Math.max(0, bottom - top) }
+})
+
 /** 贴近屏幕上沿（top < 32）时自动翻转标牌位置，避免被视口顶边裁切；靠近右边界时右对齐。 */
 const badgePlacementClass = computed(() => {
   const rect = boxRect.value
   if (!rect) return []
   const classes: string[] = []
   if (rect.top < 32) {
-    classes.push(rect.height >= 30 ? 'is-inside' : 'is-below')
+    classes.push(rect.height >= 38 ? 'is-inside' : 'is-below')
   }
   const vw = canvasEl.value?.clientWidth || window.innerWidth
-  if (vw > 0 && rect.left > vw - 116) {
+  if (vw > 0 && rect.left > vw - 136) {
     classes.push('is-right')
   }
   return classes
@@ -210,27 +221,27 @@ onBeforeUnmount(() => {
     @contextmenu.prevent="cancel"
   >
     <img v-if="session" class="frozen-screen" :src="session.dataUri" alt="" draggable="false" />
-    <div v-if="!boxRect" class="full-mask" aria-hidden="true" />
-    <!-- 4 块精准矩形遮罩替代 9999px 大半径 box-shadow，避免超大阴影合成开销与跨屏精度偏差 -->
+    <div v-if="!maskRect" class="full-mask" aria-hidden="true" />
+    <!-- 4 块整数像素对齐矩形遮罩替代 9999px 大半径 box-shadow，避免超大阴影合成开销与小数缩放细缝 -->
     <template v-else>
       <div
         class="mask-part"
-        :style="{ left: '0px', top: '0px', right: '0px', height: `${boxRect.top}px` }"
+        :style="{ left: '0px', top: '0px', right: '0px', height: `${maskRect.top}px` }"
         aria-hidden="true"
       />
       <div
         class="mask-part"
-        :style="{ left: '0px', top: `${boxRect.top + boxRect.height}px`, right: '0px', bottom: '0px' }"
+        :style="{ left: '0px', top: `${maskRect.bottom}px`, right: '0px', bottom: '0px' }"
         aria-hidden="true"
       />
       <div
         class="mask-part"
-        :style="{ left: '0px', top: `${boxRect.top}px`, width: `${boxRect.left}px`, height: `${boxRect.height}px` }"
+        :style="{ left: '0px', top: `${maskRect.top}px`, width: `${maskRect.left}px`, height: `${maskRect.height}px` }"
         aria-hidden="true"
       />
       <div
         class="mask-part"
-        :style="{ left: `${boxRect.left + boxRect.width}px`, top: `${boxRect.top}px`, right: '0px', height: `${boxRect.height}px` }"
+        :style="{ left: `${maskRect.right}px`, top: `${maskRect.top}px`, right: '0px', height: `${maskRect.height}px` }"
         aria-hidden="true"
       />
     </template>

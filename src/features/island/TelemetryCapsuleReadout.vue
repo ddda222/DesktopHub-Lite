@@ -49,7 +49,12 @@ const animated = reactive({
 
 function setPulseRef(metric: 'cpu' | 'memory', el: unknown): void {
   if (el instanceof HTMLElement) {
+    const isNewNode = pulseGridRefs.get(metric) !== el
     pulseGridRefs.set(metric, el)
+    // 新脉冲格栅节点挂载后，若当前为非减弱动态的 pulse 模式则主动恢复该指标呼吸补间，防止 DOM 重建后动画卡死
+    if (isNewNode && props.styleMode === 'pulse' && !props.reduced) {
+      syncMetricPulse(metric, true)
+    }
   } else {
     pulseGridRefs.delete(metric)
     killMetricPulse(metric)
@@ -104,44 +109,51 @@ function killMetricPulse(metric: 'cpu' | 'memory'): void {
   lastPulseSig.delete(metric)
 }
 
+function syncMetricPulse(metric: 'cpu' | 'memory', force = false): void {
+  if (props.styleMode !== 'pulse' || props.reduced) {
+    killMetricPulse(metric)
+    return
+  }
+  const tier = metric === 'cpu' ? cpuPulseTier.value : memoryPulseTier.value
+  const grid = pulseGridRefs.get(metric)
+  if (!grid || tier === 'none') {
+    killMetricPulse(metric)
+    return
+  }
+  // 档位未变且补间仍在运行，跳过重建以保持呼吸律动连续无跳帧
+  if (!force && lastPulseSig.get(metric) === tier && pulseTweens.has(metric)) {
+    return
+  }
+  killMetricPulse(metric)
+  const [barsStr, tempo] = tier.split(':')
+  const activeIdx = Math.max(0, Number(barsStr) - 1)
+  const bars = grid.querySelectorAll<HTMLElement>('i')
+  const peakBar = bars[activeIdx]
+  if (!peakBar) return
+  const tween = gsap.fromTo(
+    peakBar,
+    { scaleY: 0.78, opacity: 0.72 },
+    {
+      scaleY: 1.18,
+      opacity: 1,
+      duration: tempo === 'fast' ? 0.55 : 0.9,
+      yoyo: true,
+      repeat: -1,
+      ease: 'sine.inOut'
+    }
+  )
+  pulseTweens.set(metric, tween)
+  lastPulseSig.set(metric, tier)
+}
+
 function syncPulseAnimation(force = false): void {
   if (props.styleMode !== 'pulse' || props.reduced) {
     killMetricPulse('cpu')
     killMetricPulse('memory')
     return
   }
-  for (const metric of ['cpu', 'memory'] as const) {
-    const tier = metric === 'cpu' ? cpuPulseTier.value : memoryPulseTier.value
-    const grid = pulseGridRefs.get(metric)
-    if (!grid || tier === 'none') {
-      killMetricPulse(metric)
-      continue
-    }
-    // 档位未变且补间仍在运行，跳过重建以保持呼吸律动连续无跳帧
-    if (!force && lastPulseSig.get(metric) === tier && pulseTweens.has(metric)) {
-      continue
-    }
-    killMetricPulse(metric)
-    const [barsStr, tempo] = tier.split(':')
-    const activeIdx = Math.max(0, Number(barsStr) - 1)
-    const bars = grid.querySelectorAll<HTMLElement>('i')
-    const peakBar = bars[activeIdx]
-    if (!peakBar) continue
-    const tween = gsap.fromTo(
-      peakBar,
-      { scaleY: 0.78, opacity: 0.72 },
-      {
-        scaleY: 1.18,
-        opacity: 1,
-        duration: tempo === 'fast' ? 0.55 : 0.9,
-        yoyo: true,
-        repeat: -1,
-        ease: 'sine.inOut'
-      }
-    )
-    pulseTweens.set(metric, tween)
-    lastPulseSig.set(metric, tier)
-  }
+  syncMetricPulse('cpu', force)
+  syncMetricPulse('memory', force)
 }
 
 function updateMetricTween(key: 'cpu' | 'memory', target: number | null): void {
@@ -158,7 +170,11 @@ function updateMetricTween(key: 'cpu' | 'memory', target: number | null): void {
     animated[key] = safeTarget
     return
   }
-  if (Math.abs(animated[key] - safeTarget) < 0.01) return
+  if (Math.abs(animated[key] - safeTarget) < 0.01) {
+    gsap.killTweensOf(animated, key)
+    animated[key] = safeTarget
+    return
+  }
   const integerOnly = props.styleMode === 'text' || props.styleMode === 'pulse'
   gsap.to(animated, {
     [key]: safeTarget,
@@ -172,6 +188,23 @@ function updateMetricTween(key: 'cpu' | 'memory', target: number | null): void {
 
 watch(cpuTarget, val => updateMetricTween('cpu', val), { immediate: true })
 watch(memoryTarget, val => updateMetricTween('memory', val), { immediate: true })
+
+watch(
+  () => props.reduced,
+  (isReduced) => {
+    if (!isReduced) return
+    // 运行时开启减弱动画，立即清掉在途数值补间并直接吸附至最新目标值
+    gsap.killTweensOf(animated)
+    if (cpuTarget.value !== null) {
+      animated.cpuHasValue = true
+      animated.cpu = Math.max(0, Math.min(100, cpuTarget.value))
+    }
+    if (memoryTarget.value !== null) {
+      animated.memoryHasValue = true
+      animated.memory = Math.max(0, Math.min(100, memoryTarget.value))
+    }
+  }
+)
 
 watch(
   [() => props.styleMode, () => props.reduced, cpuPulseTier, memoryPulseTier],
@@ -191,7 +224,7 @@ onBeforeUnmount(() => {
 
 <template>
   <span ref="rootEl" class="telemetry-readout-wrap" :class="`style-${styleMode}`">
-    <template v-for="(seg, idx) in readout.segments" :key="`${seg.metric || 'net'}-${idx}`">
+    <template v-for="(seg, idx) in readout.segments" :key="seg.metric || `net-${idx}`">
       <i v-if="idx > 0" class="tel-sep">·</i>
       <span
         class="tel-seg"

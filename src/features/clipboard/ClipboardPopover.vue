@@ -859,12 +859,14 @@ function onKeydown(event: KeyboardEvent): void {
       const clip = pagedClips.value[idx]
       if (clip) {
         event.preventDefault()
+        event.stopPropagation()
         onCopy(clip)
       }
     } else {
       const snippet = filteredSnippets.value[idx]
       if (snippet) {
         event.preventDefault()
+        event.stopPropagation()
         void onCopySnippet(snippet)
       }
     }
@@ -2385,6 +2387,8 @@ function openDetectedUrl(url: string): void {
 
 .row-trigger {
   flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   display: flex;
   align-items: center;

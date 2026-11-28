@@ -237,11 +237,23 @@
   background: rgba(14, 52, 96, 0.65);
   font-family: var(--font-mono);
 }
-:root[data-theme='blueprint'] .pop .pager-btn.is-on {
+:root[data-theme='blueprint'] .pop .pager-btn:hover:not(:disabled):not(.is-on) {
+  background: rgba(23, 74, 132, 0.85);
+  border-color: #fde047;
+  color: #ffffff;
+}
+:root[data-theme='blueprint'] .pop .pager-btn.is-on:not(:disabled) {
   background: #fde047;
   color: #08203e;
   border: 1px solid #fef08a;
   font-weight: 700;
+}
+:root[data-theme='blueprint'] .pop .pager-btn:disabled {
+  background: rgba(8, 32, 62, 0.42);
+  border-color: rgba(186, 230, 253, 0.24);
+  color: rgba(186, 230, 253, 0.45);
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 
 :root[data-theme='blueprint'] .pack-console,
@@ -255,9 +267,23 @@
 :root[data-theme='blueprint'] .pack-console .editor,
 :root[data-theme='blueprint'] .pack-console .confirm-bar {
   border-radius: 2px;
-  border: 1px dashed rgba(224, 242, 254, 0.52);
-  background: var(--tile-surface);
+  border-width: 1px;
+  border-style: dashed;
   box-shadow: var(--tile-shadow);
+}
+:root[data-theme='blueprint'] .pack-console .run-focus:not(.is-error),
+:root[data-theme='blueprint'] .pack-console .editor,
+:root[data-theme='blueprint'] .pack-console .confirm-bar:not(.is-remote) {
+  border-color: rgba(224, 242, 254, 0.52);
+  background: var(--tile-surface);
+}
+:root[data-theme='blueprint'] .pack-console .run-focus.is-error {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--tile-surface));
+}
+:root[data-theme='blueprint'] .pack-console .confirm-bar.is-remote {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, var(--tile-surface));
 }
 :root[data-theme='blueprint'] .pack-console .run-summary-card,
 :root[data-theme='blueprint'] .pack-console .log,
@@ -265,9 +291,26 @@
 :root[data-theme='blueprint'] .pack-console .port-box,
 :root[data-theme='blueprint'] .pack-console .editor input {
   border-radius: 1px;
-  border: 1px dashed rgba(224, 242, 254, 0.46);
-  background: var(--well-bg);
+  border-width: 1px;
+  border-style: dashed;
   box-shadow: var(--well-shadow);
+}
+:root[data-theme='blueprint'] .pack-console .run-summary-card:not(.is-err):not(.is-done),
+:root[data-theme='blueprint'] .pack-console .log,
+:root[data-theme='blueprint'] .pack-console .log-toggle,
+:root[data-theme='blueprint'] .pack-console .port-box,
+:root[data-theme='blueprint'] .pack-console .editor input {
+  border-color: rgba(224, 242, 254, 0.46);
+  background: var(--well-bg);
+}
+:root[data-theme='blueprint'] .pack-console .run-summary-card.is-err {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--well-bg));
+  color: var(--danger);
+}
+:root[data-theme='blueprint'] .pack-console .run-summary-card.is-done {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, var(--well-bg));
 }
 :root[data-theme='blueprint'] .pack-console .adb-strip {
   border-bottom-style: dashed;
@@ -287,12 +330,28 @@
 :root[data-theme='blueprint'] .pack-console .summary-badge {
   border-radius: 1px;
 }
-:root[data-theme='blueprint'] .pack-console .btn-inline {
+:root[data-theme='blueprint'] .pack-console .btn-inline:not(.danger):not(:disabled) {
   border: 1px dashed rgba(224, 242, 254, 0.52);
   background: rgba(14, 52, 96, 0.62);
 }
-:root[data-theme='blueprint'] .pack-console .btn-primary,
-:root[data-theme='blueprint'] .pack-console .btn-run:not(.is-remote) {
+:root[data-theme='blueprint'] .pack-console .btn-inline:not(.danger):hover:not(:disabled) {
+  border-color: #fde047;
+  background: rgba(23, 74, 132, 0.85);
+  color: #ffffff;
+}
+:root[data-theme='blueprint'] .pack-console .btn-inline.danger:not(:disabled) {
+  border: 1px dashed var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, rgba(14, 52, 96, 0.62));
+  color: var(--danger);
+}
+:root[data-theme='blueprint'] .pack-console .btn-inline.danger:hover:not(:disabled) {
+  border-style: solid;
+  border-color: var(--danger);
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+:root[data-theme='blueprint'] .pack-console .btn-primary:not(:disabled),
+:root[data-theme='blueprint'] .pack-console .btn-run:not(.is-remote):not(:disabled) {
   border: 1px dashed #fde047;
   background: rgba(253, 224, 71, 0.16);
   color: #fde047;
@@ -303,8 +362,17 @@
   background: #fde047;
   color: #08203e;
 }
-:root[data-theme='blueprint'] .pack-console .btn-run.is-remote {
+:root[data-theme='blueprint'] .pack-console .btn-run.is-remote:not(:disabled) {
   border-style: dashed;
+}
+:root[data-theme='blueprint'] .pack-console .btn-inline:disabled,
+:root[data-theme='blueprint'] .pack-console .btn-primary:disabled,
+:root[data-theme='blueprint'] .pack-console .btn-run:disabled {
+  border: 1px dashed rgba(186, 230, 253, 0.24);
+  background: rgba(8, 32, 62, 0.42);
+  color: rgba(186, 230, 253, 0.45);
+  opacity: 0.48;
+  cursor: not-allowed;
 }
 :root[data-theme='blueprint'] .pack-console .progress,
 :root[data-theme='blueprint'] .pack-console .progress > span {
@@ -318,17 +386,38 @@
   background: var(--well-bg);
   box-shadow: var(--well-shadow);
 }
+:root[data-theme='blueprint'] .ocr-panel .ocr-state-box.is-error {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--well-bg));
+}
 :root[data-theme='blueprint'] .ocr-panel .ocr-btn,
 :root[data-theme='blueprint'] .ocr-panel .ocr-close-btn {
   border-radius: 1px;
   border: 1px dashed rgba(224, 242, 254, 0.55);
   background: rgba(14, 52, 96, 0.65);
 }
-:root[data-theme='blueprint'] .ocr-panel .ocr-btn-primary {
+:root[data-theme='blueprint'] .ocr-panel .ocr-btn:hover:not(:disabled),
+:root[data-theme='blueprint'] .ocr-panel .ocr-close-btn:hover:not(:disabled) {
+  border-color: #fde047;
+  background: rgba(23, 74, 132, 0.85);
+  color: #ffffff;
+}
+:root[data-theme='blueprint'] .ocr-panel .ocr-btn-primary:not(:disabled) {
   background: #fde047;
   color: #08203e;
   border: 1px solid #fef08a;
   font-weight: 700;
+}
+:root[data-theme='blueprint'] .ocr-panel .ocr-btn-primary:hover:not(:disabled) {
+  background: #fef08a;
+  color: #08203e;
+  border-color: #fef08a;
+}
+:root[data-theme='blueprint'] .ocr-panel .ocr-btn:disabled {
+  border: 1px dashed rgba(186, 230, 253, 0.24);
+  background: rgba(8, 32, 62, 0.42);
+  color: rgba(186, 230, 253, 0.45);
+  opacity: 0.48;
 }
 
 :root[data-theme='blueprint'] .mail-panel .mail-heading {
@@ -343,9 +432,19 @@
   border: 1px dashed rgba(224, 242, 254, 0.52);
   background: rgba(14, 52, 96, 0.65);
 }
+:root[data-theme='blueprint'] .mail-panel button:hover:enabled {
+  border-color: #fde047;
+  background: rgba(23, 74, 132, 0.85);
+  color: #ffffff;
+}
 :root[data-theme='blueprint'] .mail-panel button.dismiss {
   background: transparent;
   border-color: transparent;
+}
+:root[data-theme='blueprint'] .mail-panel button.dismiss:hover:enabled {
+  background: rgba(186, 230, 253, 0.12);
+  border-color: transparent;
+  color: #ffffff;
 }
 :root[data-theme='blueprint'] .mail-panel .code {
   border: 1px dashed #fde047;
@@ -356,6 +455,16 @@
   border-style: solid;
   background: #fde047;
   color: #08203e;
+}
+:root[data-theme='blueprint'] .mail-panel button.copied,
+:root[data-theme='blueprint'] .mail-panel button.copied:hover:enabled {
+  border: 1px solid #fef08a;
+  background: #fde047;
+  color: #08203e;
+  font-weight: 700;
+}
+:root[data-theme='blueprint'] .mail-panel button:disabled {
+  opacity: 0.48;
 }
 
 :root[data-theme='blueprint'] .approval .approval-body,
@@ -375,21 +484,54 @@
   border: 1px dashed rgba(224, 242, 254, 0.55);
   background: rgba(14, 52, 96, 0.65);
 }
+:root[data-theme='blueprint'] .approval button:hover:enabled,
+:root[data-theme='blueprint'] .question-form button:hover:enabled {
+  border-color: #fde047;
+  background: rgba(23, 74, 132, 0.85);
+  color: #ffffff;
+}
 :root[data-theme='blueprint'] .approval button.delegate,
 :root[data-theme='blueprint'] .question-form button.delegate {
   background: transparent;
   border-color: transparent;
 }
-:root[data-theme='blueprint'] .approval .allow,
+:root[data-theme='blueprint'] .approval button.delegate:hover:enabled,
+:root[data-theme='blueprint'] .question-form button.delegate:hover:enabled {
+  background: rgba(186, 230, 253, 0.12);
+  border-color: transparent;
+  color: #ffffff;
+}
+:root[data-theme='blueprint'] .approval .allow:not(:disabled),
 :root[data-theme='blueprint'] .question-form .submit:not(:disabled) {
   background: #fde047;
   color: #08203e;
   border: 1px solid #fef08a;
   font-weight: 700;
 }
+:root[data-theme='blueprint'] .approval .allow:hover:enabled,
+:root[data-theme='blueprint'] .question-form .submit:hover:enabled {
+  background: #fef08a;
+  color: #08203e;
+  border-color: #fef08a;
+}
 :root[data-theme='blueprint'] .approval .deny {
   border-style: dashed;
   border-color: var(--danger);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, rgba(14, 52, 96, 0.65));
+}
+:root[data-theme='blueprint'] .approval .deny:hover:enabled {
+  border-style: solid;
+  border-color: var(--danger);
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+:root[data-theme='blueprint'] .approval button:disabled,
+:root[data-theme='blueprint'] .question-form button:disabled {
+  border: 1px dashed rgba(186, 230, 253, 0.24);
+  background: rgba(8, 32, 62, 0.42);
+  color: rgba(186, 230, 253, 0.45);
+  opacity: 0.48;
 }
 :root[data-theme='blueprint'] .question-form .choice {
   border-radius: 1px;
