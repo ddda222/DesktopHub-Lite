@@ -1,6 +1,33 @@
 /* 星舰仪表主题（data-theme="midnight"）全组件设计系统覆盖 */
 
 /* 1. 调音台（AudioMixer） */
+:root[data-theme='midnight'] .audio-mixer .output-devices {
+  border-radius: 6px;
+  border-color: rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .audio-mixer .output-devices .device-chip {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.24);
+}
+
+:root[data-theme='midnight'] .audio-mixer .output-devices .device-chip:hover:not(.active):not(:disabled) {
+  background: var(--hover);
+  border-color: rgba(109, 182, 255, 0.52);
+}
+
+:root[data-theme='midnight'] .audio-mixer .output-devices .device-chip.active {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+:root[data-theme='midnight'] .audio-mixer .output-devices .device-chip:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
 :root[data-theme='midnight'] .audio-mixer .sound-profiles button {
   border-radius: 5px;
   border-color: rgba(109, 182, 255, 0.24);
@@ -305,6 +332,18 @@
 
 :root[data-theme='midnight'] .settings-ui .features .field-label output {
   font-family: var(--font-mono);
+  color: var(--accent);
+}
+:root[data-theme='midnight'] .settings-ui .features .peripheral-settings-row {
+  border-bottom-color: rgba(109, 182, 255, 0.18);
+}
+:root[data-theme='midnight'] .settings-ui .features .peripheral-pill {
+  border-radius: 5px;
+  border-color: rgba(109, 182, 255, 0.28);
+  background: var(--well-bg);
+  font-family: var(--font-mono);
+}
+:root[data-theme='midnight'] .settings-ui .features .peripheral-pill strong {
   color: var(--accent);
 }
 

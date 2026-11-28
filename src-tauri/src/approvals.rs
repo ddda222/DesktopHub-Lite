@@ -1,4 +1,5 @@
 //! 一个连接对应一次人工决定。审批正文只存在于请求进程、队列和灵动岛内存中。
+pub(crate) mod orca;
 mod pipe;
 mod questions;
 pub(crate) mod setup;
@@ -17,7 +18,7 @@ const WAIT: Duration = Duration::from_secs(240);
 const CHANGED: &str = "approvals-changed";
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
-enum Source { Codex, DSH }
+enum Source { Codex, DSH, Orca }
 
 #[derive(Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -151,6 +152,7 @@ fn withdraw(app: &AppHandle, id: u64) {
 }
 
 pub(crate) fn start(app: AppHandle) {
+    orca::start(app.clone());
     tauri::async_runtime::spawn(async move {
         if pipe::serve(app).await.is_err() {
             crate::log_warn!("灵动岛审批连接不可用，请在原应用中审批");
@@ -197,6 +199,7 @@ fn adapter_request(source: Source, question_channel: bool) -> Option<Request> {
         }
         Source::DSH => (text_field(&input, "tool")?, text_field(&input, "title")?.to_owned(),
             text_field(&input, "details")?.to_owned(), text_field(&input, "context")?.to_owned()),
+        Source::Orca => return None,
     };
     Some(Request { source, kind: Kind::Approval, questions: Vec::new(), tool: tool.into(), title, details, context })
 }
@@ -222,6 +225,7 @@ pub(crate) fn run_adapter() -> bool {
         (Source::DSH, Answer::Allow) if !question_channel => json!("allowed-once"),
         (Source::DSH, Answer::Deny) if !question_channel => json!("rejected"),
         (Source::DSH, _) => json!("delegate"),
+        (Source::Orca, _) => json!("delegate"),
     };
     let _ = writeln!(std::io::stdout().lock(), "{output}");
     true

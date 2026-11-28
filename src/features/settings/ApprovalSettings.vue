@@ -2,16 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { invokeHost, isDesktop, listenHost } from '@/lib/desktop/desktop'
 
-type Agent = 'codex' | 'dsh'
+type Agent = 'codex' | 'dsh' | 'orca'
 interface AgentRow {
   agent: Agent
   state: 'available' | 'registered' | 'repair' | 'disabled' | 'missing' | 'unknown' | 'unsupported'
   detail: string
 }
-const names: Record<Agent, string> = { codex: 'Codex', dsh: 'DSH（DeepSeek Harness）' }
+const names: Record<Agent, string> = { codex: 'Codex', dsh: 'DSH（DeepSeek Harness）', orca: 'Orca' }
 const rows = ref<AgentRow[]>([])
 const connected = ref(new Set<Agent>())
-const agents: Agent[] = ['codex', 'dsh']
+const agents: Agent[] = ['codex', 'dsh', 'orca']
 const entries = computed(() => agents.map(agent => ({ agent, row: rows.value.find(row => row.agent === agent) })))
 const reading = ref(false)
 const installing = ref<Agent | null>(null)
@@ -33,6 +33,19 @@ async function connect(row: AgentRow) {
   try {
     const result = await invokeHost<AgentRow>('connect_approval_agent', { agent: row.agent })
     rows.value = rows.value.map(item => item.agent === result.agent ? result : item)
+    if (result.agent === 'orca' && result.state === 'registered') connected.value.add('orca')
+  } catch (e) { error.value = String(e) }
+  finally { installing.value = null }
+}
+
+async function disconnect(row: AgentRow) {
+  if (installing.value || reading.value) return
+  installing.value = row.agent
+  error.value = ''
+  try {
+    const result = await invokeHost<AgentRow>('disconnect_approval_agent', { agent: row.agent })
+    rows.value = rows.value.map(item => item.agent === result.agent ? result : item)
+    connected.value.delete(result.agent)
   } catch (e) { error.value = String(e) }
   finally { installing.value = null }
 }
@@ -54,7 +67,7 @@ onBeforeUnmount(() => { disposed = true; stop?.() })
 <template>
   <section class="panel" aria-label="智能体连接">
     <h3 class="panel-title">智能体连接</h3>
-    <p class="hint">灵动岛显示 Codex 和 DSH 的工具审批，也会提醒你回答 DSH 的提问。</p>
+    <p class="hint">灵动岛显示 Codex 和 DSH 的工具审批与提问，也支持监听 Orca 会话的等待处理与任务完成提醒并一键切回。</p>
     <div class="set-row">
       <span class="set-label">本机智能体</span>
       <button class="btn" type="button" :disabled="reading || !!installing || !isDesktop" @click="detect">{{ rows.length ? '重新检测' : '检测本机智能体' }}</button>
@@ -66,13 +79,16 @@ onBeforeUnmount(() => { disposed = true; stop?.() })
       <div class="set-text">
         <strong class="set-label">{{ names[agent] }}</strong>
         <span v-if="connected.has(agent)" class="tag tag-ok" role="status">已连接</span>
-        <span v-if="installing === agent" class="set-desc" role="status">正在接入…</span>
-        <span v-else-if="row && (!connected.has(agent) || row.state !== 'registered' || agent === 'dsh')" class="set-desc" role="status">{{ row.detail }}</span>
+        <span v-if="installing === agent" class="set-desc" role="status">正在更新…</span>
+        <span v-else-if="row && (!connected.has(agent) || row.state !== 'registered' || agent === 'dsh' || agent === 'orca')" class="set-desc" role="status">{{ row.detail }}</span>
         <span v-else-if="!connected.has(agent)" class="set-desc">尚未检测</span>
       </div>
       <button v-if="row && (row.state === 'available' || row.state === 'repair')" class="btn" type="button"
-        :disabled="reading || !!installing" :aria-label="(row.state === 'repair' ? '更新接入：' : '添加钩子：') + names[agent]"
-        @click="connect(row)">{{ row.state === 'repair' ? '更新接入' : '添加钩子' }}</button>
+        :disabled="reading || !!installing" :aria-label="(row.state === 'repair' ? '更新接入：' : agent === 'orca' ? '启用监听：' : '添加钩子：') + names[agent]"
+        @click="connect(row)">{{ row.state === 'repair' ? '更新接入' : agent === 'orca' ? '启用监听' : '添加钩子' }}</button>
+      <button v-else-if="row && agent === 'orca' && row.state === 'registered'" class="btn" type="button"
+        :disabled="reading || !!installing" aria-label="停用监听：Orca"
+        @click="disconnect(row)">停用监听</button>
     </div>
   </section>
 </template>

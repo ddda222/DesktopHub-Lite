@@ -17,10 +17,47 @@
   padding: 1px 6px;
   font-size: 11.5px;
 }
-.variant-blueprint:not(.expanded) :deep(.tel-pre) { color: #bae6fd; }
+.variant-blueprint:not(.expanded) :deep(.tel-seg:not(.is-thermal-alert) .tel-pre) { color: #bae6fd; }
 .variant-blueprint:not(.expanded) :deep(.tel-pre.accent) { color: #fde047; }
 .variant-blueprint:not(.expanded) :deep(.tel-bar-track),
 .variant-blueprint:not(.expanded) :deep(.tel-pulse-bar) { border-radius: 0; }
+.variant-blueprint .capsule-badge {
+  border-radius: 1px;
+  border-style: dashed;
+  font-family: var(--font-mono);
+}
+.variant-blueprint .capsule-quick-menu {
+  border-top: 1px dashed rgba(186, 230, 253, .42);
+}
+.variant-blueprint .capsule-quick-menu button {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, .48);
+  background: rgba(14, 52, 96, .68);
+  font-family: var(--font-mono);
+}
+.variant-blueprint .capsule-quick-menu button:hover:not(:disabled) {
+  border-style: solid;
+  border-color: #fde047;
+  color: #fde047;
+  background: rgba(23, 74, 132, .85);
+}
+.variant-blueprint .capsule-quick-menu .quick-audio-row {
+  border-top-color: rgba(186, 230, 253, .38);
+}
+.variant-blueprint .capsule-quick-menu .quick-audio-chip {
+  border-radius: 1px;
+}
+.variant-blueprint .capsule-quick-menu .quick-audio-chip.active {
+  border: 1px solid #fef08a;
+  background: #fde047;
+  color: #08203e;
+  font-weight: 700;
+}
+.variant-blueprint .capsule-quick-menu .quick-audio-chip.active .quick-audio-dot {
+  border-radius: 0;
+  background: #08203e;
+  box-shadow: none;
+}
 .bp-tag {
   padding: 1px 5px;
   font-size: 10px;

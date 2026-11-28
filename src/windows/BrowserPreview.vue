@@ -127,7 +127,18 @@ async function capsuleDemo(kind: string): Promise<void> {
     demoNote.value = state.ui.paused ? '模拟暂停记录；再次点击可恢复。' : '已恢复演示记录状态。'
   } else if (kind === 'telemetry') {
     if (!wasTelemetry) {
-      telemetryDemoSample.value = { netState: 'ready', downBps: 12_980_000, upBps: 368_000, cpuPercent: 42, memoryPercent: 68 }
+      telemetryDemoSample.value = {
+        netState: 'ready',
+        downBps: 12_980_000,
+        upBps: 368_000,
+        cpuPercent: 42,
+        gpuPercent: 28,
+        gpuTempC: 61,
+        gpuVramUsedMb: 2458,
+        gpuVramTotalMb: 8192,
+        gpuVramPercent: 30,
+        memoryPercent: 68
+      }
       demoNote.value = '正在演示合成微读数样本（非真实系统数据）；再次点击或点结束任务可关闭。'
     } else {
       demoNote.value = '已关闭合成微读数演示，胶囊恢复时间显示。'

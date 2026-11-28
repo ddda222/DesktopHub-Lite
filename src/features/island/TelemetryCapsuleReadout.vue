@@ -1,11 +1,14 @@
 <script setup lang="ts">
 /**
- * 灵动岛胶囊微读数渲染组件：支持网络速率与 CPU/内存占用的多样式可视化，
+ * 灵动岛胶囊微读数渲染组件：支持网络速率与 CPU/GPU/内存占用的多样式可视化，
  * 使用 GSAP 驱动数值滚动插值、弹性进度条、双环描边与脉冲呼吸动画。
  */
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { gsap } from '@/lib/gsapMotion'
 import type { TelemetryReadout, TelemetryStyle } from './telemetryReadout'
+
+type PercentMetric = 'cpu' | 'gpu' | 'memory'
+const PERCENT_METRICS: readonly PercentMetric[] = ['cpu', 'gpu', 'memory']
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 5
 
@@ -18,12 +21,15 @@ const props = withDefaults(defineProps<{
 })
 
 const rootEl = ref<HTMLElement | null>(null)
-const pulseGridRefs = new Map<'cpu' | 'memory', HTMLElement>()
-const pulseTweens = new Map<'cpu' | 'memory', gsap.core.Tween>()
-const lastPulseSig = new Map<'cpu' | 'memory', string>()
+const pulseGridRefs = new Map<PercentMetric, HTMLElement>()
+const pulseTweens = new Map<PercentMetric, gsap.core.Tween>()
+const lastPulseSig = new Map<PercentMetric, string>()
 
 const cpuTarget = computed(() =>
   props.readout.segments.find(item => item.metric === 'cpu')?.percent ?? null
+)
+const gpuTarget = computed(() =>
+  props.readout.segments.find(item => item.metric === 'gpu')?.percent ?? null
 )
 const memoryTarget = computed(() =>
   props.readout.segments.find(item => item.metric === 'memory')?.percent ?? null
@@ -38,16 +44,25 @@ function pulseTierOf(percent: number | null): string {
 }
 
 const cpuPulseTier = computed(() => pulseTierOf(cpuTarget.value))
+const gpuPulseTier = computed(() => pulseTierOf(gpuTarget.value))
 const memoryPulseTier = computed(() => pulseTierOf(memoryTarget.value))
 
 const animated = reactive({
   cpu: cpuTarget.value ?? 0,
+  gpu: gpuTarget.value ?? 0,
   memory: memoryTarget.value ?? 0,
   cpuHasValue: cpuTarget.value !== null,
+  gpuHasValue: gpuTarget.value !== null,
   memoryHasValue: memoryTarget.value !== null
 })
 
-function setPulseRef(metric: 'cpu' | 'memory', el: unknown): void {
+function hasMetricValue(metric: PercentMetric): boolean {
+  if (metric === 'cpu') return animated.cpuHasValue
+  if (metric === 'gpu') return animated.gpuHasValue
+  return animated.memoryHasValue
+}
+
+function setPulseRef(metric: PercentMetric, el: unknown): void {
   if (el instanceof HTMLElement) {
     const isNewNode = pulseGridRefs.get(metric) !== el
     pulseGridRefs.set(metric, el)
@@ -68,24 +83,21 @@ function loadLevel(percent: number | null | undefined): 'normal' | 'warm' | 'hot
   return 'normal'
 }
 
-function formattedPercent(metric: 'cpu' | 'memory', rawValue: string): string {
-  const hasVal = metric === 'cpu' ? animated.cpuHasValue : animated.memoryHasValue
-  if (!hasVal) return rawValue
-  const val = metric === 'cpu' ? animated.cpu : animated.memory
+function formattedPercent(metric: PercentMetric, rawValue: string): string {
+  if (!hasMetricValue(metric)) return rawValue
+  const val = animated[metric]
   return `${Math.round(Math.max(0, Math.min(100, val)))}%`
 }
 
-function progressRatio(metric: 'cpu' | 'memory'): number {
-  const hasVal = metric === 'cpu' ? animated.cpuHasValue : animated.memoryHasValue
-  if (!hasVal) return 0
-  const val = metric === 'cpu' ? animated.cpu : animated.memory
+function progressRatio(metric: PercentMetric): number {
+  if (!hasMetricValue(metric)) return 0
+  const val = animated[metric]
   return Math.max(0.04, Math.min(1, val / 100))
 }
 
-function ringOffset(metric: 'cpu' | 'memory'): number {
-  const hasVal = metric === 'cpu' ? animated.cpuHasValue : animated.memoryHasValue
-  if (!hasVal) return RING_CIRCUMFERENCE
-  const val = metric === 'cpu' ? animated.cpu : animated.memory
+function ringOffset(metric: PercentMetric): number {
+  if (!hasMetricValue(metric)) return RING_CIRCUMFERENCE
+  const val = animated[metric]
   const ratio = Math.max(0, Math.min(1, val / 100))
   return RING_CIRCUMFERENCE * (1 - ratio)
 }
@@ -95,7 +107,7 @@ function activeBarsCount(percent: number | null | undefined): number {
   return Math.max(1, Math.min(4, Math.ceil(percent / 25)))
 }
 
-function killMetricPulse(metric: 'cpu' | 'memory'): void {
+function killMetricPulse(metric: PercentMetric): void {
   const existing = pulseTweens.get(metric)
   if (existing) {
     existing.kill()
@@ -109,12 +121,12 @@ function killMetricPulse(metric: 'cpu' | 'memory'): void {
   lastPulseSig.delete(metric)
 }
 
-function syncMetricPulse(metric: 'cpu' | 'memory', force = false): void {
+function syncMetricPulse(metric: PercentMetric, force = false): void {
   if (props.styleMode !== 'pulse' || props.reduced) {
     killMetricPulse(metric)
     return
   }
-  const tier = metric === 'cpu' ? cpuPulseTier.value : memoryPulseTier.value
+  const tier = metric === 'cpu' ? cpuPulseTier.value : metric === 'gpu' ? gpuPulseTier.value : memoryPulseTier.value
   const grid = pulseGridRefs.get(metric)
   if (!grid || tier === 'none') {
     killMetricPulse(metric)
@@ -148,16 +160,14 @@ function syncMetricPulse(metric: 'cpu' | 'memory', force = false): void {
 
 function syncPulseAnimation(force = false): void {
   if (props.styleMode !== 'pulse' || props.reduced) {
-    killMetricPulse('cpu')
-    killMetricPulse('memory')
+    for (const metric of PERCENT_METRICS) killMetricPulse(metric)
     return
   }
-  syncMetricPulse('cpu', force)
-  syncMetricPulse('memory', force)
+  for (const metric of PERCENT_METRICS) syncMetricPulse(metric, force)
 }
 
-function updateMetricTween(key: 'cpu' | 'memory', target: number | null): void {
-  const flagKey = key === 'cpu' ? 'cpuHasValue' : 'memoryHasValue'
+function updateMetricTween(key: PercentMetric, target: number | null): void {
+  const flagKey = key === 'cpu' ? 'cpuHasValue' : key === 'gpu' ? 'gpuHasValue' : 'memoryHasValue'
   if (target === null) {
     gsap.killTweensOf(animated, key)
     animated[flagKey] = false
@@ -187,6 +197,7 @@ function updateMetricTween(key: 'cpu' | 'memory', target: number | null): void {
 }
 
 watch(cpuTarget, val => updateMetricTween('cpu', val), { immediate: true })
+watch(gpuTarget, val => updateMetricTween('gpu', val), { immediate: true })
 watch(memoryTarget, val => updateMetricTween('memory', val), { immediate: true })
 
 watch(
@@ -199,6 +210,10 @@ watch(
       animated.cpuHasValue = true
       animated.cpu = Math.max(0, Math.min(100, cpuTarget.value))
     }
+    if (gpuTarget.value !== null) {
+      animated.gpuHasValue = true
+      animated.gpu = Math.max(0, Math.min(100, gpuTarget.value))
+    }
     if (memoryTarget.value !== null) {
       animated.memoryHasValue = true
       animated.memory = Math.max(0, Math.min(100, memoryTarget.value))
@@ -207,7 +222,7 @@ watch(
 )
 
 watch(
-  [() => props.styleMode, () => props.reduced, cpuPulseTier, memoryPulseTier],
+  [() => props.styleMode, () => props.reduced, cpuPulseTier, gpuPulseTier, memoryPulseTier],
   ([nextStyle, nextReduced], prev) => {
     const modeChanged = !prev || nextStyle !== prev[0] || nextReduced !== prev[1]
     void nextTick(() => syncPulseAnimation(modeChanged))
@@ -217,26 +232,26 @@ watch(
 
 onBeforeUnmount(() => {
   gsap.killTweensOf(animated)
-  killMetricPulse('cpu')
-  killMetricPulse('memory')
+  for (const metric of PERCENT_METRICS) killMetricPulse(metric)
 })
 </script>
 
 <template>
-  <span ref="rootEl" class="telemetry-readout-wrap" :class="`style-${styleMode}`">
+  <span ref="rootEl" class="telemetry-readout-wrap" :class="[`style-${styleMode}`, { 'is-dense': readout.metricCount >= 4 }]">
     <template v-for="(seg, idx) in readout.segments" :key="seg.metric || `net-${idx}`">
       <i v-if="idx > 0" class="tel-sep">·</i>
       <span
         class="tel-seg"
         :class="[
           seg.metric ? `metric-${seg.metric}` : '',
-          seg.metric && seg.metric !== 'net' ? `level-${loadLevel(seg.percent)}` : ''
+          seg.metric && seg.metric !== 'net' ? `level-${seg.alertLevel ?? loadLevel(seg.percent)}` : '',
+          { 'is-thermal-alert': !!seg.thermalAlert }
         ]"
       >
         <em class="tel-pre" :class="{ accent: seg.accent }">{{ seg.prefix }}</em>
 
-        <!-- 处理器与内存视觉样式 -->
-        <template v-if="seg.metric === 'cpu' || seg.metric === 'memory'">
+        <!-- 处理器、显卡与内存视觉样式 -->
+        <template v-if="seg.metric === 'cpu' || seg.metric === 'gpu' || seg.metric === 'memory'">
           <span
             v-if="styleMode === 'bar'"
             class="tel-bar-track"
@@ -267,7 +282,7 @@ onBeforeUnmount(() => {
 
           <span
             v-else-if="styleMode === 'pulse'"
-            :ref="el => setPulseRef(seg.metric as 'cpu' | 'memory', el)"
+            :ref="el => setPulseRef(seg.metric as PercentMetric, el)"
             class="tel-pulse-grid"
             aria-hidden="true"
           >
@@ -298,6 +313,15 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   font-variant-numeric: tabular-nums;
+}
+.telemetry-readout-wrap.is-dense {
+  gap: 4px;
+}
+.telemetry-readout-wrap.is-dense .tel-seg {
+  gap: 3.5px;
+}
+.telemetry-readout-wrap.is-dense .tel-bar-track {
+  width: 19px;
 }
 .tel-sep {
   font-style: normal;
@@ -334,6 +358,10 @@ onBeforeUnmount(() => {
 .tel-seg.level-warm .tel-val,
 .tel-seg.level-hot .tel-val {
   color: var(--tel-color);
+}
+.tel-seg.is-thermal-alert .tel-pre {
+  color: var(--tel-color);
+  font-weight: 700;
 }
 
 /* 能量微条 */

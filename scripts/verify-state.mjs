@@ -426,4 +426,51 @@ await test('bootstrap 失败后可再次重试，且支持已就绪与在途期�
   await Promise.all([forcedFirst, forcedSecond])
   assert.equal(appCalls, 4)
 })
+await test('灵动岛 sendGeometry 命中同键值去重后不会锁死，后续展开与切页 HRGN 仍可下发', async () => {
+  const islandVue = fs.readFileSync(new URL('../src/features/island/IslandEntry.vue', import.meta.url), 'utf8')
+  const islandScript = islandVue.split('<script setup lang="ts">')[1].split('</script>')[0]
+  const calls = []
+  const api = subject(
+    ['sendGeometry', '__enqueue'],
+    {
+      resizeBar: async (width, height, regions) => {
+        calls.push({ width, height, regions })
+      }
+    },
+    'let disposed = false; let sending = false; let sendingPromise: Promise<void> | null = null; let sent = ""; let queued: any = undefined;',
+    islandScript + '\nfunction __enqueue(v: any) { queued = v }'
+  )
+  api.__enqueue({ width: 504, height: 620, regions: [{ x: 106, y: 2, width: 292, height: 34, radius: 4 }] })
+  await api.sendGeometry()
+  assert.equal(calls.length, 1)
+  // 稳态重复上报相同几何，命中 sent === key 同步去重
+  api.__enqueue({ width: 504, height: 620, regions: [{ x: 106, y: 2, width: 292, height: 34, radius: 4 }] })
+  await api.sendGeometry()
+  assert.equal(calls.length, 1)
+  // 紧接着展开灵动岛与切剪贴板，必须继续下发新 HRGN（不得因去重锁死）
+  api.__enqueue({ width: 504, height: 620, regions: [{ x: 12, y: 2, width: 480, height: 281, radius: 4 }] })
+  await api.sendGeometry()
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].regions[0].height, 281)
+  api.__enqueue({ width: 504, height: 620, regions: [{ x: 12, y: 2, width: 480, height: 540, radius: 4 }] })
+  await api.sendGeometry()
+  assert.equal(calls.length, 3)
+  assert.equal(calls[2].regions[0].height, 540)
+})
+await test('显卡温度预警与显存详情正确输出告警等级和悬浮提示', () => {
+  const mod = ts.transpileModule(telemetrySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const ctx = { exports: {} }
+  vm.runInNewContext(mod, ctx)
+  const api = ctx.exports
+  const readout = api.buildTelemetryReadout(
+    { netState: 'ready', downBps: 500 * 1024, upBps: 50 * 1024, cpuPercent: 30, gpuPercent: 45, gpuTempC: 86, gpuVramUsedMb: 6144, gpuVramTotalMb: 12288, gpuVramPercent: 50, memoryPercent: 52 },
+    { telemetryMode: 'always', telemetryNet: true, telemetryCpu: true, telemetryGpu: true, telemetryMemory: true }
+  )
+  assert.equal(readout.metricCount, 4)
+  const gpu = readout.segments.find(s => s.metric === 'gpu')
+  assert.equal(gpu?.alertLevel, 'hot')
+  assert.equal(gpu?.thermalAlert, true)
+  assert.match(readout.tooltip, /86°C 高温预警/)
+  assert.match(readout.tooltip, /显存 6\.0\/12\.0 GB \(50%\)/)
+})
 if(failed)process.exitCode=1

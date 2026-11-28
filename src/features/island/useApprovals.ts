@@ -4,7 +4,7 @@ import { invokeHost, isDesktop, listenHost } from '@/lib/desktop/desktop'
 
 export interface ApprovalCard {
   id: string
-  source: 'Codex' | 'DSH'
+  source: 'Codex' | 'DSH' | 'Orca'
   tool: string
   title: string
   details: string

@@ -1,12 +1,13 @@
-//! 胶囊轻量系统遥测：仅在本机用户态只读采集活动物理网卡吞吐、处理器总占用与物理内存占用。
+//! 胶囊轻量系统遥测：仅在本机用户态只读采集活动物理网卡吞吐、处理器总占用、显卡引擎占用与物理内存占用。
 //!
 //! 约束与边界：
 //! - 不建立网络连接、不嗅探数据包、不将网卡名称或接口描述写入日志；
 //! - 仅累加处于连接状态的物理以太网（6）与 Wi-Fi（71）硬件接口，排除隧道与虚拟接口；
-//! - 关闭微读数、未勾选指标、灵动岛隐藏或收为全屏避让细线时自动休眠并清空差分基线。
+//! - 显卡占用通过 Windows 原生 PDH `\GPU Engine(*)\Utilization Percentage` 复用句柄采集，跨 NVIDIA / AMD / Intel 通用并与任务管理器同源；
+//! - 关闭微读数、未勾选指标、灵动岛隐藏或收为全屏避让细线时自动休眠并清空差分基线与释放查询句柄。
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 
 pub const TELEMETRY_EVENT: &str = "island-telemetry";
@@ -164,6 +165,41 @@ pub fn compute_memory_percent(total_phys: u64, avail_phys: u64) -> Option<u8> {
     Some(ratio.round().clamp(0.0, 100.0) as u8)
 }
 
+/// 聚合 Windows PDH `\GPU Engine(*)\Utilization Percentage` 各进程实例样本，
+/// 与任务管理器口径一致：同一物理适配器下按引擎类型（3D/Copy/VideoDecode/Compute 等）分别求和，
+/// 再取各引擎及各适配器中的最高占用率（0..=100）。
+pub fn aggregate_gpu_engine_utilization(samples: &[(&str, f64)]) -> Option<u8> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut engine_totals: HashMap<(String, String), f64> = HashMap::new();
+    let mut valid_count = 0usize;
+    for &(instance, value) in samples {
+        if !value.is_finite() || value < 0.0 {
+            continue;
+        }
+        valid_count += 1;
+        let adapter = instance
+            .split_once("_luid_")
+            .map(|(_, rest)| rest.split_once("_eng_").map(|(a, _)| a).unwrap_or(rest))
+            .unwrap_or("gpu0")
+            .to_ascii_lowercase();
+        let engine = instance
+            .rsplit_once("_engtype_")
+            .map(|(_, eng)| eng)
+            .unwrap_or("other")
+            .to_ascii_lowercase();
+        *engine_totals.entry((adapter, engine)).or_insert(0.0) += value;
+    }
+    if valid_count == 0 {
+        return None;
+    }
+    let peak = engine_totals
+        .into_values()
+        .fold(0.0_f64, |acc, v| acc.max(v));
+    Some(peak.round().clamp(0.0, 100.0) as u8)
+}
+
 /// 判定网卡行是否属于当前活动的物理以太网或 Wi-Fi 接口。
 pub fn is_active_physical_adapter(
     oper_status: u32,
@@ -192,14 +228,69 @@ pub struct TelemetrySnapshot {
     pub down_bps: Option<u64>,
     pub up_bps: Option<u64>,
     pub cpu_percent: Option<u8>,
+    pub gpu_percent: Option<u8>,
+    pub gpu_temp_c: Option<u8>,
+    pub gpu_vram_used_mb: Option<u32>,
+    pub gpu_vram_total_mb: Option<u32>,
+    pub gpu_vram_percent: Option<u8>,
     pub memory_percent: Option<u8>,
 }
 
-/// 组合三种采样器的有状态采集器，单线程持有。
+/// NVML 读取出的单帧显卡热与显存扩展指标。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GpuThermalVram {
+    pub temp_c: Option<u8>,
+    pub vram_used_mb: Option<u32>,
+    pub vram_total_mb: Option<u32>,
+    pub vram_percent: Option<u8>,
+}
+
+/// 显卡高温主动告警状态机（带迟滞回落与冷却时间，避免游戏场景重复打扰）。
+#[derive(Default)]
+pub struct GpuOverheatTracker {
+    overheating: bool,
+    last_alert_sec: Option<u64>,
+}
+
+impl GpuOverheatTracker {
+    pub const ALERT_ENTER_C: u8 = 86;
+    pub const ALERT_RESET_C: u8 = 80;
+    pub const COOLDOWN_SECS: u64 = 300;
+
+    pub fn reset(&mut self) {
+        self.overheating = false;
+    }
+
+    /// 推进一步温度观测，仅在首次跨过高温阈值且超出冷却时间时返回应播报的温度值。
+    pub fn observe(&mut self, temp_c: Option<u8>, now_sec: u64) -> Option<u8> {
+        let Some(temp) = temp_c else {
+            return None;
+        };
+        if temp <= Self::ALERT_RESET_C {
+            self.overheating = false;
+            return None;
+        }
+        if temp >= Self::ALERT_ENTER_C && !self.overheating {
+            let cooled = self
+                .last_alert_sec
+                .is_none_or(|prev| now_sec.saturating_sub(prev) >= Self::COOLDOWN_SECS);
+            self.overheating = true;
+            if cooled {
+                self.last_alert_sec = Some(now_sec);
+                return Some(temp);
+            }
+        }
+        None
+    }
+}
+
+/// 组合多种采样器的有状态采集器，单线程持有。
 pub struct SystemSampler {
     origin: Instant,
     net: NetRateCalculator,
     cpu: CpuCalculator,
+    gpu: platform::GpuEngineReader,
+    nvml: platform::NvmlGpuReader,
 }
 
 impl Default for SystemSampler {
@@ -208,6 +299,8 @@ impl Default for SystemSampler {
             origin: Instant::now(),
             net: NetRateCalculator::default(),
             cpu: CpuCalculator::default(),
+            gpu: platform::GpuEngineReader::default(),
+            nvml: platform::NvmlGpuReader::default(),
         }
     }
 }
@@ -216,9 +309,17 @@ impl SystemSampler {
     pub fn reset(&mut self) {
         self.net.reset();
         self.cpu.reset();
+        self.gpu.reset();
+        self.nvml.reset();
     }
 
-    pub fn sample(&mut self, want_net: bool, want_cpu: bool, want_memory: bool) -> TelemetrySnapshot {
+    pub fn sample(
+        &mut self,
+        want_net: bool,
+        want_cpu: bool,
+        want_gpu: bool,
+        want_memory: bool,
+    ) -> TelemetrySnapshot {
         let now_us = self.origin.elapsed().as_micros().min(u64::MAX as u128) as u64;
 
         let (net_state, down_bps, up_bps) = if !want_net {
@@ -252,6 +353,14 @@ impl SystemSampler {
             None
         };
 
+        let (gpu_percent, gpu_extra) = if !want_gpu {
+            self.gpu.reset();
+            self.nvml.reset();
+            (None, GpuThermalVram::default())
+        } else {
+            (self.gpu.sample(), self.nvml.sample())
+        };
+
         let memory_percent = if !want_memory {
             None
         } else {
@@ -264,6 +373,11 @@ impl SystemSampler {
             down_bps,
             up_bps,
             cpu_percent,
+            gpu_percent,
+            gpu_temp_c: gpu_extra.temp_c,
+            gpu_vram_used_mb: gpu_extra.vram_used_mb,
+            gpu_vram_total_mb: gpu_extra.vram_total_mb,
+            gpu_vram_percent: gpu_extra.vram_percent,
             memory_percent,
         }
     }
@@ -271,9 +385,32 @@ impl SystemSampler {
 
 #[cfg(windows)]
 mod platform {
-    use super::{is_active_physical_adapter, AdapterCounter};
+    use super::{
+        aggregate_gpu_engine_utilization, is_active_physical_adapter, AdapterCounter,
+        GpuThermalVram,
+    };
     use core::ffi::c_void;
     use std::mem::{offset_of, size_of};
+
+    // PDH 常量（对应 Windows SDK pdh.h / pdhmsg.h）
+    const PDH_FMT_DOUBLE: u32 = 0x0000_0200;
+    const PDH_MORE_DATA: u32 = 0x8000_07D2;
+    const PDH_CSTATUS_VALID_DATA: u32 = 0x0000_0000;
+    const PDH_CSTATUS_NEW_DATA: u32 = 0x0000_0001;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct PdhFmtCounterValue {
+        c_status: u32,
+        double_value: f64,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct PdhFmtCounterValueItemW {
+        sz_name: *const u16,
+        fmt_value: PdhFmtCounterValue,
+    }
 
     #[repr(C)]
     #[derive(Clone, Copy, Default)]
@@ -368,6 +505,10 @@ mod platform {
         assert!(offset_of!(MibIfRow2, out_octets) == 1280);
         assert!(offset_of!(MibIfTable2, table) == 8);
         assert!(size_of::<MemoryStatusEx>() == 64);
+        assert!(size_of::<PdhFmtCounterValue>() == 16);
+        assert!(offset_of!(PdhFmtCounterValue, double_value) == 8);
+        assert!(size_of::<PdhFmtCounterValueItemW>() == 24);
+        assert!(offset_of!(PdhFmtCounterValueItemW, fmt_value) == 8);
     };
 
     #[link(name = "iphlpapi")]
@@ -384,6 +525,385 @@ mod platform {
             user_time: *mut FileTime,
         ) -> i32;
         fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+        fn LoadLibraryW(file_name: *const u16) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, proc_name: *const u8) -> *mut c_void;
+        fn FreeLibrary(module: *mut c_void) -> i32;
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct NvmlMemory {
+        total: u64,
+        free: u64,
+        used: u64,
+    }
+
+    type NvmlInitFn = unsafe extern "C" fn() -> i32;
+    type NvmlShutdownFn = unsafe extern "C" fn() -> i32;
+    type NvmlDeviceGetCountFn = unsafe extern "C" fn(*mut u32) -> i32;
+    type NvmlDeviceGetHandleByIndexFn = unsafe extern "C" fn(u32, *mut *mut c_void) -> i32;
+    type NvmlDeviceGetTemperatureFn = unsafe extern "C" fn(*mut c_void, u32, *mut u32) -> i32;
+    type NvmlDeviceGetMemoryInfoFn = unsafe extern "C" fn(*mut c_void, *mut NvmlMemory) -> i32;
+
+    /// 零依赖动态加载 NVIDIA `nvml.dll` 读取显卡核心温度与显存占用（<0.1ms/次，无 N 卡静默回退为空）。
+    pub struct NvmlGpuReader {
+        module: *mut c_void,
+        initialized: bool,
+        unavailable: bool,
+        devices: Vec<*mut c_void>,
+        shutdown_fn: Option<NvmlShutdownFn>,
+        get_temp_fn: Option<NvmlDeviceGetTemperatureFn>,
+        get_mem_fn: Option<NvmlDeviceGetMemoryInfoFn>,
+    }
+
+    impl Default for NvmlGpuReader {
+        fn default() -> Self {
+            Self {
+                module: core::ptr::null_mut(),
+                initialized: false,
+                unavailable: false,
+                devices: Vec::new(),
+                shutdown_fn: None,
+                get_temp_fn: None,
+                get_mem_fn: None,
+            }
+        }
+    }
+
+    impl Drop for NvmlGpuReader {
+        fn drop(&mut self) {
+            self.reset();
+        }
+    }
+
+    impl NvmlGpuReader {
+        pub fn reset(&mut self) {
+            self.devices.clear();
+            if self.initialized {
+                if let Some(shutdown) = self.shutdown_fn {
+                    unsafe {
+                        let _ = shutdown();
+                    }
+                }
+                self.initialized = false;
+            }
+            if !self.module.is_null() {
+                unsafe {
+                    let _ = FreeLibrary(self.module);
+                }
+                self.module = core::ptr::null_mut();
+            }
+            self.shutdown_fn = None;
+            self.get_temp_fn = None;
+            self.get_mem_fn = None;
+        }
+
+        fn ensure_open(&mut self) -> bool {
+            if self.initialized && !self.devices.is_empty() {
+                return true;
+            }
+            if self.unavailable {
+                return false;
+            }
+            self.reset();
+            let candidates = [
+                r"C:\Windows\System32\nvml.dll",
+                r"C:\Program Files\NVIDIA Corporation\NVSMI\nvml.dll",
+                "nvml.dll",
+            ];
+            let mut module: *mut c_void = core::ptr::null_mut();
+            for path in candidates {
+                let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+                let h = unsafe { LoadLibraryW(wide.as_ptr()) };
+                if !h.is_null() {
+                    module = h;
+                    break;
+                }
+            }
+            if module.is_null() {
+                self.unavailable = true;
+                return false;
+            }
+            unsafe {
+                let p_init = GetProcAddress(module, b"nvmlInit_v2\0".as_ptr());
+                let p_shutdown = GetProcAddress(module, b"nvmlShutdown\0".as_ptr());
+                let p_count = GetProcAddress(module, b"nvmlDeviceGetCount_v2\0".as_ptr());
+                let p_handle = GetProcAddress(module, b"nvmlDeviceGetHandleByIndex_v2\0".as_ptr());
+                let p_temp = GetProcAddress(module, b"nvmlDeviceGetTemperature\0".as_ptr());
+                let p_mem = GetProcAddress(module, b"nvmlDeviceGetMemoryInfo\0".as_ptr());
+                if p_init.is_null()
+                    || p_shutdown.is_null()
+                    || p_count.is_null()
+                    || p_handle.is_null()
+                    || (p_temp.is_null() && p_mem.is_null())
+                {
+                    let _ = FreeLibrary(module);
+                    self.unavailable = true;
+                    return false;
+                }
+                let init_fn: NvmlInitFn = core::mem::transmute(p_init);
+                let shutdown_fn: NvmlShutdownFn = core::mem::transmute(p_shutdown);
+                let count_fn: NvmlDeviceGetCountFn = core::mem::transmute(p_count);
+                let handle_fn: NvmlDeviceGetHandleByIndexFn = core::mem::transmute(p_handle);
+                if init_fn() != 0 {
+                    let _ = FreeLibrary(module);
+                    self.unavailable = true;
+                    return false;
+                }
+                let mut count = 0u32;
+                let mut devices = Vec::new();
+                if count_fn(&mut count) == 0 && count > 0 {
+                    for idx in 0..count.min(8) {
+                        let mut dev: *mut c_void = core::ptr::null_mut();
+                        if handle_fn(idx, &mut dev) == 0 && !dev.is_null() {
+                            devices.push(dev);
+                        }
+                    }
+                }
+                if devices.is_empty() {
+                    let _ = shutdown_fn();
+                    let _ = FreeLibrary(module);
+                    self.unavailable = true;
+                    return false;
+                }
+                self.module = module;
+                self.initialized = true;
+                self.devices = devices;
+                self.shutdown_fn = Some(shutdown_fn);
+                self.get_temp_fn = if p_temp.is_null() {
+                    None
+                } else {
+                    Some(core::mem::transmute(p_temp))
+                };
+                self.get_mem_fn = if p_mem.is_null() {
+                    None
+                } else {
+                    Some(core::mem::transmute(p_mem))
+                };
+                true
+            }
+        }
+
+        pub fn sample(&mut self) -> GpuThermalVram {
+            if !self.ensure_open() {
+                return GpuThermalVram::default();
+            }
+            let mut max_temp: Option<u8> = None;
+            let mut best_vram: Option<(u32, u32, u8)> = None;
+            for &dev in &self.devices {
+                if let Some(get_temp) = self.get_temp_fn {
+                    let mut raw_temp = 0u32;
+                    // NVML_TEMPERATURE_GPU = 0
+                    if unsafe { get_temp(dev, 0, &mut raw_temp) } == 0 && raw_temp <= 150 {
+                        let t = raw_temp as u8;
+                        max_temp = Some(max_temp.map_or(t, |prev| prev.max(t)));
+                    }
+                }
+                if let Some(get_mem) = self.get_mem_fn {
+                    let mut mem = NvmlMemory::default();
+                    if unsafe { get_mem(dev, &mut mem) } == 0 && mem.total > 0 {
+                        let used_mb = (mem.used / (1024 * 1024)).min(u32::MAX as u64) as u32;
+                        let total_mb = (mem.total / (1024 * 1024)).max(1).min(u32::MAX as u64) as u32;
+                        let pct = ((mem.used as f64 / mem.total as f64) * 100.0)
+                            .round()
+                            .clamp(0.0, 100.0) as u8;
+                        if best_vram.is_none_or(|(_, _, prev_pct)| pct >= prev_pct) {
+                            best_vram = Some((used_mb, total_mb, pct));
+                        }
+                    }
+                }
+            }
+            GpuThermalVram {
+                temp_c: max_temp,
+                vram_used_mb: best_vram.map(|v| v.0),
+                vram_total_mb: best_vram.map(|v| v.1),
+                vram_percent: best_vram.map(|v| v.2),
+            }
+        }
+    }
+
+    #[link(name = "pdh")]
+    extern "system" {
+        fn PdhOpenQueryW(
+            data_source: *const u16,
+            user_data: usize,
+            query: *mut *mut c_void,
+        ) -> u32;
+        fn PdhAddEnglishCounterW(
+            query: *mut c_void,
+            full_counter_path: *const u16,
+            user_data: usize,
+            counter: *mut *mut c_void,
+        ) -> u32;
+        fn PdhCollectQueryData(query: *mut c_void) -> u32;
+        fn PdhGetFormattedCounterArrayW(
+            counter: *mut c_void,
+            format: u32,
+            buffer_size: *mut u32,
+            item_count: *mut u32,
+            item_buffer: *mut c_void,
+        ) -> u32;
+        fn PdhCloseQuery(query: *mut c_void) -> u32;
+    }
+
+    /// 持久化复用 PDH 查询句柄，低开销采集所有物理显卡的引擎占用率（<1ms/次）。
+    pub struct GpuEngineReader {
+        query: *mut c_void,
+        counter: *mut c_void,
+        warmed: bool,
+        consecutive_errors: u8,
+        /// 8 字节对齐缓冲区，复用以减少每秒堆分配。
+        buffer: Vec<u64>,
+    }
+
+    impl Default for GpuEngineReader {
+        fn default() -> Self {
+            Self {
+                query: core::ptr::null_mut(),
+                counter: core::ptr::null_mut(),
+                warmed: false,
+                consecutive_errors: 0,
+                buffer: Vec::new(),
+            }
+        }
+    }
+
+    impl Drop for GpuEngineReader {
+        fn drop(&mut self) {
+            self.reset();
+        }
+    }
+
+    impl GpuEngineReader {
+        pub fn reset(&mut self) {
+            if !self.query.is_null() {
+                unsafe {
+                    PdhCloseQuery(self.query);
+                }
+                self.query = core::ptr::null_mut();
+            }
+            self.counter = core::ptr::null_mut();
+            self.warmed = false;
+            self.consecutive_errors = 0;
+        }
+
+        fn ensure_open(&mut self) -> bool {
+            if !self.query.is_null() && !self.counter.is_null() {
+                return true;
+            }
+            self.reset();
+            let mut query: *mut c_void = core::ptr::null_mut();
+            let status = unsafe { PdhOpenQueryW(core::ptr::null(), 0, &mut query) };
+            if status != 0 || query.is_null() {
+                return false;
+            }
+            let path: Vec<u16> = "\\GPU Engine(*)\\Utilization Percentage\0"
+                .encode_utf16()
+                .collect();
+            let mut counter: *mut c_void = core::ptr::null_mut();
+            let add_status =
+                unsafe { PdhAddEnglishCounterW(query, path.as_ptr(), 0, &mut counter) };
+            if add_status != 0 || counter.is_null() {
+                unsafe {
+                    PdhCloseQuery(query);
+                }
+                return false;
+            }
+            self.query = query;
+            self.counter = counter;
+            self.warmed = false;
+            true
+        }
+
+        pub fn sample(&mut self) -> Option<u8> {
+            if !self.ensure_open() {
+                return None;
+            }
+            let status = unsafe { PdhCollectQueryData(self.query) };
+            if status != 0 {
+                self.consecutive_errors = self.consecutive_errors.saturating_add(1);
+                if self.consecutive_errors >= 3 {
+                    self.reset();
+                }
+                return None;
+            }
+            self.consecutive_errors = 0;
+            if !self.warmed {
+                // 首次采集仅建立差分基线，下一拍返回准确占用率。
+                self.warmed = true;
+                return None;
+            }
+
+            let mut buffer_bytes: u32 = 0;
+            let mut item_count: u32 = 0;
+            let probe = unsafe {
+                PdhGetFormattedCounterArrayW(
+                    self.counter,
+                    PDH_FMT_DOUBLE,
+                    &mut buffer_bytes,
+                    &mut item_count,
+                    core::ptr::null_mut(),
+                )
+            };
+            if probe != PDH_MORE_DATA || buffer_bytes == 0 || item_count == 0 {
+                return None;
+            }
+            // 防御性上限（8 MiB / 65536 条实例），避免异常计数器撑爆内存。
+            if buffer_bytes > 8 * 1024 * 1024 || item_count > 65_536 {
+                return None;
+            }
+
+            let words = (buffer_bytes as usize).div_ceil(size_of::<u64>());
+            if self.buffer.len() < words {
+                self.buffer.resize(words, 0);
+            }
+            let mut actual_bytes = (self.buffer.len() * size_of::<u64>()) as u32;
+            let mut actual_count: u32 = 0;
+            let read = unsafe {
+                PdhGetFormattedCounterArrayW(
+                    self.counter,
+                    PDH_FMT_DOUBLE,
+                    &mut actual_bytes,
+                    &mut actual_count,
+                    self.buffer.as_mut_ptr() as *mut c_void,
+                )
+            };
+            if read != 0 || actual_count == 0 {
+                return None;
+            }
+
+            let max_items = (actual_bytes as usize) / size_of::<PdhFmtCounterValueItemW>();
+            let count = (actual_count as usize).min(max_items);
+            let items = unsafe {
+                core::slice::from_raw_parts(
+                    self.buffer.as_ptr() as *const PdhFmtCounterValueItemW,
+                    count,
+                )
+            };
+
+            let mut decoded: Vec<(String, f64)> = Vec::with_capacity(count.min(1024));
+            for item in items {
+                if item.fmt_value.c_status != PDH_CSTATUS_VALID_DATA
+                    && item.fmt_value.c_status != PDH_CSTATUS_NEW_DATA
+                {
+                    continue;
+                }
+                if item.sz_name.is_null() {
+                    continue;
+                }
+                // 读取以 NUL 结尾的 UTF-16 实例名，加安全长度上限。
+                let name = unsafe {
+                    let mut len = 0usize;
+                    while len < 512 && *item.sz_name.add(len) != 0 {
+                        len += 1;
+                    }
+                    String::from_utf16_lossy(core::slice::from_raw_parts(item.sz_name, len))
+                };
+                decoded.push((name, item.fmt_value.double_value));
+            }
+            let refs: Vec<(&str, f64)> = decoded.iter().map(|(s, v)| (s.as_str(), *v)).collect();
+            aggregate_gpu_engine_utilization(&refs)
+        }
     }
 
     pub fn read_network_counters() -> Option<Vec<AdapterCounter>> {
@@ -470,7 +990,23 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    use super::AdapterCounter;
+    use super::{AdapterCounter, GpuThermalVram};
+    #[derive(Default)]
+    pub struct GpuEngineReader;
+    impl GpuEngineReader {
+        pub fn reset(&mut self) {}
+        pub fn sample(&mut self) -> Option<u8> {
+            None
+        }
+    }
+    #[derive(Default)]
+    pub struct NvmlGpuReader;
+    impl NvmlGpuReader {
+        pub fn reset(&mut self) {}
+        pub fn sample(&mut self) -> GpuThermalVram {
+            GpuThermalVram::default()
+        }
+    }
     pub fn read_network_counters() -> Option<Vec<AdapterCounter>> {
         None
     }
@@ -492,12 +1028,15 @@ pub fn start(app: tauri::AppHandle) {
         .name("island-telemetry".into())
         .spawn(move || {
             let mut sampler = SystemSampler::default();
+            let mut overheat = GpuOverheatTracker::default();
+            let started = Instant::now();
             let mut was_active = false;
             while app.state::<AppState>().running.load(Ordering::Relaxed) {
                 let ui = app.state::<AppState>().ui.snapshot();
                 let appearance = &ui.island_appearance;
                 let any_metric = appearance.telemetry_net
                     || appearance.telemetry_cpu
+                    || appearance.telemetry_gpu
                     || appearance.telemetry_memory;
                 let mode_enabled = matches!(appearance.telemetry_mode.as_str(), "smart" | "always")
                     && any_metric;
@@ -512,12 +1051,38 @@ pub fn start(app: tauri::AppHandle) {
                     let snapshot = sampler.sample(
                         appearance.telemetry_net,
                         appearance.telemetry_cpu,
+                        appearance.telemetry_gpu,
                         appearance.telemetry_memory,
                     );
+                    if appearance.telemetry_gpu {
+                        if let Some(hot_temp) = overheat.observe(snapshot.gpu_temp_c, started.elapsed().as_secs()) {
+                            let vram_detail = match (snapshot.gpu_vram_used_mb, snapshot.gpu_vram_total_mb) {
+                                (Some(used), Some(total)) if total > 0 => format!(
+                                    " · 显存 {:.1}/{:.1} GB",
+                                    used as f64 / 1024.0,
+                                    total as f64 / 1024.0
+                                ),
+                                _ => String::new(),
+                            };
+                            let _ = app.emit_to(
+                                windows::BAR,
+                                "island-feedback",
+                                serde_json::json!({
+                                    "kind": "gpu-overheat",
+                                    "label": format!("显卡高温 {hot_temp}°C"),
+                                    "tooltip": format!("显卡核心温度达到 {hot_temp}°C{vram_detail}，请注意散热"),
+                                    "urgent": true,
+                                }),
+                            );
+                        }
+                    } else {
+                        overheat.reset();
+                    }
                     let _ = app.emit_to(windows::BAR, TELEMETRY_EVENT, &snapshot);
                 } else if was_active {
                     was_active = false;
                     sampler.reset();
+                    overheat.reset();
                 }
 
                 std::thread::sleep(Duration::from_millis(1000));
@@ -609,16 +1174,78 @@ mod tests {
     }
 
     #[test]
+    fn gpu_engine_aggregation_sums_per_engine_and_picks_adapter_peak() {
+        assert_eq!(aggregate_gpu_engine_utilization(&[]), None);
+        assert_eq!(
+            aggregate_gpu_engine_utilization(&[
+                ("pid_1_luid_0x0_0x1_phys_0_eng_0_engtype_3D", f64::NAN),
+                ("pid_2_luid_0x0_0x1_phys_0_eng_0_engtype_3D", -2.0),
+            ]),
+            None
+        );
+        // 同一适配器 3D 引擎多进程求和：24.4 + 10.2 = 34.6 -> 35%，高于 Copy 引擎 8.1%
+        let samples = [
+            ("pid_100_luid_0x00000000_0x00011ae1_phys_0_eng_0_engtype_3d", 24.4),
+            ("pid_200_luid_0x00000000_0x00011ae1_phys_0_eng_0_engtype_3D", 10.2),
+            ("pid_100_luid_0x00000000_0x00011ae1_phys_0_eng_4_engtype_Copy", 8.1),
+            ("pid_300_luid_0x00000000_0x00022bf2_phys_0_eng_0_engtype_VideoDecode", 12.0),
+        ];
+        assert_eq!(aggregate_gpu_engine_utilization(&samples), Some(35));
+        // 超过 100% 时安全截断到 100
+        let saturated = [
+            ("pid_1_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 70.0),
+            ("pid_2_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 55.0),
+        ];
+        assert_eq!(aggregate_gpu_engine_utilization(&saturated), Some(100));
+        // 全零空闲返回 Some(0)
+        assert_eq!(
+            aggregate_gpu_engine_utilization(&[
+                ("pid_1_luid_0x0_0x1_phys_0_eng_0_engtype_3D", 0.0),
+            ]),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn gpu_overheat_tracker_applies_hysteresis_and_cooldown() {
+        let mut tracker = GpuOverheatTracker::default();
+        assert_eq!(tracker.observe(Some(72), 10), None);
+        assert_eq!(tracker.observe(Some(86), 20), Some(86));
+        // 持续高温不重复打扰
+        assert_eq!(tracker.observe(Some(89), 40), None);
+        // 未降回重置阈值以下仍不重复触发
+        assert_eq!(tracker.observe(Some(82), 60), None);
+        assert_eq!(tracker.observe(Some(87), 80), None);
+        // 降温至 <= 80°C 后重置，但在 5 分钟冷却期内仍静默
+        assert_eq!(tracker.observe(Some(78), 100), None);
+        assert_eq!(tracker.observe(Some(87), 200), None);
+        // 超过冷却期后再升温触发
+        assert_eq!(tracker.observe(Some(78), 350), None);
+        assert_eq!(tracker.observe(Some(88), 360), Some(88));
+    }
+
+    #[test]
     #[ignore]
     fn read_only_windows_telemetry_smoke() {
         let mut sampler = SystemSampler::default();
-        let first = sampler.sample(true, true, true);
+        let first = sampler.sample(true, true, true, true);
         assert!(matches!(first.net_state.as_str(), "warmingUp" | "unavailable"));
         assert!(first.memory_percent.is_some_and(|v| v <= 100));
         std::thread::sleep(Duration::from_millis(220));
-        let second = sampler.sample(true, true, true);
+        let second = sampler.sample(true, true, true, true);
         assert!(matches!(second.net_state.as_str(), "ready" | "unavailable"));
         assert!(second.cpu_percent.is_some_and(|v| v <= 100));
+        assert!(second.gpu_percent.is_some_and(|v| v <= 100));
         assert!(second.memory_percent.is_some_and(|v| v <= 100));
+        println!(
+            "telemetry smoke: cpu={:?}% gpu={:?}% temp={:?}C vram={:?}/{:?}MiB ({:?}%) mem={:?}%",
+            second.cpu_percent,
+            second.gpu_percent,
+            second.gpu_temp_c,
+            second.gpu_vram_used_mb,
+            second.gpu_vram_total_mb,
+            second.gpu_vram_percent,
+            second.memory_percent
+        );
     }
 }

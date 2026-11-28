@@ -58,6 +58,7 @@
   color: #fde047;
   font-family: var(--font-mono);
 }
+:root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip,
 :root[data-theme='blueprint'] .audio-mixer .sound-profiles button,
 :root[data-theme='blueprint'] .audio-mixer .mute,
 :root[data-theme='blueprint'] .audio-mixer .save-profile button,
@@ -67,6 +68,15 @@
   border: 1px dashed rgba(224, 242, 254, 0.55);
   font-family: var(--font-mono);
 }
+:root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip {
+  background: rgba(14, 52, 96, 0.65);
+}
+:root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip:hover:not(.active):not(:disabled) {
+  border-color: #fde047;
+  background: rgba(23, 74, 132, 0.85);
+  color: #ffffff;
+}
+:root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip.active,
 :root[data-theme='blueprint'] .audio-mixer .sound-profiles button[aria-pressed='true'],
 :root[data-theme='blueprint'] .audio-mixer .muted .mute,
 :root[data-theme='blueprint'] .audio-mixer .save-profile button,
@@ -75,6 +85,23 @@
   color: #08203e;
   border: 1px solid #fef08a;
   font-weight: 700;
+}
+:root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip.active .dev-dot {
+  border-radius: 0;
+  background: #08203e;
+  box-shadow: none;
+}
+:root[data-theme='blueprint'] .settings-ui .features .peripheral-settings-row {
+  border-bottom-style: dashed;
+}
+:root[data-theme='blueprint'] .settings-ui .features .peripheral-pill {
+  border-radius: 1px;
+  border: 1px dashed rgba(224, 242, 254, 0.52);
+  background: rgba(7, 25, 47, 0.72);
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .settings-ui .features .peripheral-pill strong {
+  color: #fde047;
 }
 :root[data-theme='blueprint'] .file-shelf .shelf-list li {
   border-radius: 1px;

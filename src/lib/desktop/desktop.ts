@@ -50,8 +50,37 @@ export interface IslandAppearance {
   telemetryStyle: TelemetryStyle
   telemetryNet: boolean
   telemetryCpu: boolean
+  telemetryGpu: boolean
   telemetryMemory: boolean
+  telemetryPeripherals: boolean
   showAppNames: boolean
+}
+
+export interface PeripheralBattery {
+  id: string
+  kind: 'keyboard' | 'mouse'
+  name: string
+  percent: number
+  charging: boolean
+  transport: 'logitech-hidpp' | 'vgn-24g' | 'bluetooth'
+  stale: boolean
+  updatedAtMs: number
+}
+
+export interface PeripheralBatterySnapshot {
+  devices: PeripheralBattery[]
+  checkedAtMs: number
+}
+
+export interface OrcaStatusSnapshot {
+  enabled: boolean
+  running: boolean
+  workingCount: number
+  blockedCount: number
+  waitingCount: number
+  phase: 'idle' | 'working' | 'waiting' | 'blocked'
+  label: string
+  tooltip: string
 }
 
 export function defaultIslandAppearance(): IslandAppearance {
@@ -69,7 +98,9 @@ export function defaultIslandAppearance(): IslandAppearance {
     telemetryStyle: 'bar',
     telemetryNet: true,
     telemetryCpu: true,
+    telemetryGpu: true,
     telemetryMemory: true,
+    telemetryPeripherals: true,
     showAppNames: true
   }
 }

@@ -43,6 +43,7 @@
   border: 1.5px solid #fde68a;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
 }
+:root[data-theme='mecha'] .audio-mixer .output-devices .device-chip,
 :root[data-theme='mecha'] .audio-mixer .sound-profiles button,
 :root[data-theme='mecha'] .audio-mixer .mute,
 :root[data-theme='mecha'] .audio-mixer .save-profile button,
@@ -51,11 +52,26 @@
   border-radius: 2px;
   clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
 }
+:root[data-theme='mecha'] .audio-mixer .output-devices .device-chip {
+  border-color: rgba(245, 158, 11, 0.28); background: var(--tile-surface); font-family: var(--font-mono);
+}
+:root[data-theme='mecha'] .audio-mixer .output-devices .device-chip:hover:not(.active):not(:disabled) {
+  border-color: rgba(245, 158, 11, 0.65); background: var(--hover); color: var(--text);
+}
+:root[data-theme='mecha'] .audio-mixer .output-devices .device-chip.active,
 :root[data-theme='mecha'] .audio-mixer .sound-profiles button[aria-pressed='true'],
 :root[data-theme='mecha'] .audio-mixer .muted .mute,
 :root[data-theme='mecha'] .audio-mixer .save-profile button {
   background: var(--accent); color: var(--accent-text); border-color: var(--accent);
 }
+:root[data-theme='mecha'] .audio-mixer .output-devices .device-chip.active .dev-dot {
+  background: var(--accent-text); box-shadow: none;
+}
+:root[data-theme='mecha'] .settings-ui .features .peripheral-pill {
+  border-radius: 2px; border-color: rgba(245, 158, 11, 0.3); background: var(--well-bg); font-family: var(--font-mono);
+  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
+}
+:root[data-theme='mecha'] .settings-ui .features .peripheral-pill strong { color: var(--accent); }
 :root[data-theme='mecha'] .audio-mixer .volume-readout { border-radius: 2px; color: var(--accent); }
 
 /* 设置中心（琥珀重工） */
@@ -357,6 +373,7 @@
 :root[data-theme='pixel'] .audio-mixer .volume-readout {
   border-radius: 0; border: 2px solid #0f0d1a; background: #141915; color: #facc15;
 }
+:root[data-theme='pixel'] .audio-mixer .output-devices .device-chip,
 :root[data-theme='pixel'] .audio-mixer .sound-profiles button,
 :root[data-theme='pixel'] .audio-mixer .mute,
 :root[data-theme='pixel'] .audio-mixer .save-profile button,
@@ -365,12 +382,30 @@
   border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc;
   box-shadow: 0 3px 0 #0f0d1a; font-family: var(--font-mono);
 }
+:root[data-theme='pixel'] .audio-mixer .output-devices .device-chip:hover:not(.active):not(:disabled) {
+  background: #5b5282; color: #ffffff;
+}
+:root[data-theme='pixel'] .audio-mixer .output-devices .device-chip.active,
 :root[data-theme='pixel'] .audio-mixer .sound-profiles button[aria-pressed='true'],
 :root[data-theme='pixel'] .audio-mixer .muted .mute,
 :root[data-theme='pixel'] .audio-mixer .save-profile button,
 :root[data-theme='pixel'] .translation-panel .primary {
   background: var(--accent); color: #0f0d1a; font-weight: 700;
 }
+:root[data-theme='pixel'] .audio-mixer .output-devices .device-chip.active .dev-dot {
+  border-radius: 0; background: #0f0d1a; box-shadow: none;
+}
+:root[data-theme='pixel'] .audio-mixer .output-devices .device-chip:disabled {
+  background: #232036; color: #7e8a80; border-color: #161426; box-shadow: none; opacity: 0.56; cursor: not-allowed;
+}
+:root[data-theme='pixel'] .settings-ui .features .peripheral-settings-row {
+  border-bottom: 2px solid #0f0d1a;
+}
+:root[data-theme='pixel'] .settings-ui .features .peripheral-pill {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #141915; color: #cbd5e1;
+  box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45); font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .settings-ui .features .peripheral-pill strong { color: #facc15; }
 :root[data-theme='pixel'] .file-shelf .shelf-list li {
   border-radius: 0; border: 2px solid #0f0d1a; background: #252e27; box-shadow: 2px 2px 0 #0f0d1a;
 }

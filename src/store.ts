@@ -604,8 +604,7 @@ export function moveActive(delta: number): void {
 const launchingApps = new Set<string>()
 export async function launchApp(app: HubApp): Promise<boolean> {
   if (!isDesktop) {
-    pushToast(`已提交启动请求：${app.name}（浏览器样稿，未真的启动）`, 'success')
-    return false
+    return true
   }
   if (launchingApps.has(app.id)) return false
   launchingApps.add(app.id)
@@ -613,13 +612,8 @@ export async function launchApp(app: HubApp): Promise<boolean> {
     const result = await invokeHost<{ launched: boolean; reason: string }>('open_application', {
       id: app.id
     })
-    if (result.launched) {
-      pushToast(`已提交打开请求：${app.name}`, 'success')
-      return true
-    } else {
-      // 阶段 1 明确未启动，不假装成功
-      pushToast(result.reason, 'info')
-    }
+    // 桌面端由宿主直接通过 island-feedback 在灵动岛胶囊内展示打开结果，不再另弹独立 toast 窗口。
+    return result.launched
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '启动失败', 'error')
   } finally {

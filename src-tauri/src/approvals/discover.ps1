@@ -39,5 +39,28 @@ function Find-Dsh {
     }
 }
 
+function Find-Orca {
+    $candidates = @()
+    $cli = Get-Command orca.exe -CommandType Application | Select-Object -First 1
+    if ($cli) { $candidates += $cli.Path }
+    foreach ($proc in @(Get-Process -Name 'Orca' -ErrorAction SilentlyContinue)) {
+        if ($proc.Path) {
+            $candidates += Join-Path (Split-Path -Parent $proc.Path) 'resources\bin\orca.exe'
+        }
+    }
+    if ($env:LOCALAPPDATA) {
+        $candidates += Join-Path $env:LOCALAPPDATA 'Programs\orca\resources\bin\orca.exe'
+    }
+    if ($env:ProgramFiles) {
+        $candidates += Join-Path $env:ProgramFiles 'Orca\resources\bin\orca.exe'
+    }
+    foreach ($path in $candidates) {
+        if ($path -and [IO.Path]::GetFileName($path) -ieq 'orca.exe' -and [IO.File]::Exists($path)) {
+            return [IO.Path]::GetFullPath($path)
+        }
+    }
+}
+
 $dsh = Find-Dsh
-[Console]::WriteLine((@{ codex=$codex; dsh=$dsh } | ConvertTo-Json -Compress))
+$orca = Find-Orca
+[Console]::WriteLine((@{ codex=$codex; dsh=$dsh; orca=$orca } | ConvertTo-Json -Compress))

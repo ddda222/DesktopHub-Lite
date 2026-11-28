@@ -21,10 +21,10 @@ static INSTALL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Agent { Codex, Dsh }
+pub(crate) enum Agent { Codex, Dsh, Orca }
 
 #[derive(Deserialize)]
-struct Discovery { codex: bool, dsh: Option<PathBuf> }
+struct Discovery { codex: bool, dsh: Option<PathBuf>, orca: Option<PathBuf> }
 
 #[derive(Serialize)]
 pub(crate) struct Row {
@@ -96,12 +96,20 @@ fn root() -> Result<PathBuf, String> {
 
 impl Agent {
     fn connection_file(self) -> &'static str {
-        match self { Self::Codex => "codex.connected", Self::Dsh => "dsh.connected" }
+        match self {
+            Self::Codex => "codex.connected",
+            Self::Dsh => "dsh.connected",
+            Self::Orca => "orca.connected",
+        }
     }
 }
 
 pub(super) fn remember_connection(app: &AppHandle, source: super::Source) {
-    let agent = match source { super::Source::Codex => Agent::Codex, super::Source::DSH => Agent::Dsh };
+    let agent = match source {
+        super::Source::Codex => Agent::Codex,
+        super::Source::DSH => Agent::Dsh,
+        super::Source::Orca => Agent::Orca,
+    };
     if root().and_then(|dir| write_changed(&dir.join(agent.connection_file()), b"1")).is_err() {
         crate::log_warn!("无法保存智能体的成功连接记录");
     }
@@ -113,9 +121,15 @@ pub(crate) fn connected_approval_agents(window: WebviewWindow) -> Result<Vec<Age
     if window.label() != SETTINGS { return Err("请在设置中查看智能体连接".into()); }
     let dir = root()?;
     let mut connected = Vec::new();
-    for agent in [Agent::Codex, Agent::Dsh] {
+    for agent in [Agent::Codex, Agent::Dsh, Agent::Orca] {
         if read(&dir.join(agent.connection_file()))?.as_deref() == Some(b"1") {
             connected.push(agent);
+        } else if matches!(agent, Agent::Orca) {
+            if let Ok(Some(cfg)) = super::orca::load_config() {
+                if cfg.enabled {
+                    connected.push(agent);
+                }
+            }
         } else if matches!(agent, Agent::Dsh) {
             // 旧版只保存最后一次 DSH 结果。从已有的回执接续记录，不启动应用检测。
             let legacy = profile("DSH_HOME", ".dsh").and_then(|dir|
@@ -262,10 +276,42 @@ fn install_dsh(dsh: &Path, exe: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn orca_state(orca_cli: &Path) -> Result<(&'static str, &'static str), String> {
+    let Some(cfg) = super::orca::load_config()? else {
+        return Ok(("available", "已识别，开启后将在灵动岛提醒 Orca 等待处理、等待回复与后台任务完成，并支持一键切回"));
+    };
+    if !cfg.enabled {
+        return Ok(("available", "已停用监听，可随时重新开启 Orca 灵动岛提醒"));
+    }
+    if !points_here(Some(&cfg.cli_path), orca_cli) {
+        return Ok(("repair", "已启用监听，需要更新本机 Orca 路径"));
+    }
+    Ok(("registered", "已启用监听：Orca 进入等待处理、等待回复或后台任务完成时会在灵动岛提醒，并支持一键切回。"))
+}
+
+fn install_orca(orca_cli: &Path) -> Result<(), String> {
+    super::orca::save_config(&super::orca::OrcaConfig {
+        enabled: true,
+        cli_path: orca_cli.to_string_lossy().to_string(),
+    })
+}
+
+fn disable_orca() -> Result<(), String> {
+    let cli_path = super::orca::load_config()?.map(|c| c.cli_path).unwrap_or_default();
+    super::orca::save_config(&super::orca::OrcaConfig {
+        enabled: false,
+        cli_path,
+    })?;
+    let dir = root()?;
+    let _ = fs::remove_file(dir.join(Agent::Orca.connection_file()));
+    Ok(())
+}
+
 fn state(agent: Agent, found: &Discovery, exe: &Path) -> Row {
     let result = match agent {
         Agent::Codex if found.codex => codex_state(exe),
         Agent::Dsh if found.dsh.is_some() => dsh_state(found.dsh.as_deref().unwrap(), exe),
+        Agent::Orca if found.orca.is_some() => orca_state(found.orca.as_deref().unwrap()),
         _ => Ok(("missing", "未检测到此应用")),
     };
     let (state, detail) = match result {
@@ -281,7 +327,7 @@ pub(crate) async fn list_approval_agents(window: WebviewWindow) -> Result<Vec<Ro
     tauri::async_runtime::spawn_blocking(|| {
         let exe = env::current_exe().map_err(|_| "无法定位当前便携版")?;
         let found = discover()?;
-        Ok([Agent::Codex, Agent::Dsh].into_iter().map(|agent| state(agent, &found, &exe)).collect())
+        Ok([Agent::Codex, Agent::Dsh, Agent::Orca].into_iter().map(|agent| state(agent, &found, &exe)).collect())
     }).await.map_err(|_| "本机智能体检测中断")?
 }
 
@@ -289,12 +335,18 @@ pub(crate) async fn list_approval_agents(window: WebviewWindow) -> Result<Vec<Ro
 pub(crate) async fn connect_approval_agent(window: WebviewWindow, agent: Agent) -> Result<Row, String> {
     if window.label() != SETTINGS { return Err("请在设置中添加审批钩子".into()); }
     let _guard = INSTALL.lock().await;
+    let app = window.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let exe = env::current_exe().map_err(|_| "无法定位当前便携版")?;
         let found = discover()?;
         match agent {
             Agent::Codex if found.codex => install_codex(&exe)?,
             Agent::Dsh => install_dsh(found.dsh.as_deref().ok_or("未检测到 DSH 桌面版")?, &exe)?,
+            Agent::Orca => {
+                let cli = found.orca.as_deref().ok_or("未检测到 Orca")?;
+                install_orca(cli)?;
+                remember_connection(&app, super::Source::Orca);
+            }
             _ => return Err("未检测到 Codex".into()),
         }
         let row = state(agent, &found, &exe);
@@ -303,4 +355,19 @@ pub(crate) async fn connect_approval_agent(window: WebviewWindow, agent: Agent) 
         }
         Ok(row)
     }).await.map_err(|_| "审批钩子接入中断")?
+}
+
+#[tauri::command]
+pub(crate) async fn disconnect_approval_agent(window: WebviewWindow, agent: Agent) -> Result<Row, String> {
+    if window.label() != SETTINGS { return Err("请在设置中管理智能体连接".into()); }
+    if !matches!(agent, Agent::Orca) {
+        return Err("目前仅支持在此停用 Orca 状态监听".into());
+    }
+    let _guard = INSTALL.lock().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let exe = env::current_exe().map_err(|_| "无法定位当前便携版")?;
+        disable_orca()?;
+        let found = discover()?;
+        Ok(state(agent, &found, &exe))
+    }).await.map_err(|_| "停用智能体连接中断")?
 }

@@ -3,18 +3,34 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { vGsapPress, vGsapPulse } from '@/lib/gsapMotion'
 import { activeMotionPreset } from '@/lib/motionPresets'
 import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
-import type { AudioSession as Session, AudioSnapshot as Snapshot } from '@/lib/desktop/types'
+import type { AudioDevice, AudioSession as Session, AudioSnapshot as Snapshot } from '@/lib/desktop/types'
 import { state } from '@/store'
-import { mockProfiles, mockSessions } from './mock'
+import { mockDevices, mockProfiles, mockSessions } from './mock'
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 interface Setting { appKey: string; deviceId: string; volume: number; muted: boolean }
 interface Profile { name: string; settings: Setting[] }
+const devices = ref<AudioDevice[]>(isDesktop ? [] : mockDevices.map(d => ({ ...d })))
 const sessions = ref<Session[]>(isDesktop ? [] : mockSessions)
+const switchingDeviceId = ref('')
+const visibleDevices = computed(() => {
+  const hidden = state.ui.mixerVisibility.devices
+  // 隐藏设备不出现在切换栏，但当前系统默认设备始终保留以免丢失出口状态。
+  return devices.value.filter(dev => dev.isDefault || !Object.hasOwn(hidden, dev.id))
+})
 const visibleSessions = computed(() => {
   const hidden = state.ui.mixerVisibility
   return sessions.value.filter(row => !Object.hasOwn(hidden.devices, row.deviceId) &&
     (row.appKey === null || !Object.hasOwn(hidden.apps, row.appKey)))
 })
+/** 提取更紧凑易读的设备简称（如 "扬声器 (Realtek...)" -> "Realtek..."）。 */
+function compactDeviceLabel(name: string): string {
+  const match = /\(([^()]+)\)/.exec(name)
+  if (match && match[1]) {
+    const inner = match[1].trim()
+    if (inner.length >= 2) return inner.length > 20 ? `${inner.slice(0, 19)}…` : inner
+  }
+  return name.length > 20 ? `${name.slice(0, 19)}…` : name
+}
 const profiles = ref<Profile[]>(isDesktop ? [] : mockProfiles)
 const profileName = ref('')
 const notice = ref('')
@@ -41,8 +57,48 @@ function displayedVolume(session: Session): number { return Math.round(Math.max(
 async function refresh(): Promise<void> {
   if (!isDesktop || busy.value || Object.keys(drafts.value).length || !props.active) return
   const ticket = ++sequence
-  try { const snapshot = await invokeHost<Snapshot>('list_audio_sessions'); if (!disposed && ticket === sequence) { sessions.value = snapshot.sessions; warnings.value = snapshot.warnings; readError.value = '' } }
-  catch (e) { if (!disposed && ticket === sequence) { readError.value = String(e); sessions.value = [] } }
+  try {
+    const snapshot = await invokeHost<Snapshot>('list_audio_sessions')
+    if (!disposed && ticket === sequence) {
+      devices.value = snapshot.devices
+      sessions.value = snapshot.sessions
+      warnings.value = snapshot.warnings
+      readError.value = ''
+    }
+  } catch (e) {
+    if (!disposed && ticket === sequence) {
+      readError.value = String(e)
+      sessions.value = []
+    }
+  }
+}
+async function switchOutputDevice(device: AudioDevice): Promise<void> {
+  if (busy.value || switchingDeviceId.value || device.isDefault) return
+  switchingDeviceId.value = device.id
+  busy.value = true
+  exclusive.value = true
+  sequence++
+  error.value = ''
+  try {
+    if (isDesktop) {
+      const snapshot = await invokeHost<Snapshot>('set_default_audio_device', { deviceId: device.id })
+      if (!disposed) {
+        devices.value = snapshot.devices
+        sessions.value = snapshot.sessions
+        warnings.value = snapshot.warnings
+        notice.value = `已切换默认输出：${device.name}`
+      }
+    } else {
+      devices.value = devices.value.map(d => ({ ...d, isDefault: d.id === device.id }))
+      notice.value = `已在网页中模拟切换输出：${device.name}`
+    }
+  } catch (e) {
+    if (!disposed) error.value = String(e)
+  } finally {
+    switchingDeviceId.value = ''
+    busy.value = false
+    exclusive.value = false
+  }
 }
 async function update(session: Session, volume?: number, muted?: boolean): Promise<void> {
   if (exclusive.value || disposed) return
@@ -132,6 +188,23 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
       </div>
       <button v-if="isDesktop" class="refresh-btn" :disabled="busy" @click="refresh">刷新会话</button>
     </div>
+    <div v-if="visibleDevices.length" class="output-devices" role="group" aria-label="默认音频输出设备">
+      <button
+        v-for="dev in visibleDevices"
+        :key="dev.id"
+        v-gsap-press="busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap"
+        type="button"
+        class="device-chip"
+        :class="{ active: dev.isDefault, switching: switchingDeviceId === dev.id }"
+        :disabled="busy"
+        :aria-pressed="!!dev.isDefault"
+        :title="dev.isDefault ? `当前默认输出：${dev.name}` : `点击切换默认输出为：${dev.name}`"
+        @click="switchOutputDevice(dev)"
+      >
+        <i class="dev-dot" aria-hidden="true" />
+        <span>{{ compactDeviceLabel(dev.name) }}</span>
+      </button>
+    </div>
     <div v-if="profiles.length" class="sound-profiles" aria-label="声音配置"><button v-for="(profile, i) in profiles" :key="profile.name" v-gsap-press="busy || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" :disabled="busy" :aria-pressed="activeProfile === profile.name" @click="apply(i)">{{ profile.name }}</button></div>
     <p v-if="!sessions.length" class="mixer-notice">{{ readError ? '暂时无法取得会话，请重试。' : '暂时没有音频会话。先让应用播放声音，再刷新。' }}</p>
     <p v-else-if="!visibleSessions.length" class="mixer-notice">当前声音条目均已隐藏，可在「设置 → 调音台」中重新显示。</p>
@@ -167,6 +240,14 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
 .refresh-btn { padding:3px 8px; border:1px solid var(--line); border-radius:6px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out),transform 70ms var(--ease-out); }
 .refresh-btn:hover:not(:disabled) { background:var(--hover); border-color:var(--line-strong); color:var(--text); }
 .simulation { font-size:10px; font-weight:500; padding:1px 5px; border:1px solid var(--line-strong); border-radius:4px; color:var(--text-3); }
+.output-devices { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
+.device-chip { display:inline-flex; align-items:center; gap:5px; max-width:100%; padding:4px 9px; border:1px solid var(--line); border-radius:7px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out); }
+.device-chip span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.device-chip .dev-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--text-3); opacity:.5; }
+.device-chip:hover:not(.active):not(:disabled) { background:var(--hover); border-color:var(--line-strong); color:var(--text); }
+.device-chip.active { background:var(--accent-weak); color:var(--accent); border-color:var(--accent); font-weight:600; }
+.device-chip.active .dev-dot { background:var(--accent); box-shadow:0 0 6px var(--accent); opacity:1; }
+.device-chip.switching { opacity:.65; cursor:wait; }
 .sound-profiles { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
 .sound-profiles button { padding:4px 10px; border:1px solid var(--line); border-radius:7px; background:var(--surface-2); color:var(--text-2); font-size:11px; transition:background 90ms var(--ease-out),border-color 90ms var(--ease-out),color 90ms var(--ease-out),transform 70ms var(--ease-out); }
 .sound-profiles button:hover:not([aria-pressed=true]):not(:disabled) { background:var(--hover); border-color:var(--line-strong); color:var(--text); }

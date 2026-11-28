@@ -29,6 +29,7 @@ mod logging;
 mod mail;
 mod ocr;
 mod pack_scripts;
+mod peripherals;
 mod snippets;
 mod state;
 mod storage;
@@ -588,9 +589,20 @@ fn open_application(app: AppHandle, id: String) -> Result<OpenResult, String> {
                 if let Some(existing) = next.apps.iter_mut().find(|a| a.id == item.id) { existing.broken = Some(true); }
             }) { drop(config); broadcast_apps(&app, &snapshot); }
         }
+        let reason = format!("目标不存在，无法启动 {}（{}）", item.name, item.target);
+        // 直接在灵动岛胶囊内反馈，不再弹出额外独立提示窗。
+        let _ = app.emit_to(
+            windows::BAR,
+            "island-feedback",
+            serde_json::json!({
+                "kind": "app-error",
+                "label": format!("目标不存在：{}", item.name),
+                "tooltip": reason,
+            }),
+        );
         return Ok(OpenResult {
             launched: false,
-            reason: format!("目标不存在，无法启动 {}（{}）", item.name, item.target),
+            reason,
         });
     }
 
@@ -605,15 +617,38 @@ fn open_application(app: AppHandle, id: String) -> Result<OpenResult, String> {
                     }) { drop(config); broadcast_apps(&app, &snapshot); }
                 }
             }
+            let reason = format!("已交给系统启动 {}（{}）", item.name, item.target);
+            // 直接在灵动岛胶囊内展示已打开反馈，避免另外弹出独立窗口。
+            let _ = app.emit_to(
+                windows::BAR,
+                "island-feedback",
+                serde_json::json!({
+                    "kind": "app-launched",
+                    "label": format!("已打开 {}", item.name),
+                    "tooltip": reason,
+                }),
+            );
             Ok(OpenResult {
                 launched: true,
-                reason: format!("已交给系统启动 {}（{}）", item.name, item.target),
+                reason,
             })
         }
-        Err(error) => Ok(OpenResult {
-            launched: false,
-            reason: format!("启动 {} 失败：{error}", item.name),
-        }),
+        Err(error) => {
+            let reason = format!("启动 {} 失败：{error}", item.name);
+            let _ = app.emit_to(
+                windows::BAR,
+                "island-feedback",
+                serde_json::json!({
+                    "kind": "app-error",
+                    "label": format!("无法打开 {}", item.name),
+                    "tooltip": reason,
+                }),
+            );
+            Ok(OpenResult {
+                launched: false,
+                reason,
+            })
+        }
     }
 }
 
@@ -1244,6 +1279,8 @@ pub fn run() {
                 auto_migrated_files,
             ));
             app.manage(file_shelf::ShelfHistory::default());
+            app.manage(peripherals::PeripheralBatteryState::default());
+            app.manage(approvals::orca::OrcaStatusState::default());
             app.manage(AppState {
                 island_reading_explanation: AtomicBool::new(false),
                 store,
@@ -1296,6 +1333,7 @@ pub fn run() {
             wechat::start(handle.clone());
             desktop_features::start_fullscreen_watch(handle.clone());
             telemetry::start(handle.clone());
+            peripherals::start(handle.clone());
             approvals::start(handle.clone());
             mail::start(handle.clone());
             if app.state::<AppState>().ui.snapshot().island_appearance.auto_check_updates {
@@ -1435,6 +1473,7 @@ pub fn run() {
             data_location::delete_data_backup,
             data_location::restart_for_data_change,
             audio::list_audio_sessions,
+            audio::set_default_audio_device,
             audio::set_mixer_item_visible,
             audio::update_audio_session,
             audio::list_audio_profiles,
@@ -1472,6 +1511,9 @@ pub fn run() {
             approvals::setup::list_approval_agents,
             approvals::setup::connected_approval_agents,
             approvals::setup::connect_approval_agent,
+            approvals::setup::disconnect_approval_agent,
+            approvals::orca::focus_orca_window,
+            approvals::orca::orca_status,
             mail::mail_accounts,
             mail::open_mail_setup_page,
             mail::bind_mail_account,
@@ -1495,6 +1537,8 @@ pub fn run() {
             desktop_features::check_deskhub_updates,
             desktop_features::last_deskhub_update,
             desktop_features::open_deskhub_release_page,
+            peripherals::peripheral_batteries,
+            peripherals::refresh_peripheral_batteries,
             toggle_panel,
             close_panel,
             open_settings,

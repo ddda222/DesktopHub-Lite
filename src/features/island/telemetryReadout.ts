@@ -9,6 +9,7 @@ export interface TelemetryPrefs {
   telemetryMode: TelemetryMode
   telemetryNet: boolean
   telemetryCpu: boolean
+  telemetryGpu: boolean
   telemetryMemory: boolean
 }
 
@@ -17,15 +18,26 @@ export interface TelemetrySnapshot {
   downBps: number | null
   upBps: number | null
   cpuPercent: number | null
+  gpuPercent: number | null
+  gpuTempC?: number | null
+  gpuVramUsedMb?: number | null
+  gpuVramTotalMb?: number | null
+  gpuVramPercent?: number | null
   memoryPercent: number | null
 }
+
+export type TelemetryAlertLevel = 'normal' | 'warm' | 'hot'
 
 export interface TelemetrySegment {
   prefix: string
   value: string
   accent: boolean
-  metric?: 'net' | 'cpu' | 'memory'
+  metric?: 'net' | 'cpu' | 'gpu' | 'memory'
   percent?: number | null
+  /** 综合负载与温度后的分级告警（用于微读数变色提示）。 */
+  alertLevel?: TelemetryAlertLevel
+  /** 显卡高温预警标记（温度 >= 78°C）。 */
+  thermalAlert?: boolean
 }
 
 export function normalizeTelemetryStyle(style: unknown): TelemetryStyle {
@@ -45,6 +57,12 @@ export const SMART_NET_ENTER_BPS = 64 * 1024
 export const SMART_NET_SUSTAIN_BPS = 32 * 1024
 export const SMART_CPU_ENTER_PCT = 35
 export const SMART_CPU_SUSTAIN_PCT = 25
+export const SMART_GPU_ENTER_PCT = 40
+export const SMART_GPU_SUSTAIN_PCT = 25
+export const SMART_GPU_TEMP_ENTER_C = 80
+export const SMART_GPU_TEMP_SUSTAIN_C = 74
+export const GPU_TEMP_WARN_C = 78
+export const GPU_TEMP_HOT_C = 85
 export const SMART_MEM_ENTER_PCT = 80
 export const SMART_MEM_SUSTAIN_PCT = 75
 export const SMART_HOLD_TICKS = 3
@@ -55,12 +73,18 @@ export function normalizeTelemetryPrefs(raw?: Partial<TelemetryPrefs> | null): T
     telemetryMode: mode === 'off' || mode === 'smart' || mode === 'always' ? mode : 'smart',
     telemetryNet: typeof raw?.telemetryNet === 'boolean' ? raw.telemetryNet : true,
     telemetryCpu: typeof raw?.telemetryCpu === 'boolean' ? raw.telemetryCpu : true,
+    telemetryGpu: typeof raw?.telemetryGpu === 'boolean' ? raw.telemetryGpu : true,
     telemetryMemory: typeof raw?.telemetryMemory === 'boolean' ? raw.telemetryMemory : true
   }
 }
 
 export function countTelemetryMetrics(prefs: TelemetryPrefs): number {
-  return Number(prefs.telemetryNet) + Number(prefs.telemetryCpu) + Number(prefs.telemetryMemory)
+  return (
+    Number(Boolean(prefs.telemetryNet)) +
+    Number(Boolean(prefs.telemetryCpu)) +
+    Number(Boolean(prefs.telemetryGpu)) +
+    Number(Boolean(prefs.telemetryMemory))
+  )
 }
 
 /**
@@ -106,11 +130,14 @@ export function stepSmartTelemetry(
   const down = sample.downBps ?? 0
   const up = sample.upBps ?? 0
   const cpu = sample.cpuPercent ?? -1
+  const gpu = sample.gpuPercent ?? -1
+  const gpuTemp = sample.gpuTempC ?? -1
   const mem = sample.memoryPercent ?? -1
 
   const enter =
     (netReady && (down >= SMART_NET_ENTER_BPS || up >= SMART_NET_ENTER_BPS)) ||
     (prefs.telemetryCpu && cpu >= SMART_CPU_ENTER_PCT) ||
+    (prefs.telemetryGpu && (gpu >= SMART_GPU_ENTER_PCT || gpuTemp >= SMART_GPU_TEMP_ENTER_C)) ||
     (prefs.telemetryMemory && mem >= SMART_MEM_ENTER_PCT)
 
   if (enter) {
@@ -121,6 +148,7 @@ export function stepSmartTelemetry(
     const sustain =
       (netReady && (down >= SMART_NET_SUSTAIN_BPS || up >= SMART_NET_SUSTAIN_BPS)) ||
       (prefs.telemetryCpu && cpu >= SMART_CPU_SUSTAIN_PCT) ||
+      (prefs.telemetryGpu && (gpu >= SMART_GPU_SUSTAIN_PCT || gpuTemp >= SMART_GPU_TEMP_SUSTAIN_C)) ||
       (prefs.telemetryMemory && mem >= SMART_MEM_SUSTAIN_PCT)
     if (sustain) {
       return { active: true, nextHold: holdRemaining }
@@ -172,6 +200,41 @@ export function buildTelemetryReadout(
     segments.push({ prefix: 'CPU', value: val, accent: false, metric: 'cpu', percent: pct })
     ariaParts.push(`处理器 ${val}`)
     tipParts.push(`处理器 ${val}`)
+  }
+
+  if (prefs.telemetryGpu) {
+    const pct = sample.gpuPercent !== null ? Math.round(sample.gpuPercent) : null
+    const val = pct !== null ? `${pct}%` : '--%'
+    const temp = typeof sample.gpuTempC === 'number' && Number.isFinite(sample.gpuTempC) ? Math.round(sample.gpuTempC) : null
+    const vramUsed = typeof sample.gpuVramUsedMb === 'number' && Number.isFinite(sample.gpuVramUsedMb) ? sample.gpuVramUsedMb : null
+    const vramTotal = typeof sample.gpuVramTotalMb === 'number' && Number.isFinite(sample.gpuVramTotalMb) && sample.gpuVramTotalMb > 0 ? sample.gpuVramTotalMb : null
+    const vramPct = typeof sample.gpuVramPercent === 'number' && Number.isFinite(sample.gpuVramPercent) ? Math.round(sample.gpuVramPercent) : null
+
+    const loadLevel: TelemetryAlertLevel = pct === null ? 'normal' : pct >= 85 ? 'hot' : pct >= 65 ? 'warm' : 'normal'
+    const tempLevel: TelemetryAlertLevel = temp === null ? 'normal' : temp >= GPU_TEMP_HOT_C ? 'hot' : temp >= GPU_TEMP_WARN_C ? 'warm' : 'normal'
+    const rank = (lvl: TelemetryAlertLevel) => (lvl === 'hot' ? 2 : lvl === 'warm' ? 1 : 0)
+    const alertLevel = rank(tempLevel) >= rank(loadLevel) ? tempLevel : loadLevel
+    const thermalAlert = temp !== null && temp >= GPU_TEMP_WARN_C
+
+    segments.push({
+      prefix: 'GPU',
+      value: val,
+      accent: false,
+      metric: 'gpu',
+      percent: pct,
+      alertLevel,
+      thermalAlert
+    })
+
+    const extraParts: string[] = []
+    if (temp !== null) extraParts.push(`${temp}°C${temp >= GPU_TEMP_HOT_C ? ' 高温预警' : temp >= GPU_TEMP_WARN_C ? ' 偏高' : ''}`)
+    if (vramUsed !== null && vramTotal !== null) {
+      const usedGb = (vramUsed / 1024).toFixed(1)
+      const totalGb = (vramTotal / 1024).toFixed(1)
+      extraParts.push(`显存 ${usedGb}/${totalGb} GB${vramPct !== null ? ` (${vramPct}%)` : ''}`)
+    }
+    ariaParts.push(extraParts.length ? `显卡 ${val}，${extraParts.join('，')}` : `显卡 ${val}`)
+    tipParts.push(extraParts.length ? `显卡 ${val}（${extraParts.join(' · ')}）` : `显卡 ${val}`)
   }
 
   if (prefs.telemetryMemory) {
