@@ -386,7 +386,7 @@ fn set_bar_size(app: AppHandle, width: f64, height: f64, regions: Option<Vec<win
         return Err("灵动岛尺寸无效".into());
     }
     let regions = regions.unwrap_or_default();
-    // 贴顶一体刘海与贴顶分层模式最多上报 4 个合并区域（顶肩带 + 顶栏体 + 指针桥接 + 悬浮卡片）。
+    // 贴顶一体刘海与贴顶分层模式最多允许上报 6 个合并区域（含顶肩带、顶栏体、贴屏侧直角带、指针桥接与悬浮卡片）。
     if regions.len() > 6 || regions.iter().any(|r| {
         ![r.x, r.y, r.width, r.height, r.radius].iter().all(|n| n.is_finite()) ||
         r.x < 0.0 || r.y < 0.0 || r.width <= 0.0 || r.height <= 0.0 ||

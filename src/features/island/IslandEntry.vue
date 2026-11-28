@@ -1820,10 +1820,20 @@ watch(() => state.ui.islandAnchor, () => {
   cancelExpandStaging()
   clearTimeout(geometryTimer)
   geometryTimer = undefined
+  shellTween?.kill()
+  shellTween = null
+  splitCardTween?.kill()
+  splitCardTween = null
   geometryMoving.value = false
   geometryShrinking = false
-  if (isDesktop) void nextTick(queueGeometry)
-  else windowDrag.reset()
+  applyShellImmediate()
+  if (isDesktop) {
+    viewportSize.value = computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
+    void nextTick(queueGeometry)
+  } else {
+    viewportSize.value = { ...bounds.value }
+    windowDrag.reset()
+  }
 }, { flush: 'post' })
 watch(() => shelf.busy, busy => {
   if (!busy) {
@@ -2002,9 +2012,10 @@ function pushSafeRegion(
 }
 
 /**
- * 为贴顶形态（notch / split 母舰）生成双段合并 HRGN：
+ * 为贴顶形态（notch / split 母舰）生成 2/3 段合并 HRGN：
  * 1. 顶部肩带矩形（radius = 0）：完整罩住左右外扩融合肩部，杜绝圆角裁切耳朵；
- * 2. 主体圆角区域：覆盖肩部内侧至底边，使耳朵下方透明区完整穿透给桌面。
+ * 2. 主体圆角区域：覆盖肩部内侧至底边，使耳朵下方透明区完整穿透给桌面；
+ * 3. 靠左/靠右贴屏停靠时追加贴屏侧无圆角垂直带（radius = 0），补齐贴屏侧 90° 底角。
  */
 function appendNotchRegions(
   regions: BarRegion[],
