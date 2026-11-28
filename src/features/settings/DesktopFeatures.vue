@@ -9,6 +9,13 @@ import { normalizeTelemetryStyle, type TelemetryStyle } from '@/features/island/
 import { Draggable, gsap } from '@/lib/gsapMotion'
 import { activeMotionPreset, INSTANT_TRANSITION } from '@/lib/motionPresets'
 import {
+  ISLAND_SHAPE_DESCRIPTIONS,
+  ISLAND_SHAPE_LABELS,
+  ISLAND_SHAPES,
+  normalizeIslandShape,
+  type IslandShape
+} from '@/lib/islandShapes'
+import {
   defaultIslandAppearance,
   invokeHost,
   isDesktop,
@@ -16,7 +23,7 @@ import {
   type PeripheralBattery,
   type PeripheralBatterySnapshot
 } from '@/lib/desktop/desktop'
-import { pushToast, state } from '@/store'
+import { pushToast, setIslandShape, state } from '@/store'
 
 const appearance = ref({ ...defaultIslandAppearance(), ...state.ui.islandAppearance })
 const anchor = ref(state.ui.islandAnchor)
@@ -103,6 +110,14 @@ const telemetryStyleOptions: { value: TelemetryStyle; label: string }[] = [
   { value: 'pulse', label: '律动格栅' },
   { value: 'text', label: '跳字精简' }
 ]
+const islandShapeOptions: { value: IslandShape; label: string }[] = ISLAND_SHAPES.map(value => ({
+  value,
+  label: ISLAND_SHAPE_LABELS[value]
+}))
+const currentIslandShape = computed<IslandShape>(() => normalizeIslandShape(state.ui.islandShape))
+function onIslandShapeChange(val: string): void {
+  setIslandShape(normalizeIslandShape(val))
+}
 const validSettings = computed(() => validTiming.value && validTelemetry.value)
 
 function restore(): void {
@@ -314,6 +329,22 @@ watch(() => state.ui.settingsOpen, open => {
   </div>
   <slot />
   <section class="features" aria-label="灵动岛与系统">
+    <h4 class="sub-title">灵动岛形态 <span class="save-mode">即时生效</span></h4>
+    <div class="card">
+      <div class="set-row set-row-stack">
+        <span class="set-text">
+          <span class="set-label">外壳形态</span>
+          <span class="set-desc">全主题通用，切换即时同步至顶部灵动岛：{{ ISLAND_SHAPE_DESCRIPTIONS[currentIslandShape] }}</span>
+        </span>
+        <SegmentedControl
+          :model-value="currentIslandShape"
+          :options="islandShapeOptions"
+          name="island-shape"
+          label="灵动岛形态"
+          @update:model-value="onIslandShapeChange"
+        />
+      </div>
+    </div>
     <h4 class="sub-title">灵动岛 <span class="save-mode">手动应用</span></h4>
     <div class="field-grid">
       <div class="field field-wide">

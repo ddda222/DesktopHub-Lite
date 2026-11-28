@@ -9,6 +9,7 @@
 import { computed, reactive, watch } from 'vue'
 import { host, newRequestId } from '@/lib/desktop/host'
 import { isDarkThemeMode, normalizeThemeMode } from '@/lib/themes'
+import { normalizeIslandShape, type IslandShape } from '@/lib/islandShapes'
 import { isMotionMode, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import {
   defaultIslandAppearance,
@@ -26,6 +27,7 @@ import {
   pickApplicationTarget,
   readAppIcons,
   requestCategory,
+  requestIslandShape,
   requestMotion,
   requestPanel,
   requestSettings,
@@ -107,6 +109,7 @@ export const state = reactive({
   ui: {
     islandExpanded: false,
     islandAnchor: 'center',
+    islandShape: 'floating' as IslandShape,
     islandPage: 'applications' as UiState['islandPage'],
     islandHoverMs: 320,
     islandLeaveMs: 450,
@@ -337,17 +340,28 @@ let pendingThemeOps = 0
 let latestThemeReq = 0
 let pendingMotionOps = 0
 let latestMotionReq = 0
+let pendingShapeOps = 0
+let latestShapeReq = 0
 let pendingCategoryOps = 0
 let latestCategoryReq = 0
 
 function applyUiState(ui: UiState): void {
   const pageBusy = typeof pendingPageOps !== 'undefined' && pendingPageOps > 0
   const motionBusy = typeof pendingMotionOps !== 'undefined' && pendingMotionOps > 0
+  const shapeBusy = typeof pendingShapeOps !== 'undefined' && pendingShapeOps > 0
   const categoryBusy = typeof pendingCategoryOps !== 'undefined' && pendingCategoryOps > 0
   const themeBusy = typeof pendingThemeOps !== 'undefined' && pendingThemeOps > 0
 
   state.ui.islandExpanded = ui.islandExpanded
   state.ui.islandAnchor = ui.islandAnchor
+  if (!shapeBusy) {
+    const rawShape = ui.islandShape
+    state.ui.islandShape = (
+      rawShape === 'notch' || rawShape === 'split' || rawShape === 'floating'
+        ? rawShape
+        : 'floating'
+    ) as IslandShape
+  }
   if (!pageBusy) {
     state.ui.islandPage = ['applications', 'clipboard', 'translation', 'files', 'audio', 'pack'].includes(ui.islandPage) ? ui.islandPage : 'applications'
   }
@@ -1087,6 +1101,24 @@ export function setMotion(motion: MotionMode): void {
     })
 }
 
+/** 切换灵动岛全局形态（悬浮胶囊 / 贴顶刘海 / 贴顶分层），乐观更新并在失败时回滚。 */
+export function setIslandShape(shape: IslandShape): void {
+  const normalized = normalizeIslandShape(shape)
+  const previous = state.ui.islandShape
+  state.ui.islandShape = normalized
+  if (!isDesktop) return
+  const reqId = ++latestShapeReq
+  pendingShapeOps++
+  void requestIslandShape(normalized)
+    .catch(error => {
+      if (reqId === latestShapeReq) state.ui.islandShape = previous
+      pushToast(`保存灵动岛形态失败：${String(error)}`, 'error')
+    })
+    .finally(() => {
+      pendingShapeOps--
+    })
+}
+
 /* ---------- 主题落地 ---------- */
 
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
@@ -1106,12 +1138,17 @@ function applyMotion(): void {
   document.documentElement.dataset.motion = normalizeMotionMode(state.ui.islandAppearance.motion)
 }
 
+function applyIslandShape(): void {
+  document.documentElement.dataset.islandShape = normalizeIslandShape(state.ui.islandShape)
+}
+
 function applyReducedMotion(): void {
   document.documentElement.dataset.reducedMotion = state.ui.islandReducedMotion ? '1' : '0'
 }
 
 watch(() => state.settings.theme, applyTheme, { immediate: true })
 watch(() => state.ui.islandAppearance.motion, applyMotion, { immediate: true })
+watch(() => state.ui.islandShape, applyIslandShape, { immediate: true })
 watch(() => state.ui.islandReducedMotion, applyReducedMotion, { immediate: true })
 prefersDark.addEventListener('change', () => {
   if (state.settings.theme === 'system') applyTheme()

@@ -8,6 +8,13 @@ import { animateFlipFromState, animateScrambleText, captureFlipSnapshot, Flip, g
 import Icon from '@/components/Icon.vue'
 import GlassLight from '@/components/GlassLight.vue'
 import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
+import {
+  buildNotchPath,
+  computeNotchEarMetrics,
+  normalizeNotchAnchor,
+  type NotchAnchor
+} from './notchPath'
+import { normalizeIslandShape, type IslandShape } from '@/lib/islandShapes'
 import ApprovalPrompt from './ApprovalPrompt.vue'
 import OcrResultPanel from '@/features/ocr/OcrResultPanel.vue'
 import MailNotices from '@/features/mail/MailNotices.vue'
@@ -104,10 +111,24 @@ const windowDrag = useWindowDrag(viewport, {
   onError: error => pushToast(`无法拖动窗口：${String(error)}`, 'error')
 })
 const panel = ref<HTMLElement | null>(null)
+const topShellEl = ref<HTMLElement | null>(null)
+const splitBridgeEl = ref<HTMLElement | null>(null)
+const cardShellEl = ref<HTMLElement | null>(null)
+const attentionEl = ref<HTMLElement | null>(null)
 const capsuleTextEl = ref<HTMLElement | null>(null)
 const capsuleStatusLabelEl = ref<HTMLElement | null>(null)
 const quickCodeTextEl = ref<HTMLElement | null>(null)
 const appGridEl = ref<HTMLElement | null>(null)
+const islandShape = computed<IslandShape>(() => normalizeIslandShape(state.ui.islandShape))
+const isFloating = computed(() => islandShape.value === 'floating')
+const isNotch = computed(() => islandShape.value === 'notch')
+const isSplit = computed(() => islandShape.value === 'split')
+const isDockedTop = computed(() => islandShape.value !== 'floating')
+const notchAnchor = computed<NotchAnchor>(() => normalizeNotchAnchor(state.ui.islandAnchor))
+/** split 模式下底部悬浮卡片与顶部母舰之间的视觉透明缝隙（px）。 */
+const SPLIT_GAP = 7
+/** split 模式闭合动画期间保持悬浮卡片可见，待滑回母舰下方后再隐藏。 */
+const splitCardVisible = ref(false)
 function resolveVariant(mode = state.settings.theme): IslandVariant {
   if (mode === 'midnight') return 'telemetry'
   if (mode === 'mecha') return 'mecha'
@@ -464,6 +485,7 @@ const modeNav = ref<HTMLElement | null>(null)
 const paneDir = ref<1 | -1>(1)
 const contentHeight = ref(330)
 const chromeHeight = ref(56)
+const attentionHeight = ref(0)
 const availableWidth = ref(window.screen.availWidth)
 const revealed = computed(() => !tucked.value)
 const page = computed(() => state.ui.islandPage)
@@ -612,17 +634,47 @@ const visibleWidth = computed(() => {
 // 内容高度已经来自实际布局；再次乘缩放比例会让小尺寸裁切、大尺寸多出留白。
 const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, mecha: 8, pixel: 9, blueprint: 8, neon: 6 }
 const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, pixel: 36, blueprint: 34, neon: 34 }
+/** split 模式下展开态母舰顶栏紧凑高度（44–48px，完美容纳导航页签与工具按钮）。 */
+const splitTopExpandedHeights: Record<IslandVariant, number> = { standard: 44, telemetry: 44, mecha: 46, pixel: 48, blueprint: 46, neon: 46 }
 const maxExpandedHeight = computed(() => Math.max(220, window.screen.availHeight - 60))
+const onClipboardList = computed(() =>
+  !approval.value && !viewingMail.value && !ocrPanelOpen.value && page.value === 'clipboard' && !state.ui.detailId
+)
+const activeAttentionHeight = computed(() =>
+  state.ui.wechatAttention && !approval.value ? attentionHeight.value : 0
+)
 const rawExpandedHeight = computed(() => {
-  const onClipboardList = !approval.value && !viewingMail.value && !ocrPanelOpen.value && page.value === 'clipboard' && !state.ui.detailId
   // pixel 主题 .island-content 自带 2px 边框 + 10px 内边距（纵向共 +24px），剪贴板固定 420px 时需计入防止底部翻页栏被裁切。
-  const clipboardExtra = onClipboardList && variant.value === 'pixel' ? 24 : 0
+  const clipboardExtra = onClipboardList.value && variant.value === 'pixel' ? 24 : 0
   return (variant.value === 'blueprint' ? 58 : 48) +
     (approval.value ? 0 : chromeHeight.value) +
-    (onClipboardList ? 420 + clipboardExtra : contentHeight.value)
+    activeAttentionHeight.value +
+    (onClipboardList.value ? 420 + clipboardExtra : contentHeight.value)
 })
+const splitTopHeight = computed(() => {
+  if (tucked.value) return lineHeights[variant.value] * scale.value
+  if (expanded.value) {
+    return approval.value ? compactHeights[variant.value] * scale.value : splitTopExpandedHeights[variant.value]
+  }
+  const quickMenuExtra = quickMenuOpen.value ? (showQuickAudioRow.value ? 76 : 42) : 0
+  return compactHeights[variant.value] * scale.value + quickMenuExtra + (showPackStrip.value ? Math.round(32 * scale.value) : 0)
+})
+const splitCardWidth = computed(() => expandedWidth.value - 24)
+const rawSplitCardHeight = computed(() => {
+  const topPad = variant.value === 'pixel' ? 10 : 12
+  // blueprint 底部需为尺寸标注线（h - 22）与收起拉条（h - 15）留足 32px，其余主题留 22px 保证拉条与剪贴板分页零重叠。
+  const bottomPad = variant.value === 'blueprint' ? 32 : 22
+  return topPad + bottomPad + activeAttentionHeight.value + (onClipboardList.value ? 420 : contentHeight.value)
+})
+const maxSplitCardHeight = computed(() =>
+  Math.max(180, maxExpandedHeight.value - splitTopExpandedHeights[variant.value] - SPLIT_GAP)
+)
+const splitCardHeight = computed(() => Math.min(rawSplitCardHeight.value, maxSplitCardHeight.value))
 const needsOuterScroll = computed(() =>
-  expanded.value && !geometryMoving.value && !pageSwitching.value && rawExpandedHeight.value > maxExpandedHeight.value
+  expanded.value &&
+  !geometryMoving.value &&
+  !pageSwitching.value &&
+  (isSplit.value ? rawSplitCardHeight.value > maxSplitCardHeight.value : rawExpandedHeight.value > maxExpandedHeight.value)
 )
 const visibleHeight = computed(() => {
   if (expanded.value) {
@@ -632,6 +684,62 @@ const visibleHeight = computed(() => {
   const quickMenuExtra = quickMenuOpen.value ? (showQuickAudioRow.value ? 76 : 42) : 0
   return compactHeights[variant.value] * scale.value + quickMenuExtra + (showPackStrip.value ? Math.round(32 * scale.value) : 0)
 })
+const topShellHeight = computed(() => (isSplit.value ? splitTopHeight.value : visibleHeight.value))
+const topExpandRatio = computed(() => {
+  if (tucked.value) return 0
+  if (isSplit.value) return expanded.value ? 0.14 : 0
+  return Math.max(0, Math.min(1, (visibleHeight.value - 34) / 86))
+})
+const topEarMetrics = computed(() => {
+  if (isFloating.value) {
+    return { earLeft: 0, earRight: 0, earHeight: 0, bottomCorner: cornerRadius.value }
+  }
+  return computeNotchEarMetrics(
+    topShellHeight.value,
+    variant.value,
+    notchAnchor.value,
+    topExpandRatio.value,
+    tucked.value
+  )
+})
+/** 外壳真实总宽：贴顶形态（notch / split 母舰）在内容宽度两侧显式加上左右融合肩部，杜绝多徽标右侧裁切。 */
+const topShellWidth = computed(() => {
+  if (isFloating.value) return visibleWidth.value
+  const ears = topEarMetrics.value.earLeft + topEarMetrics.value.earRight
+  return Math.min(availableWidth.value, Math.round(visibleWidth.value + ears))
+})
+const totalVisibleHeight = computed(() => {
+  if (!isSplit.value) return visibleHeight.value
+  if (expanded.value) return splitTopHeight.value + SPLIT_GAP + splitCardHeight.value
+  return splitTopHeight.value
+})
+/** 贴顶形态任务巡航光粒专用单路径轮廓，确保光粒紧贴融合肩部运行。 */
+const topOrbitPath = computed(() => {
+  if (isFloating.value || !orbitActive.value) return ''
+  return buildNotchPath({
+    width: topShellWidth.value,
+    height: topShellHeight.value,
+    variant: variant.value,
+    anchor: notchAnchor.value,
+    expandRatio: topExpandRatio.value,
+    line: tucked.value
+  }).strokePath
+})
+/** notch 模式下限定 GlassLight 严格对齐主体侧壁并渐隐顶部肩部带，彻底避免非圆角肩部漏光错位。 */
+const notchGlassStyle = computed(() => {
+  if (!isNotch.value) return undefined
+  const { earLeft, earRight, earHeight } = topEarMetrics.value
+  const fadeTop = Math.max(0, Math.round(earHeight))
+  const fadeEnd = fadeTop + 8
+  const mask = `linear-gradient(to bottom, transparent 0px, transparent ${fadeTop}px, #000 ${fadeEnd}px)`
+  return {
+    left: `${earLeft}px`,
+    right: `${earRight}px`,
+    width: 'auto',
+    maskImage: mask,
+    WebkitMaskImage: mask
+  }
+})
 const cornerRadius = computed(() => {
   if (variant.value === 'mecha' || variant.value === 'pixel') return 4
   if (variant.value === 'blueprint') return 2
@@ -640,11 +748,27 @@ const cornerRadius = computed(() => {
     : tucked.value ? (telemetry.value ? 4 : 5) : quickMenuOpen.value ? 16 : (telemetry.value ? 10 : 24)
   return Math.min(base, visibleHeight.value / 2, visibleWidth.value / 2)
 })
-const bounds = computed(() => ({
-  width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (tucked.value ? 0 : 4)),
-  // 展开态与收起态共用 2px 顶部边距，底部保留 14px 余量以容纳弹性微过冲，开合零上下跳动。
-  height: Math.max(14, visibleHeight.value + (expanded.value ? 16 : tucked.value ? 0 : 4))
-}))
+const expandedOuterWidth = computed(() => {
+  if (isFloating.value) return expandedWidth.value
+  const sampleH = isSplit.value ? splitTopExpandedHeights[variant.value] : 300
+  const sampleRatio = isSplit.value ? 0.14 : 1
+  const maxEars = computeNotchEarMetrics(sampleH, variant.value, notchAnchor.value, sampleRatio, false)
+  return Math.min(availableWidth.value, Math.ceil(expandedWidth.value + maxEars.earLeft + maxEars.earRight))
+})
+const bounds = computed(() => {
+  if (isFloating.value) {
+    return {
+      width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (tucked.value ? 0 : 4)),
+      // 展开态与收起态共用 2px 顶部边距，底部保留 14px 余量以容纳弹性微过冲，开合零上下跳动。
+      height: Math.max(14, visibleHeight.value + (expanded.value ? 16 : tucked.value ? 0 : 4))
+    }
+  }
+  const outerW = Math.max(topShellWidth.value, isSplit.value && expanded.value ? splitCardWidth.value : 0)
+  return {
+    width: Math.max(140, Math.ceil(outerW) + (tucked.value ? 0 : 4)),
+    height: Math.max(14, Math.ceil(totalVisibleHeight.value) + (expanded.value ? 14 : tucked.value ? 0 : 4))
+  }
+})
 // 覆盖剪贴板面板（420）+ 导航栏 + 微信提醒条与底部余量，日常开合与切页零 SetWindowPos 扩容。
 const DESKTOP_MIN_STAGE_HEIGHT = 620
 /** 计算桌面端稳态定帧窗口尺寸：按宽高双高水位稳定画布，日常开合与多徽标切换仅改 HRGN 不触发 SetWindowPos 闪跳。 */
@@ -654,7 +778,7 @@ function computeDesktopStageSize(
   currentWidth = 0
 ): { width: number; height: number } {
   const maxStageW = Math.max(140, Math.min(1560, availableWidth.value))
-  const desiredW = Math.max(140, Math.ceil(expandedWidth.value), Math.ceil(target.width))
+  const desiredW = Math.max(140, Math.ceil(expandedOuterWidth.value), Math.ceil(target.width))
   const width = Math.min(maxStageW, Math.max(currentWidth, desiredW))
   const maxStageH = Math.min(1180, Math.max(DESKTOP_MIN_STAGE_HEIGHT, Math.ceil(maxExpandedHeight.value + 16)))
   const desiredH = Math.max(DESKTOP_MIN_STAGE_HEIGHT, Math.ceil(target.height))
@@ -673,6 +797,11 @@ const rootStyle = computed(() => ({
   '--expand-time': `${expandMs.value}ms`,
   '--content-width': `${expandedWidth.value - 24}px`,
   '--capsule-height': `${compactHeights[variant.value] * scale.value}px`,
+  '--ear-left': `${topEarMetrics.value.earLeft}px`,
+  '--ear-right': `${topEarMetrics.value.earRight}px`,
+  '--split-gap': `${SPLIT_GAP}px`,
+  '--split-card-height': `${splitCardHeight.value}px`,
+  '--split-outer-width': `${Math.max(topShellWidth.value, expanded.value ? splitCardWidth.value : 0)}px`,
   '--page-index': Math.max(0, sections.findIndex(section => section.value === page.value)),
   '--section-count': sections.length
 }))
@@ -743,6 +872,7 @@ const ordinaryPaneEl = ref<HTMLElement | null>(null)
 const dismissProxy = { y: 0, scaleY: 1 }
 let dismissTween: gsap.core.Tween | null = null
 let shellTween: gsap.core.Tween | gsap.core.Timeline | null = null
+let splitCardTween: gsap.core.Tween | gsap.core.Timeline | null = null
 let capsuleTween: gsap.core.Tween | null = null
 let chromeTween: gsap.core.Tween | null = null
 let contentTween: gsap.core.Tween | null = null
@@ -1022,6 +1152,61 @@ function cancelExpandStaging(): void {
   }
 }
 
+/** 立即同步当前形态（floating / notch / split）外壳与卡片内联几何样式，清除跨形态残留属性。 */
+function applyShellImmediate(): void {
+  const rootPanel = panel.value
+  const topEl = topShellEl.value
+  const cardEl = cardShellEl.value
+  if (isSplit.value) {
+    if (rootPanel) gsap.set(rootPanel, { clearProps: 'width,height,borderRadius,transform' })
+    if (topEl) {
+      gsap.set(topEl, {
+        width: `${topShellWidth.value}px`,
+        height: `${topShellHeight.value}px`,
+        clearProps: 'borderRadius'
+      })
+    }
+    splitCardVisible.value = expanded.value
+    if (cardEl) {
+      if (expanded.value) {
+        gsap.set(cardEl, {
+          width: `${splitCardWidth.value}px`,
+          height: `${splitCardHeight.value}px`,
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          scaleX: 1,
+          scaleY: 1,
+          filter: 'blur(0px)'
+        })
+      } else {
+        gsap.set(cardEl, {
+          width: `${splitCardWidth.value}px`,
+          height: `${splitCardHeight.value}px`,
+          opacity: 0,
+          y: -12,
+          scale: 0.96,
+          scaleX: 1,
+          scaleY: 1,
+          filter: 'blur(0px)'
+        })
+      }
+    }
+    return
+  }
+
+  splitCardVisible.value = false
+  if (topEl) gsap.set(topEl, { clearProps: 'width,height,borderRadius,transform' })
+  if (cardEl) gsap.set(cardEl, { clearProps: 'width,height,opacity,y,scale,scaleX,scaleY,filter,transform' })
+  if (rootPanel) {
+    gsap.set(rootPanel, {
+      width: `${topShellWidth.value}px`,
+      height: `${visibleHeight.value}px`,
+      borderRadius: isNotch.value ? '0px' : `${cornerRadius.value}px`
+    })
+  }
+}
+
 function settleGeometry(): void {
   clearTimeout(geometryTimer)
   geometryTimer = undefined
@@ -1029,14 +1214,12 @@ function settleGeometry(): void {
   cancelExpandStaging()
   geometryShrinking = false
   // 若两阶段扩容被打断或定时器兜底触发，确保外壳尺寸与最新目标严丝合缝后再测量 HRGN。
-  if ((wasStaging || !shellTween) && panel.value) {
+  if ((wasStaging || (!shellTween && !splitCardTween)) && panel.value) {
     shellTween?.kill()
     shellTween = null
-    gsap.set(panel.value, {
-      width: `${visibleWidth.value}px`,
-      height: `${visibleHeight.value}px`,
-      borderRadius: `${cornerRadius.value}px`
-    })
+    splitCardTween?.kill()
+    splitCardTween = null
+    applyShellImmediate()
   }
   viewportSize.value = isDesktop
     ? computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
@@ -1117,11 +1300,43 @@ watch(
   },
   { flush: 'sync' }
 )
-// 缩放比例或屏幕宽度变化时同步更新桌面定帧窗口宽度。
-watch(expandedWidth, () => {
+// 缩放比例、屏幕宽度或贴顶形态变化时同步更新桌面定帧窗口宽度。
+watch(expandedOuterWidth, () => {
   if (!isDesktop) return
   viewportSize.value = computeDesktopStageSize(bounds.value, viewportSize.value.height)
   queueGeometry()
+}, { flush: 'post' })
+watch(islandShape, () => {
+  clearDismissVisual()
+  shellTween?.kill()
+  shellTween = null
+  splitCardTween?.kill()
+  splitCardTween = null
+  chromeTween?.kill()
+  contentTween?.kill()
+  capsuleTween?.kill()
+  geometryMoving.value = false
+  geometryShrinking = false
+  applyShellImmediate()
+  if (capsuleTextEl.value) {
+    const hide = expanded.value && (isSplit.value ? !approval.value : !isNoticeStatus.value)
+    gsap.set(capsuleTextEl.value, hide ? { opacity: 0, y: -3, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 })
+  }
+  if (chrome.value) {
+    gsap.set(chrome.value, { clearProps: 'transform,translate,xPercent,yPercent,x,y,scaleX,scaleY' })
+    gsap.set(chrome.value, expanded.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1 } : { opacity: 0, y: -4, scaleX: 0.98, scaleY: 0.98 })
+  }
+  if (content.value) {
+    gsap.set(content.value, { clearProps: 'transform,translate,xPercent,yPercent,x,y,scaleX,scaleY,filter' })
+    gsap.set(content.value, expanded.value || isSplit.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : contentHiddenPose.value)
+  }
+  viewportSize.value = isDesktop
+    ? computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
+    : { ...bounds.value }
+  void nextTick(() => {
+    measureContent()
+    queueGeometry()
+  })
 }, { flush: 'post' })
 function updateMotion(): void { reducedMotion.value = systemMotion.matches }
 
@@ -1174,8 +1389,12 @@ function expand(value: boolean, focus = false): void {
   })
 }
 
+function dismissSurfaceEl(): HTMLElement | null {
+  return isSplit.value ? cardShellEl.value : panel.value
+}
+
 function syncDismissTransform(): void {
-  const surface = panel.value
+  const surface = dismissSurfaceEl()
   if (surface) gsap.set(surface, { y: dismissProxy.y, scaleY: dismissProxy.scaleY })
 }
 
@@ -1183,7 +1402,7 @@ function applyDismissVisual(offsetY: number, scaleY: number, dragging: boolean, 
   dismissProxy.y = offsetY
   dismissProxy.scaleY = scaleY
   syncDismissTransform()
-  const surface = panel.value
+  const surface = dismissSurfaceEl()
   if (surface) surface.classList.toggle('dismiss-dragging', dragging)
   const handle = dismissHandle.value
   if (handle) {
@@ -1752,9 +1971,62 @@ function scrollWheel(event: WheelEvent): void {
   }
 }
 
+/** 将区域裁剪到视口有效范围内，确保传入 Rust SetWindowRgn 永不因浮点越界被拒。 */
+function pushSafeRegion(
+  regions: BarRegion[],
+  rectW: number,
+  rectH: number,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+): void {
+  const cx = Math.max(0, Math.min(rectW - 1, Math.round(x)))
+  const cy = Math.max(0, Math.min(rectH - 1, Math.round(y)))
+  const cw = Math.min(Math.ceil(width), rectW - cx)
+  const ch = Math.min(Math.ceil(height), rectH - cy)
+  if (cw <= 0 || ch <= 0) return
+  const cr = Math.max(0, Math.min(radius, cw / 2, ch / 2))
+  regions.push({ x: cx, y: cy, width: cw, height: ch, radius: cr })
+}
+
+/**
+ * 为贴顶形态（notch / split 母舰）生成双段合并 HRGN：
+ * 1. 顶部肩带矩形（radius = 0）：完整罩住左右外扩融合肩部，杜绝圆角裁切耳朵；
+ * 2. 主体圆角区域：覆盖肩部内侧至底边，使耳朵下方透明区完整穿透给桌面。
+ */
+function appendNotchRegions(
+  regions: BarRegion[],
+  box: DOMRect,
+  rect: DOMRect,
+  rectW: number,
+  rectH: number
+): void {
+  const x = Math.max(0, Math.round(box.left - rect.left))
+  const y = Math.max(0, Math.round(box.top - rect.top))
+  const w = Math.min(Math.ceil(box.width), rectW - x)
+  const h = Math.min(Math.ceil(box.height), rectH - y)
+  if (w <= 0 || h <= 0) return
+  const metrics = topEarMetrics.value
+  const earBandH = Math.min(h, Math.max(12, Math.ceil(metrics.earHeight) + 4))
+  // 顶带：保证左右融合肩部 0px 裁切
+  pushSafeRegion(regions, rectW, rectH, x, y, w, earBandH, 0)
+  // 主体：仅保留底角外包圆角，耳朵下方区域彻底点击穿透
+  const earL = Math.floor(metrics.earLeft)
+  const earR = Math.floor(metrics.earRight)
+  const bodyW = Math.max(2, w - earL - earR)
+  const bodyR = variant.value === 'mecha' || variant.value === 'pixel'
+    ? 4
+    : variant.value === 'blueprint'
+      ? 2
+      : Math.round(metrics.bottomCorner)
+  pushSafeRegion(regions, rectW, rectH, x + earL, y, bodyW, h, bodyR)
+}
+
 /** 计算当前可见外壳在目标新视口坐标系中的精确贴合区域，用于扩容首帧遮罩未渲染的透明区。 */
 function computeLockedPanelRegion(viewportW: number, viewportH: number): BarRegion | null {
-  const surface = panel.value
+  const surface = isSplit.value ? topShellEl.value : panel.value
   if (!surface) return null
   const box = surface.getBoundingClientRect()
   const w = Math.min(Math.ceil(box.width), Math.ceil(viewportW))
@@ -1766,8 +2038,10 @@ function computeLockedPanelRegion(viewportW: number, viewportH: number): BarRegi
     : anchor === 'right'
       ? Math.max(0, Math.round(viewportW - w))
       : Math.max(0, Math.round((viewportW - w) / 2))
-  const y = Math.min(suppressed.value ? 0 : 2, Math.max(0, Math.ceil(viewportH) - h))
-  const radius = Math.min(parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0, w / 2, h / 2)
+  const y = Math.min(suppressed.value || isDockedTop.value ? 0 : 2, Math.max(0, Math.ceil(viewportH) - h))
+  const radius = isDockedTop.value
+    ? 0
+    : Math.min(parseFloat(getComputedStyle(surface).borderTopLeftRadius) || 0, w / 2, h / 2)
   return { x, y, width: Math.min(w, Math.ceil(viewportW) - x), height: Math.min(h, Math.ceil(viewportH) - y), radius }
 }
 
@@ -1876,6 +2150,44 @@ function queueGeometry(): void {
         const height = Math.min(Math.ceil(hit.height), rectH - y)
         if (width > 0 && height > 0) regions.push({ x, y, width, height, radius: 0 })
       }
+    } else if (isSplit.value) {
+      // split（B+C）模式：母舰双段 HRGN + 7px 透明缝隙指针桥接 HRGN + 下方独立悬浮卡片 HRGN。
+      const topBox = topShellEl.value?.getBoundingClientRect()
+      if (topBox && topBox.width > 0 && topBox.height > 0) {
+        appendNotchRegions(regions, topBox, rect, rectW, rectH)
+      }
+      if (expanded.value && cardShellEl.value) {
+        const cardBox = cardShellEl.value.getBoundingClientRect()
+        if (cardBox.width > 0 && cardBox.height > 0) {
+          const cardX = Math.max(0, Math.round(cardBox.left - rect.left))
+          const cardY = Math.max(0, Math.round(cardBox.top - rect.top))
+          const cardW = Math.min(Math.ceil(cardBox.width), rectW - cardX)
+          const cardH = Math.min(Math.ceil(cardBox.height), rectH - cardY)
+          if (topBox && topBox.height > 0) {
+            const bridgeTop = Math.max(0, Math.floor(topBox.bottom - rect.top) - 2)
+            const bridgeBottom = Math.min(rectH, Math.ceil(cardBox.top - rect.top) + 2)
+            if (bridgeBottom > bridgeTop) {
+              // 将两层间 7px 透明视觉缝隙纳入 Win32 命中区，防止鼠标跨缝触发 mouseleave 误收起。
+              pushSafeRegion(regions, rectW, rectH, cardX, bridgeTop, cardW, bridgeBottom - bridgeTop, 0)
+            }
+          }
+          const cardRadius = variant.value === 'mecha' || variant.value === 'pixel'
+            ? 4
+            : variant.value === 'blueprint'
+              ? 2
+              : variant.value === 'telemetry'
+                ? 12
+                : variant.value === 'neon'
+                  ? 20
+                  : 18
+          pushSafeRegion(regions, rectW, rectH, cardX, cardY, cardW, cardH, cardRadius)
+        }
+      }
+    } else if (isNotch.value) {
+      const box = panel.value?.getBoundingClientRect()
+      if (box && box.width > 0 && box.height > 0) {
+        appendNotchRegions(regions, box, rect, rectW, rectH)
+      }
     } else {
       for (const surface of [panel.value]) {
         if (!surface) continue
@@ -1931,26 +2243,168 @@ function measureContent(): void {
   if (height) contentHeight.value = Math.min(478, height)
   const hdr = chrome.value as HTMLElement | null
   const header = hdr?.offsetHeight
-  if (header) chromeHeight.value = header
+  if (header && !isSplit.value) chromeHeight.value = header
+  const att = attentionEl.value
+  attentionHeight.value = att && state.ui.wechatAttention ? att.offsetHeight + 12 : 0
 }
 
-watch([ocrPanelOpen, () => state.ocr.status, () => state.ocr.text, page], () => {
+watch([ocrPanelOpen, () => state.ocr.status, () => state.ocr.text, page, () => state.ui.wechatAttention], () => {
   void nextTick(measureContent)
 })
 
 function runShellResize(): void {
-  const el = panel.value
-  if (!el || expandStaging) return
+  if (expandStaging) return
   shellTween?.kill()
   shellTween = null
-  const targetW = `${visibleWidth.value}px`
+  splitCardTween?.kill()
+  splitCardTween = null
+
+  if (isSplit.value) {
+    const topEl = topShellEl.value
+    const cardEl = cardShellEl.value
+    if (!topEl) return
+    const targetTopW = `${topShellWidth.value}px`
+    const targetTopH = `${topShellHeight.value}px`
+    const targetCardW = `${splitCardWidth.value}px`
+    const targetCardH = `${splitCardHeight.value}px`
+
+    if ((isDesktop && tucked.value) || motionReduced.value || motionMode.value === 'flicker') {
+      applyShellImmediate()
+      onShellAnimationComplete()
+      return
+    }
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        shellTween = null
+        if (!expanded.value) splitCardVisible.value = false
+        onShellAnimationComplete()
+      }
+    })
+
+    if (expanded.value) {
+      const wasHidden = !splitCardVisible.value
+      splitCardVisible.value = true
+      const expandEase = motionMode.value === 'bounce'
+        ? 'back.out(1.16)'
+        : motionMode.value === 'focus'
+          ? 'expo.out'
+          : 'power3.out'
+      const topDur = Math.max(0.18, Math.min(0.32, (expandMs.value / 1000) * 0.78))
+      const cardDur = Math.max(0.22, Math.min(0.36, (expandMs.value / 1000) * 0.88))
+      // 1) 母舰顶栏先顺滑扩宽并切换为紧凑导航栏
+      tl.to(topEl, { width: targetTopW, height: targetTopH, duration: topDur, ease: expandEase }, 0)
+      if (cardEl) {
+        if (wasHidden) {
+          gsap.set(cardEl, {
+            width: targetCardW,
+            height: targetCardH,
+            opacity: 0,
+            y: -14,
+            scale: 0.96,
+            filter: motionMode.value === 'focus' ? 'blur(5px)' : 'blur(2.5px)'
+          })
+          // 2) 独立悬浮卡片从母舰下方错峰滑出并伴随轻柔缩放/聚焦浮现
+          tl.to(cardEl, {
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            filter: 'blur(0px)',
+            duration: cardDur,
+            ease: expandEase
+          }, 0.055)
+        } else {
+          // 已展开态切页或重入：从当前状态顺滑衔接尺寸与不透明度，支持随时打断
+          tl.to(cardEl, {
+            width: targetCardW,
+            height: targetCardH,
+            opacity: 1,
+            y: 0,
+            scale: 1,
+            filter: 'blur(0px)',
+            duration: pageSwitching.value ? Math.max(0.16, motionPreset.value.shellResize.duration) : cardDur,
+            ease: pageSwitching.value ? motionPreset.value.shellResize.ease : expandEase
+          }, 0)
+        }
+      }
+    } else {
+      // 闭合时零回弹：下方悬浮卡片先迅速收叠回母舰下方，母舰随即缩回紧凑贴顶胶囊
+      const cardCloseDur = Math.max(0.1, Math.min(0.15, (collapseMs.value / 1000) * 0.56))
+      const topCloseDur = Math.max(0.15, Math.min(0.24, (collapseMs.value / 1000) * 0.88))
+      if (cardEl && splitCardVisible.value) {
+        tl.to(cardEl, {
+          opacity: 0,
+          y: -14,
+          scale: 0.95,
+          filter: 'blur(2px)',
+          duration: cardCloseDur,
+          ease: 'power2.out',
+          onComplete: () => {
+            if (!expanded.value) splitCardVisible.value = false
+          }
+        }, 0)
+      }
+      tl.to(topEl, {
+        width: targetTopW,
+        height: targetTopH,
+        duration: topCloseDur,
+        ease: 'power3.out'
+      }, splitCardVisible.value ? 0.055 : 0)
+    }
+
+    shellTween = tl
+    return
+  }
+
+  const el = panel.value
+  if (!el) return
+  const targetW = `${topShellWidth.value}px`
   const targetH = `${visibleHeight.value}px`
-  const targetRadius = `${cornerRadius.value}px`
+  const targetRadius = isNotch.value ? '0px' : `${cornerRadius.value}px`
   if ((isDesktop && tucked.value) || motionReduced.value) {
     gsap.set(el, { width: targetW, height: targetH, borderRadius: targetRadius })
     onShellAnimationComplete()
     return
   }
+
+  // notch 模式：宽/高解耦平滑过渡（展开宽度先行、高度紧随垂展；闭合更快、高度先收且零回弹）
+  if (isNotch.value && !pageSwitching.value && motionMode.value !== 'flicker') {
+    const tl = gsap.timeline({
+      onComplete: () => {
+        shellTween = null
+        onShellAnimationComplete()
+      }
+    })
+    if (expanded.value) {
+      const widthEase = motionMode.value === 'bounce'
+        ? 'back.out(1.14)'
+        : motionMode.value === 'sweep'
+          ? 'back.out(1.2)'
+          : motionMode.value === 'focus'
+            ? 'expo.out'
+            : 'power3.out'
+      const heightEase = motionMode.value === 'bounce'
+        ? 'back.out(1.1)'
+        : motionMode.value === 'sweep'
+          ? 'back.out(1.16)'
+          : motionMode.value === 'focus'
+            ? 'expo.out'
+            : 'power3.out'
+      const wDur = Math.max(0.22, Math.min(0.34, (expandMs.value / 1000) * 0.78))
+      const hDur = Math.max(0.26, Math.min(0.42, (expandMs.value / 1000) * 0.96))
+      const hDelay = motionMode.value === 'sweep' ? 0.075 : 0.035
+      tl.to(el, { width: targetW, borderRadius: '0px', duration: wDur, ease: widthEase }, 0)
+        .to(el, { height: targetH, duration: hDur, ease: heightEase }, hDelay)
+    } else {
+      const hDur = Math.max(0.14, Math.min(0.2, (collapseMs.value / 1000) * 0.76))
+      const wDur = Math.max(0.16, Math.min(0.24, (collapseMs.value / 1000) * 0.9))
+      tl.to(el, { height: targetH, duration: hDur, ease: 'power3.out' }, 0)
+        .to(el, { width: targetW, borderRadius: '0px', duration: wDur, ease: 'power3.out' }, 0.04)
+    }
+    shellTween = tl
+    return
+  }
+
   if (motionMode.value === 'sweep' && !pageSwitching.value) {
     const tl = gsap.timeline({
       onComplete: () => {
@@ -1984,18 +2438,19 @@ function runShellResize(): void {
   })
 }
 
-watch([visibleWidth, visibleHeight], runShellResize, { flush: 'post' })
+watch([topShellWidth, topShellHeight, splitCardWidth, splitCardHeight, expanded], runShellResize, { flush: 'post' })
 watch(cornerRadius, radius => {
-  if (!shellTween && panel.value) {
+  if (!shellTween && panel.value && isFloating.value) {
     gsap.set(panel.value, { borderRadius: `${radius}px` })
   }
 }, { flush: 'post' })
 
-watch([expanded, isNoticeStatus], ([open, notice]) => {
+watch([expanded, isNoticeStatus, isSplit, () => !!approval.value], ([open, notice, splitMode, hasApproval]) => {
   const el = capsuleTextEl.value
   if (!el) return
   capsuleTween?.kill()
-  const hide = open && !notice
+  // split 模式展开时（非审批态）母舰顶栏切为功能页签导航，胶囊文本让位隐藏。
+  const hide = open && (splitMode ? !hasApproval : !notice)
   const spec = capsuleTextTransition.value
   if (motionReduced.value) {
     gsap.set(el, hide ? { opacity: 0, y: -3, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 })
@@ -2020,12 +2475,52 @@ watch(expanded, (open) => {
   const hidden = contentHiddenPose.value
   if (motionReduced.value) {
     if (ch) gsap.set(ch, open ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1 } : { opacity: 0, y: -4, scaleX: 0.98, scaleY: 0.98 })
-    if (co) gsap.set(co, open ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : hidden)
+    if (co) gsap.set(co, open || isSplit.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : hidden)
+    return
+  }
+
+  if (isSplit.value) {
+    // split 模式下悬浮卡片整体执行错峰滑出与收叠，这里仅负责母舰顶栏导航的淡入淡出及应用磁贴轻错峰。
+    if (open) {
+      if (ch) {
+        chromeTween = gsap.to(ch, {
+          opacity: 1,
+          y: 0,
+          scaleX: 1,
+          scaleY: 1,
+          duration: Math.max(0.001, Math.min(0.2, spec.duration)),
+          delay: 0.04,
+          ease: spec.ease
+        })
+      }
+      if (co) {
+        gsap.set(co, { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' })
+        const tiles = co.querySelectorAll<HTMLElement>('.app-tile, .categories button')
+        if (tiles.length && tiles.length <= 28 && motionMode.value !== 'flicker') {
+          contentTween = gsap.fromTo(
+            tiles,
+            { opacity: 0, y: 6, scale: 0.96 },
+            { opacity: 1, y: 0, scale: 1, duration: 0.2, stagger: 0.01, delay: 0.08, ease: spec.ease, clearProps: 'transform,opacity' }
+          )
+        }
+      }
+    } else if (ch) {
+      chromeTween = gsap.to(ch, {
+        opacity: 0,
+        y: -3,
+        scaleX: 0.98,
+        scaleY: 0.98,
+        duration: Math.max(0.001, Math.min(0.09, spec.duration * 0.75)),
+        delay: 0.04,
+        ease: 'power2.out'
+      })
+    }
     return
   }
 
   if (open) {
     const tl = gsap.timeline()
+    const revealBlur = isNotch.value && motionMode.value !== 'flicker' ? 'blur(2.5px)' : (hidden.filter ?? 'blur(0px)')
     if (ch) {
       tl.to(ch, {
         opacity: 1,
@@ -2038,6 +2533,9 @@ watch(expanded, (open) => {
       }, 0)
     }
     if (co) {
+      if (isNotch.value && motionMode.value !== 'flicker') {
+        gsap.set(co, { filter: revealBlur })
+      }
       tl.to(co, {
         opacity: 1,
         y: 0,
@@ -2045,7 +2543,7 @@ watch(expanded, (open) => {
         scaleY: 1,
         filter: 'blur(0px)',
         duration: Math.max(0.001, spec.duration),
-        delay: spec.delay ?? 0,
+        delay: (spec.delay ?? 0) + (isNotch.value ? 0.025 : 0),
         ease: spec.ease
       }, 0.02)
       const tiles = co.querySelectorAll<HTMLElement>('.app-tile, .categories button')
@@ -2063,14 +2561,14 @@ watch(expanded, (open) => {
   }
 
   if (ch) {
-    // 顶部工具栏贴近胶囊区，收起时略快退场以避开胶囊文字浮现。
+    // 顶部工具栏贴近胶囊区，收起时先干净退场，避免与胶囊文字重叠及外壳收缩挤压。
     chromeTween = gsap.to(ch, {
       opacity: 0,
       y: -4,
       scaleX: 0.98,
       scaleY: 0.98,
-      duration: Math.max(0.001, spec.duration * 0.8),
-      ease: spec.ease
+      duration: Math.max(0.001, spec.duration * 0.72),
+      ease: 'power2.out'
     })
   }
   if (co) {
@@ -2080,8 +2578,8 @@ watch(expanded, (open) => {
       scaleX: 0.97,
       scaleY: 0.97,
       filter: hidden.filter ?? 'blur(0px)',
-      duration: Math.max(0.001, spec.duration),
-      ease: spec.ease
+      duration: Math.max(0.001, spec.duration * 0.85),
+      ease: 'power2.out'
     })
   }
 }, { flush: 'post' })
@@ -2124,22 +2622,18 @@ watch([page, expanded, viewingMail, ocrPanelOpen], () => {
 }, { flush: 'pre' })
 
 onMounted(() => {
-  if (panel.value) {
-    gsap.set(panel.value, {
-      width: `${visibleWidth.value}px`,
-      height: `${visibleHeight.value}px`,
-      borderRadius: `${cornerRadius.value}px`
-    })
-  }
+  applyShellImmediate()
   if (capsuleTextEl.value) {
-    const hide = expanded.value && !isNoticeStatus.value
+    const hide = expanded.value && (isSplit.value ? !approval.value : !isNoticeStatus.value)
     gsap.set(capsuleTextEl.value, hide ? { opacity: 0, y: -3, scale: 0.96 } : { opacity: 1, y: 0, scale: 1 })
   }
   if (chrome.value) {
+    gsap.set(chrome.value, { clearProps: 'transform,translate,xPercent,yPercent,x,y,scaleX,scaleY' })
     gsap.set(chrome.value, expanded.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1 } : { opacity: 0, y: -4, scaleX: 0.98, scaleY: 0.98 })
   }
   if (content.value) {
-    gsap.set(content.value, expanded.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : contentHiddenPose.value)
+    gsap.set(content.value, { clearProps: 'transform,translate,xPercent,yPercent,x,y,scaleX,scaleY,filter' })
+    gsap.set(content.value, expanded.value || isSplit.value ? { opacity: 1, y: 0, scaleX: 1, scaleY: 1, filter: 'blur(0px)' } : contentHiddenPose.value)
   }
   void subscribeShelf().then(off => { if (disposed) off(); else stopShelf = off })
     .catch(() => { shelf.error = '暂时无法同步中转文件状态' })
@@ -2243,6 +2737,7 @@ onBeforeUnmount(() => {
   disposed = true
   cancelExpandStaging()
   shellTween?.kill()
+  splitCardTween?.kill()
   capsuleTween?.kill()
   chromeTween?.kill()
   contentTween?.kill()
@@ -2283,9 +2778,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="viewport" class="island-viewport" :class="[`anchor-${state.ui.islandAnchor}`, { 'desktop-shell': isDesktop }]" :style="viewportStyle">
+  <div ref="viewport" class="island-viewport" :class="[`anchor-${state.ui.islandAnchor}`, `shape-${islandShape}`, { 'desktop-shell': isDesktop }]" :style="viewportStyle">
   <section ref="element" class="island-hit-area"
-    :class="[{ expanded, 'page-switching': pageSwitching, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed, 'has-quick-menu': quickMenuOpen && !expanded }, `variant-${variant}`, `motion-${motionMode}`]"
+    :class="[{ expanded, 'page-switching': pageSwitching, moving: geometryMoving, desktop: isDesktop, dark, telemetry, compact: expandedWidth < 620, narrow: expandedWidth < 440, tucked: !revealed, reduced: state.ui.islandReducedMotion || reducedMotion, suppressed: tucked, avoiding: suppressed, 'has-quick-menu': quickMenuOpen && !expanded }, `variant-${variant}`, `motion-${motionMode}`, `shape-${islandShape}`]"
     :style="rootStyle" aria-label="顶部灵动岛"
     @mouseenter="enter" @mouseleave="onMouseLeave" @pointermove="trackPointerSpeed" @focusout="focusout" @keydown="keydown" @wheel="scrollWheel"
     @pointerdown="pressed = true" @compositionstart="composing = true" @compositionend="composing = false">
@@ -2294,24 +2789,72 @@ onBeforeUnmount(() => {
       ref="panel"
       class="island solid-surface"
       :data-motion="motionMode"
-      :class="[{ expanded, 'page-switching': pageSwitching, tucked: !revealed, telemetry, 'has-quick-menu': quickMenuOpen && !expanded, 'no-physics': !(effectsActive && quality === 'full') && !motionReduced }, `variant-${variant}`, `motion-${motionMode}`]"
+      :data-shape="islandShape"
+      :class="[{ expanded, 'page-switching': pageSwitching, tucked: !revealed, telemetry, 'has-quick-menu': quickMenuOpen && !expanded, 'no-physics': !(effectsActive && quality === 'full') && !motionReduced }, `variant-${variant}`, `motion-${motionMode}`, `shape-${islandShape}`]"
     >
-      <LiquidSkin :width="visibleWidth" :height="visibleHeight" :shape="shape" :variant="variant" :moving="geometryMoving || pageSwitching" />
-      <GlassLight v-if="materialReady && glassAvailable"
-        :light-surface="!dark" :signal="taskSignal" :quality="quality" :active="effectsActive" :paused="pageSwitching"
+      <LiquidSkin
+        v-if="!isSplit"
+        :width="topShellWidth"
+        :height="visibleHeight"
+        :shape="shape"
+        :variant="variant"
+        :contour-mode="isNotch ? 'notch' : 'floating'"
+        :anchor="notchAnchor"
+        :moving="geometryMoving || pageSwitching"
+      />
+      <GlassLight
+        v-if="!isSplit && materialReady && glassAvailable"
+        :style="notchGlassStyle"
+        :light-surface="!dark"
+        :signal="taskSignal"
+        :quality="quality"
+        :active="effectsActive"
+        :paused="pageSwitching"
         :corner-radius="variant === 'mecha' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : undefined"
-        :palette="glassPalette" @unavailable="glassAvailable = false" />
+        :palette="glassPalette"
+        @unavailable="glassAvailable = false"
+      />
       <CapsuleOrbitTrack
-        :width="visibleWidth"
+        v-if="!isSplit"
+        :width="topShellWidth"
         :height="visibleHeight"
         :corner-radius="cornerRadius"
+        :custom-path="isNotch ? topOrbitPath : ''"
         :active="orbitActive"
         :tone="orbitTone"
         :speed="orbitSpeed"
         :reduced="motionReduced"
       />
-      <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
-      <div class="capsule-bar" :class="{ 'has-quick-code': showQuickOcr || showQuickCode }">
+      <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked && !isSplit" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
+
+      <div
+        ref="topShellEl"
+        class="island-top-shell"
+        :class="{ 'is-mothership': isSplit, 'is-mothership-expanded': isSplit && expanded && !approval }"
+      >
+        <LiquidSkin
+          v-if="isSplit"
+          :width="topShellWidth"
+          :height="topShellHeight"
+          :shape="shape"
+          :variant="variant"
+          contour-mode="notch"
+          :anchor="notchAnchor"
+          :moving="geometryMoving || pageSwitching"
+        />
+        <CapsuleOrbitTrack
+          v-if="isSplit"
+          :width="topShellWidth"
+          :height="topShellHeight"
+          :corner-radius="cornerRadius"
+          :custom-path="topOrbitPath"
+          :active="orbitActive"
+          :tone="orbitTone"
+          :speed="orbitSpeed"
+          :reduced="motionReduced"
+        />
+        <span v-if="state.ui.wechatEnabled && state.ui.wechatAttention && !tucked && isSplit" class="attention-dot" role="img" title="微信有待关注提醒" aria-label="微信有待关注提醒" />
+        <div class="capsule-bar" :class="{ 'has-quick-code': showQuickOcr || showQuickCode }">
         <button class="capsule" :class="{ 'has-feedback': isNoticeStatus }" type="button" :aria-expanded="expanded"
           :title="expanded ? '单击收起 · 按住拖动位置' : (capsuleStatus.tooltip || '单击展开 · 右键快操 · 滚轮调音')"
           :aria-label="approval ? approval.title : `${capsuleStatus.ariaText || capsuleStatus.text}，${expanded ? '收起面板' : '展开面板'}`"
@@ -2508,11 +3051,14 @@ onBeforeUnmount(() => {
         </div>
       </GsapPresence>
       <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && isNoticeStatus ? capsuleStatus.text : '' }}</span>
-      <div class="expanded-content" :class="{ 'can-scroll': needsOuterScroll, 'fixed-search': !approval && !ocrPanelOpen && !viewingMail && page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
         <div
           ref="chrome"
           v-show="!approval"
           class="island-chrome"
+          :class="{ 'is-split-chrome': isSplit }"
+          :inert="!expanded"
+          @pointerdown="isSplit ? windowDrag.begin($event) : undefined"
+          @click="isSplit ? windowDrag.consumeClick($event) : undefined"
         >
           <header class="toolbar">
             <nav ref="modeNav" class="mode-nav" aria-label="灵动岛功能">
@@ -2552,16 +3098,48 @@ onBeforeUnmount(() => {
               <button v-gsap-press="actionTapPose" class="round-action collapse-action" type="button" title="收起（Esc）" aria-label="收起灵动岛" @click="collapseNow(true)"><Icon name="chevron-down" :size="16" /></button>
             </div>
           </header>
-          <div v-if="state.ui.wechatAttention" class="attention-strip" role="status">
+        </div>
+      </div>
+
+      <!-- split 模式透明无视觉指针桥接层：覆盖 7px 视觉缝隙并纳入 SetWindowRgn，跨缝移动绝不误触发 mouseleave -->
+      <div v-if="isSplit && expanded" ref="splitBridgeEl" class="split-pointer-bridge" aria-hidden="true" />
+
+      <div
+        ref="cardShellEl"
+        class="island-body-shell"
+        :class="{ 'is-split-card': isSplit, 'is-split-hidden': isSplit && !splitCardVisible }"
+      >
+        <LiquidSkin
+          v-if="isSplit"
+          :width="splitCardWidth"
+          :height="splitCardHeight"
+          shape="expanded"
+          :variant="variant"
+          contour-mode="floating"
+          :split-card="true"
+          :moving="geometryMoving || pageSwitching"
+        />
+        <GlassLight
+          v-if="isSplit && expanded && materialReady && glassAvailable"
+          :light-surface="!dark"
+          :signal="taskSignal"
+          :quality="quality"
+          :active="effectsActive"
+          :paused="pageSwitching"
+          :corner-radius="variant === 'mecha' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : variant === 'telemetry' ? 12 : variant === 'neon' ? 20 : 18"
+          :palette="glassPalette"
+          @unavailable="glassAvailable = false"
+        />
+        <div class="expanded-content" :class="{ 'can-scroll': needsOuterScroll, 'fixed-search': !approval && !ocrPanelOpen && !viewingMail && page === 'clipboard' && !state.ui.detailId }" :inert="!expanded">
+          <div v-if="state.ui.wechatAttention && !approval" ref="attentionEl" class="attention-strip" role="status">
             <span>微信有新提醒</span>
             <button type="button" @click="openWechat">打开微信</button>
             <button type="button" @click="invokeHost('clear_wechat_attention')">清除待关注</button>
           </div>
-        </div>
-        <div
-          ref="content"
-          class="island-content"
-        >
+          <div
+            ref="content"
+            class="island-content"
+          >
           <ApprovalPrompt v-if="approval" :key="approval.id" :card="approval" :count="approvalCount" :busy="answering" @answer="answerApproval" />
           <OcrResultPanel v-else-if="ocrPanelOpen && expanded" />
           <MailNotices v-else-if="viewingMail && expanded" :notices="mailNotices" @error="pushToast($event, 'error')" />
@@ -2626,23 +3204,24 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
+        </div>
+        <button
+          v-if="expanded && !approval"
+          ref="dismissHandle"
+          class="dismiss-handle"
+          type="button"
+          title="单击或向上轻推收起"
+          aria-label="收起灵动岛（底部拉条）"
+          @pointerdown.stop="beginDismissDrag"
+          @pointermove.stop="moveDismissDrag"
+          @pointerup.stop="endDismissDrag($event, false)"
+          @pointercancel.stop="endDismissDrag($event, true)"
+          @lostpointercapture.stop="endDismissDrag($event, true)"
+          @click.stop="onDismissClick"
+        >
+          <span class="dismiss-pill" aria-hidden="true" />
+        </button>
       </div>
-      <button
-        v-if="expanded && !approval"
-        ref="dismissHandle"
-        class="dismiss-handle"
-        type="button"
-        title="单击或向上轻推收起"
-        aria-label="收起灵动岛（底部拉条）"
-        @pointerdown.stop="beginDismissDrag"
-        @pointermove.stop="moveDismissDrag"
-        @pointerup.stop="endDismissDrag($event, false)"
-        @pointercancel.stop="endDismissDrag($event, true)"
-        @lostpointercapture.stop="endDismissDrag($event, true)"
-        @click.stop="onDismissClick"
-      >
-        <span class="dismiss-pill" aria-hidden="true" />
-      </button>
     </div>
   </section>
   </div>
@@ -2689,28 +3268,242 @@ onBeforeUnmount(() => {
 .island-hit-area.desktop.suppressed:not(.reduced) > .island { --geometry-time: var(--collapse-time); }
 /* 预览的三种形态保持同一顶部位置，避免变形时整体上下漂移。 */
 .island-hit-area:not(.desktop) { --surface-inset: 2px; }
+/* 贴顶一体刘海（notch）与贴顶分层（split）彻底贴死屏幕顶沿（y = 0），无顶部空缝。 */
+.island-hit-area.shape-notch,
+.island-hit-area.shape-split { --surface-inset: 0px; }
 .tuck-trigger { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; }
 .solid-surface {
   background: transparent;
   isolation: isolate;
 }
-.island.variant-standard {
+.island.shape-floating.variant-standard {
   background: var(--surface-glass);
   backdrop-filter: var(--glass-backdrop);
   box-shadow: var(--island-drop-shadow);
 }
-.island.variant-telemetry {
+.island.shape-floating.variant-telemetry {
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--island-rim, var(--island-outline)), inset 0 1px 0 var(--island-top-sheen);
 }
 .island {
+  --content-gutter: 18px;
   position: absolute; top: var(--surface-inset); left: -320px; right: -320px; margin-inline: auto; transform-origin: 50% 0;
   overflow: hidden; border-radius: 24px; color: var(--text); contain: layout;
   box-shadow: inset 0 1px 0 var(--island-top-sheen);
 }
+.narrow .island { --content-gutter: 14px; }
+.island.expanded:not(.shape-split) {
+  display: flex;
+  flex-direction: column;
+}
+.island.expanded:not(.shape-split) > .island-top-shell {
+  flex: none;
+}
+.island.expanded:not(.shape-split) > .island-body-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.island.expanded:not(.shape-split) > .island-body-shell > .expanded-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+}
+.island.shape-notch {
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  clip-path: none !important;
+}
+.island.shape-split {
+  width: var(--split-outer-width);
+  height: auto;
+  overflow: visible !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  clip-path: none !important;
+  contain: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.island-viewport.anchor-left .island.shape-split { align-items: flex-start; }
+.island-viewport.anchor-right .island.shape-split { align-items: flex-end; }
+.island-top-shell {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+}
+.island-top-shell.is-mothership {
+  flex: none;
+  overflow: hidden;
+  isolation: isolate;
+}
+.island-top-shell.is-mothership.is-mothership-expanded .capsule-bar {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.split-pointer-bridge {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  width: var(--content-width);
+  height: calc(var(--split-gap) + 4px);
+  margin: -2px 0;
+  background: transparent;
+  pointer-events: auto;
+}
+.island-body-shell {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+}
+.island-body-shell.is-split-card {
+  flex: none;
+  width: var(--content-width);
+  height: var(--split-card-height);
+  overflow: hidden;
+  transform-origin: 50% 0;
+  isolation: isolate;
+  will-change: transform, opacity;
+}
+.island-body-shell.is-split-card.is-split-hidden {
+  position: absolute;
+  top: 100%;
+  visibility: hidden;
+  pointer-events: none;
+}
+.island.shape-split.variant-standard .is-split-card {
+  border-radius: 18px;
+  background: var(--surface-glass);
+  backdrop-filter: var(--glass-backdrop);
+  box-shadow: var(--island-drop-shadow);
+}
+.island.shape-split.variant-telemetry .is-split-card {
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--island-rim, var(--island-outline)), inset 0 1px 0 var(--island-top-sheen);
+}
+.island.shape-split.variant-mecha .is-split-card {
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
+  clip-path: polygon(13px 0, calc(100% - 13px) 0, 100% 13px, 100% calc(100% - 13px), calc(100% - 13px) 100%, 13px 100%, 0 calc(100% - 13px), 0 13px);
+}
+.island.shape-split.variant-pixel .is-split-card {
+  border-radius: 0;
+  background: #1c221e;
+  box-shadow: inset 0 0 0 2px #0f0d1a, inset 0 4px 0 rgba(0, 0, 0, .42);
+}
+.island.shape-split.variant-blueprint .is-split-card {
+  border-radius: 2px;
+  background: transparent;
+  box-shadow: none;
+}
+.island.shape-split.variant-neon .is-split-card {
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 43, 214, .75),
+    inset 0 0 14px rgba(255, 43, 214, .18);
+}
+.island-hit-area:not(.desktop) .island.shape-split.variant-neon .is-split-card {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 43, 214, .75),
+    inset 0 0 14px rgba(255, 43, 214, .18),
+    0 0 18px rgba(255, 43, 214, .22),
+    0 0 28px rgba(0, 240, 255, .14);
+}
+.island.shape-split .is-split-card > .expanded-content {
+  height: 100%;
+  max-height: 100%;
+  padding: 12px 16px 22px;
+}
+.island.shape-split.variant-pixel .is-split-card > .expanded-content {
+  padding: 10px 14px 22px;
+}
+.island.shape-split.variant-blueprint .is-split-card > .expanded-content {
+  padding-bottom: 32px;
+}
+.island.shape-split .is-split-card .island-content {
+  left: 0;
+  margin-left: 0;
+  translate: none;
+  width: 100%;
+}
+.island.shape-split.variant-pixel .is-split-card .island-content {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+/* 贴顶刘海与母舰顶栏内容水平安全区：精确让出左右融合肩部，杜绝任何收起/展开内容裁切。 */
+.shape-notch .capsule-bar,
+.shape-split .is-mothership .capsule-bar {
+  padding-left: var(--ear-left);
+  padding-right: var(--ear-right);
+}
+.shape-notch .capsule-bar.has-quick-code,
+.shape-split .is-mothership .capsule-bar.has-quick-code {
+  padding-left: calc(var(--ear-left) + 8px);
+  padding-right: calc(var(--ear-right) + 7px);
+}
+.shape-notch .capsule-pack-strip,
+.shape-split .is-mothership .capsule-pack-strip {
+  margin-left: calc(var(--ear-left) + 8px);
+  margin-right: calc(var(--ear-right) + 8px);
+}
+.shape-notch .capsule-quick-menu,
+.shape-split .is-mothership .capsule-quick-menu {
+  padding-left: calc(var(--ear-left) + 8px);
+  padding-right: calc(var(--ear-right) + 8px);
+}
+.shape-notch .island-chrome,
+.shape-notch .island-content {
+  left: calc(50% + (var(--ear-left) - var(--ear-right)) / 2);
+}
+.shape-notch .dismiss-handle {
+  left: var(--ear-left);
+  right: var(--ear-right);
+  width: auto;
+}
+.island-chrome.is-split-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  margin-left: 0;
+  translate: none;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 calc(var(--ear-right) + 12px) 0 calc(var(--ear-left) + 12px);
+  cursor: grab;
+  pointer-events: none;
+}
+.is-mothership-expanded .island-chrome.is-split-chrome {
+  position: relative;
+  pointer-events: auto;
+}
+.island-chrome.is-split-chrome .toolbar {
+  width: 100%;
+  margin-bottom: 0;
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+.variant-pixel .island-chrome.is-split-chrome .mode-nav {
+  padding: 2px 2px 3px;
+}
 .island-viewport.anchor-left > .island-hit-area > .island { left: 0; right: auto; margin-inline: 0; transform-origin: 0 0; }
 .island-viewport.anchor-right > .island-hit-area > .island { left: auto; right: 0; margin-inline: 0; transform-origin: 100% 0; }
-.island.dismiss-dragging { transition: none !important; }
+.island.dismiss-dragging,
+.island-body-shell.dismiss-dragging { transition: none !important; }
 .island.expanded { border-radius: 18px; }
 .island.tucked { border-radius: 5px; box-shadow: none; }
 .island.tucked .capsule-bar,
@@ -2870,9 +3663,19 @@ onBeforeUnmount(() => {
 .expanded .capsule:hover .grip { opacity: .62; transform: scaleX(1.12); }
 .capsule.has-feedback .grip { opacity: 0; }
 .expanded-content {
-  --content-gutter: 18px;
   position: relative; z-index: 3; width: 100%; max-height: calc(100% - 24px);
   overflow: clip; padding: 0 var(--content-gutter) 18px;
+}
+.expanded-content > .attention-strip {
+  position: relative; left: 50%;
+  margin-left: calc((var(--content-width) - 2 * var(--content-gutter)) / -2);
+  width: calc(var(--content-width) - 2 * var(--content-gutter));
+}
+.shape-notch .expanded-content > .attention-strip {
+  left: calc(50% + (var(--ear-left) - var(--ear-right)) / 2);
+}
+.shape-split .is-split-card .expanded-content > .attention-strip {
+  left: 0; margin-left: 0; translate: none; width: 100%;
 }
 .expanded .expanded-content.can-scroll { overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .expanded .expanded-content.can-scroll .island-chrome,
@@ -2883,14 +3686,16 @@ onBeforeUnmount(() => {
 .island-hit-area:not(.expanded).moving .app-grid { scrollbar-color: transparent transparent; }
 .moving .island-chrome,
 .moving .island-content { will-change: transform, opacity; }
-/* 工具栏与正文共同锁定展开态最终内容宽并水平居中，收起动画中途不被外壳挤压、不触发导航栏滚动条。 */
+/* 工具栏与正文共同锁定展开态最终内容宽并水平居中（用负 margin-left 代替 CSS translate，避免 GSAP 缓存 xPercent:-50 导致运行中切换 split/notch 偏移）。 */
 .island-chrome {
-  position: relative; left: 50%; translate: -50% 0;
+  position: relative; left: 50%;
+  margin-left: calc((var(--content-width) - 2 * var(--content-gutter)) / -2);
   display: flow-root;
   width: calc(var(--content-width) - 2 * var(--content-gutter));
 }
 .island-content {
-  position: relative; left: 50%; translate: -50% 0;
+  position: relative; left: 50%;
+  margin-left: calc((var(--content-width) - 2 * var(--content-gutter)) / -2);
   width: calc(var(--content-width) - 2 * var(--content-gutter));
 }
 .ordinary-pane { position: relative; display: block; overflow: clip; }
@@ -3206,12 +4011,12 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-pixel:not(.expanded) :deep(.tel-pulse-bar) { border-radius: 0; }
 
 /* ==================== 琥珀重工（variant-mecha：45° 倒角装甲与液压导轨） ==================== */
-.island.variant-mecha {
+.island.shape-floating.variant-mecha {
   border-radius: 2px;
   box-shadow: none;
   clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 8px, 100% calc(100% - 8px), calc(100% - 8px) 100%, 8px 100%, 0 calc(100% - 8px), 0 8px);
 }
-.island.variant-mecha.expanded {
+.island.shape-floating.variant-mecha.expanded {
   clip-path: polygon(13px 0, calc(100% - 13px) 0, 100% 13px, 100% calc(100% - 13px), calc(100% - 13px) 100%, 13px 100%, 0 calc(100% - 13px), 0 13px);
 }
 .island.variant-mecha.tucked { clip-path: none; }
@@ -3291,7 +4096,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 }
 
 /* ==================== 像素掌机（variant-pixel：锯齿外壳、双层液晶内屏与 3D 厚底按键） ==================== */
-.island.variant-pixel {
+.island.shape-floating.variant-pixel {
   border-radius: 2px; box-shadow: none;
   clip-path: polygon(
     6px 0, calc(100% - 6px) 0, calc(100% - 6px) 3px, calc(100% - 3px) 3px, calc(100% - 3px) 6px, 100% 6px,

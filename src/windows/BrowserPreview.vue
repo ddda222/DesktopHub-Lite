@@ -14,8 +14,9 @@ import SettingsWindow from '@/features/settings/SettingsWindow.vue'
 import ImagePreviewWindow from './ImagePreviewWindow.vue'
 import { browserImagePreview } from '@/mock/image-preview'
 import { startBrowserPackSimulation, stopBrowserPackSimulation } from '@/features/pack/useTaskRunner'
-import { closeSettings, isDarkTheme, setMotion, setTheme, state } from '@/store'
+import { closeSettings, isDarkTheme, setIslandShape, setMotion, setTheme, state } from '@/store'
 import { THEME_LABELS, THEME_MODES } from '@/lib/themes'
+import { ISLAND_SHAPE_LABELS, ISLAND_SHAPES, normalizeIslandShape } from '@/lib/islandShapes'
 import { MOTION_LABELS, MOTION_MODES, normalizeMotionMode, type MotionMode } from '@/lib/motions'
 import { previewApps, previewIcons } from '@/mock/preview-icons'
 import { makeShelfSamples } from '@/mock/shelf-samples'
@@ -201,6 +202,16 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
         <a href="?preview=styles" style="color: inherit; font-weight: 600">形态交互实验室 ↗</a>
         <button type="button" @click="state.ui.settingsOpen = true">体验设置</button>
         <button v-for="mode in previewThemes" :key="mode" type="button" :aria-pressed="state.settings.theme === mode" @click="setTheme(mode)">{{ THEME_LABELS[mode] }}</button>
+        <div class="preview-select-item" role="group" aria-label="灵动岛形态">
+          <span>形态</span>
+          <button
+            v-for="shapeOpt in ISLAND_SHAPES"
+            :key="shapeOpt"
+            type="button"
+            :aria-pressed="normalizeIslandShape(state.ui.islandShape) === shapeOpt"
+            @click="setIslandShape(shapeOpt)"
+          >{{ ISLAND_SHAPE_LABELS[shapeOpt] }}</button>
+        </div>
         <div class="preview-select-item"><span>动效</span><ThemedSelect size="xs" :model-value="normalizeMotionMode(state.ui.islandAppearance.motion)" :options="previewMotionOptions" aria-label="动态效果" @change="val => selectPreviewMotion(String(val) as MotionMode)" /></div>
         <div class="preview-select-item"><span>尺寸</span><ThemedSelect size="xs" :model-value="state.ui.islandAppearance.scale" :options="previewScaleOptions" aria-label="灵动岛尺寸" @update:model-value="val => (state.ui.islandAppearance.scale = Number(val))" /></div>
         <label><input v-model="plain" type="checkbox" />纯色背景</label>

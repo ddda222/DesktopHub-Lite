@@ -16,8 +16,8 @@ const previewHeading = ref<HTMLElement | null>(null)
 const importButton = ref<HTMLButtonElement | null>(null)
 let sequence = 0
 let demoSignature = ''
-const signature = () => JSON.stringify([state.apps, state.categories, state.settings.theme, state.ui.islandAppearance])
-const displayValue = (value: string) => (isThemeMode(value) ? THEME_LABELS[value] : value === 'liquid' ? '深色（原液态琉璃）' : value === 'scroll' ? '浅色（原海棠书卷）' : value === 'clay' ? '浅色（原软糖黏土）' : (isMotionMode(value) || value in LEGACY_MOTION_MAP) ? MOTION_LABELS[normalizeMotionMode(value)] : ({ left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', text: '跳字精简', bar: '能量微条', ring: '双环仪表', pulse: '律动格栅', true: '开启', false: '关闭', all: '全部' } as Record<string, string>)[value]) ?? value
+const signature = () => JSON.stringify([state.apps, state.categories, state.settings.theme, state.ui.islandShape, state.ui.islandAppearance])
+const displayValue = (value: string) => (isThemeMode(value) ? THEME_LABELS[value] : value === 'liquid' ? '深色（原液态琉璃）' : value === 'scroll' ? '浅色（原海棠书卷）' : value === 'clay' ? '浅色（原软糖黏土）' : (isMotionMode(value) || value in LEGACY_MOTION_MAP) ? MOTION_LABELS[normalizeMotionMode(value)] : ({ floating: '悬浮胶囊', notch: '贴顶刘海', split: '贴顶分层', left: '左上', center: '顶部居中', right: '右上', applications: '应用', clipboard: '剪贴板', translation: '翻译', files: '文件中转', audio: '调音台', text: '跳字精简', bar: '能量微条', ring: '双环仪表', pulse: '律动格栅', true: '开启', false: '关闭', all: '全部' } as Record<string, string>)[value]) ?? value
 
 async function discard(token: string): Promise<void> {
   if (isDesktop) await invokeHost('cancel_configuration_import', { token })

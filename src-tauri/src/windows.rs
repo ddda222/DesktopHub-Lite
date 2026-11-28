@@ -241,14 +241,19 @@ fn default_bar_position(app: &AppHandle, width: f64, height: f64) -> (i32, i32) 
     let scale = scale_of(app);
     let width = (width * scale).round() as i32;
     let _ = height;
-    let anchor = app.try_state::<crate::AppState>()
-        .map(|state| state.ui.snapshot().island_anchor)
-        .unwrap_or_else(|| "center".into());
+    let (anchor, island_shape) = app.try_state::<crate::AppState>()
+        .map(|state| {
+            let snap = state.ui.snapshot();
+            (snap.island_anchor, snap.island_shape)
+        })
+        .unwrap_or_else(|| ("center".into(), crate::state::ISLAND_SHAPE_FLOATING.into()));
+    // 贴顶刘海（notch）与贴顶分层（split）靠左/靠右停靠时贴紧屏边（0 边距），悬浮胶囊保持 16px 边距。
+    let edge_margin = if matches!(island_shape.as_str(), "notch" | "split") { 0 } else { 16 };
     match work_area(app) {
         Some((x, y, available, _)) => {
             let offset = match anchor.as_str() {
-                "left" => 16,
-                "right" => (available as i32 - width - 16).max(0),
+                "left" => edge_margin,
+                "right" => (available as i32 - width - edge_margin).max(0),
                 _ => (available as i32 - width).max(0) / 2,
             };
             (x + offset, y)

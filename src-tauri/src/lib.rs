@@ -64,6 +64,7 @@ use windows::{WindowsHandle, WindowState};
 static PAGE_SEQ: AtomicU64 = AtomicU64::new(0);
 static THEME_SEQ: AtomicU64 = AtomicU64::new(0);
 static MOTION_SEQ: AtomicU64 = AtomicU64::new(0);
+static SHAPE_SEQ: AtomicU64 = AtomicU64::new(0);
 static CATEGORY_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub const UI_STATE_EVENT: &str = "ui-state";
@@ -385,7 +386,8 @@ fn set_bar_size(app: AppHandle, width: f64, height: f64, regions: Option<Vec<win
         return Err("灵动岛尺寸无效".into());
     }
     let regions = regions.unwrap_or_default();
-    if regions.len() > 2 || regions.iter().any(|r| {
+    // 贴顶一体刘海与贴顶分层模式最多上报 4 个合并区域（顶肩带 + 顶栏体 + 指针桥接 + 悬浮卡片）。
+    if regions.len() > 6 || regions.iter().any(|r| {
         ![r.x, r.y, r.width, r.height, r.radius].iter().all(|n| n.is_finite()) ||
         r.x < 0.0 || r.y < 0.0 || r.width <= 0.0 || r.height <= 0.0 ||
         r.x + r.width > width + 1.0 || r.y + r.height > height + 1.0 ||
@@ -511,6 +513,31 @@ async fn set_motion(app: AppHandle, motion: String) -> Result<UiState, String> {
     })
     .await
     .map_err(|_| "动态效果保存中断".to_string())?
+}
+
+/// 切换灵动岛全局形态（悬浮胶囊 / 贴顶刘海 / 贴顶分层），即时落盘并广播到所有窗口。
+#[tauri::command]
+async fn set_island_shape(app: AppHandle, shape: String) -> Result<UiState, String> {
+    if !state::valid_island_shape(&shape) {
+        return Err(format!("未知灵动岛形态：{shape}"));
+    }
+    let seq = SHAPE_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
+    let state = app.state::<AppState>();
+    let _order = state.ui_persist_gate.lock().await;
+    if seq < SHAPE_SEQ.load(Ordering::SeqCst) {
+        return Ok(state.ui.snapshot());
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let next = update_ui_preferences(&handle, |ui| ui.island_shape = shape)?;
+        let app_state = handle.state::<AppState>();
+        app_state.windows.set_bar_free_position(false);
+        windows::place_bar(&handle, &app_state.windows);
+        broadcast_ui(&handle);
+        Ok(next)
+    })
+    .await
+    .map_err(|_| "灵动岛形态保存中断".to_string())?
 }
 
 /// 弹一条轻提示。提示由独立的 toast 窗口渲染，避免被图标条窗口裁掉。
@@ -1291,6 +1318,7 @@ pub fn run() {
                     settings_request: None,
                     island_expanded: false,
                     island_anchor: prefs.island_anchor,
+                    island_shape: state::normalize_island_shape(&prefs.island_shape),
                     island_page: if state::valid_island_page(&prefs.island_page) { prefs.island_page } else { state::PANEL_APPLICATIONS.into() },
                     island_hover_ms: prefs.island_hover_ms.clamp(100, 2000),
                     island_leave_ms: prefs.island_leave_ms.clamp(100, 4000),
@@ -1550,6 +1578,7 @@ pub fn run() {
             set_category,
             set_theme,
             set_motion,
+            set_island_shape,
             selftest_windows,
             show_toast,
             hide_toast,

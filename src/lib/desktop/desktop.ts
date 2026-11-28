@@ -12,6 +12,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen as tauriListen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AppConfig, MixerVisibility } from '@/lib/desktop/types'
+import type { IslandShape } from '@/lib/islandShapes'
 import type { MotionMode } from '@/lib/motions'
 import type { TelemetryStyle } from '@/features/island/telemetryReadout'
 
@@ -111,6 +112,7 @@ export type SettingsSection = 'general' | 'apps' | 'clipboard' | 'translation' |
 export interface UiState {
   islandExpanded: boolean
   islandAnchor: string
+  islandShape: IslandShape
   islandPage: 'applications' | 'clipboard' | 'translation' | 'files' | 'audio' | 'pack'
   islandHoverMs: number
   islandLeaveMs: number
@@ -137,6 +139,7 @@ export interface UiState {
 const EMPTY_UI: UiState = {
   islandExpanded: false,
   islandAnchor: 'center',
+  islandShape: 'floating',
   islandPage: 'applications',
   islandHoverMs: 320,
   islandLeaveMs: 450,
@@ -242,6 +245,12 @@ export async function requestTheme(theme: string): Promise<void> {
 export async function requestMotion(motion: MotionMode): Promise<void> {
   if (!isDesktop) return
   await invokeHost('set_motion', { motion })
+}
+
+/** 切换灵动岛全局形态（悬浮胶囊 / 贴顶刘海 / 贴顶分层，跨窗口状态）。 */
+export async function requestIslandShape(shape: IslandShape): Promise<void> {
+  if (!isDesktop) return
+  await invokeHost('set_island_shape', { shape })
 }
 
 /** 弹一条轻提示。提示由独立的 toast 窗口渲染。 */

@@ -473,4 +473,116 @@ await test('显卡温度预警与显存详情正确输出告警等级和悬浮�
   assert.match(readout.tooltip, /86°C 高温预警/)
   assert.match(readout.tooltip, /显存 6\.0\/12\.0 GB \(50%\)/)
 })
+const shapeModSource = fs.readFileSync(new URL('../src/lib/islandShapes.ts', import.meta.url), 'utf8')
+const shapeMod = ts.transpileModule(shapeModSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+const shapeCtx = { exports: {} }
+vm.runInNewContext(shapeMod, shapeCtx)
+const shapeApi = shapeCtx.exports
+await test('灵动岛形态 islandShape 默认值、持久化乐观更新与配置恢复兼容', async () => {
+  assert.equal(shapeApi.normalizeIslandShape(undefined), 'floating')
+  assert.equal(shapeApi.normalizeIslandShape('legacy-bar'), 'floating')
+  assert.equal(shapeApi.normalizeIslandShape('notch'), 'notch')
+  assert.equal(shapeApi.normalizeIslandShape('split'), 'split')
+
+  const state = { ui: { islandShape: 'floating' }, settings: {} }
+  const calls = []
+  let failNext = false
+  const api = subject(
+    ['applyUiState', 'setIslandShape'],
+    {
+      state,
+      normalizeIslandShape: shapeApi.normalizeIslandShape,
+      requestIslandShape: async (shape) => {
+        calls.push(shape)
+        if (failNext) throw new Error('synthetic-shape-save-error')
+      }
+    },
+    'let pendingShapeOps = 0; let latestShapeReq = 0;'
+  )
+  // 旧配置缺少 islandShape 字段时回退为 floating
+  api.applyUiState({ islandPage: 'applications' })
+  assert.equal(state.ui.islandShape, 'floating')
+  // 合法形态同步生效，非法形态平滑降级
+  api.applyUiState({ islandShape: 'notch', islandPage: 'applications' })
+  assert.equal(state.ui.islandShape, 'notch')
+  api.applyUiState({ islandShape: 'split', islandPage: 'applications' })
+  assert.equal(state.ui.islandShape, 'split')
+  api.applyUiState({ islandShape: 'invalid-shape', islandPage: 'applications' })
+  assert.equal(state.ui.islandShape, 'floating')
+
+  // 切换持久化成功
+  api.setIslandShape('notch')
+  assert.equal(state.ui.islandShape, 'notch')
+  await Promise.resolve()
+  assert.deepEqual(calls, ['notch'])
+
+  // 持久化失败时自动回滚至原形态
+  failNext = true
+  api.setIslandShape('split')
+  assert.equal(state.ui.islandShape, 'split')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(state.ui.islandShape, 'notch')
+})
+
+const notchPathSource = fs.readFileSync(new URL('../src/features/island/notchPath.ts', import.meta.url), 'utf8')
+const notchMod = ts.transpileModule(notchPathSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+const notchCtx = { exports: {} }
+vm.runInNewContext(notchMod, notchCtx)
+const notchApi = notchCtx.exports
+await test('notchPath 单路径几何覆盖四大主力主题与全停靠边，路径闭合有效且无越界/NaN', () => {
+  const variants = ['telemetry', 'mecha', 'pixel', 'blueprint', 'standard', 'neon']
+  const anchors = ['center', 'left', 'right']
+  const cases = [
+    { label: '收起态', width: 320, height: 34, expandRatio: 0, line: false },
+    { label: '展开态', width: 516, height: 320, expandRatio: 1, line: false },
+    { label: '母舰顶栏', width: 508, height: 46, expandRatio: 0.14, line: false },
+    { label: '细线避让', width: 120, height: 8, expandRatio: 0, line: true }
+  ]
+  const numRe = /-?\d+(?:\.\d+)?/g
+  for (const variant of variants) {
+    for (const anchor of anchors) {
+      for (const spec of cases) {
+        const res = notchApi.buildNotchPath({
+          width: spec.width,
+          height: spec.height,
+          variant,
+          anchor,
+          expandRatio: spec.expandRatio,
+          line: spec.line
+        })
+        // 闭合填充路径与连续描边路径非空、不含 NaN/Infinity
+        assert.ok(res.fillPath.startsWith('M 0 0') && res.fillPath.endsWith('Z'), `${variant}/${anchor}/${spec.label} fillPath 未正确闭合`)
+        assert.ok(res.strokePath.startsWith('M '), `${variant}/${anchor}/${spec.label} strokePath 起始异常`)
+        assert.ok(!/NaN|Infinity/i.test(res.fillPath + res.strokePath), `${variant}/${anchor}/${spec.label} 出现 NaN/Infinity`)
+        // 所有数值非负且不超出画布宽高范围
+        for (const token of (res.fillPath + ' ' + res.strokePath).match(numRe) ?? []) {
+          const val = Number(token)
+          assert.ok(val >= 0 && val <= Math.max(spec.width, spec.height) + 0.01, `${variant}/${anchor}/${spec.label} 坐标越界: ${val}`)
+        }
+        // 肩部按停靠边准确隐藏/对称
+        if (anchor === 'left') {
+          assert.equal(res.metrics.earLeft, 0, `${variant} 靠左停靠左肩必须为 0`)
+          assert.ok(res.metrics.earRight > 0, `${variant} 靠左停靠右肩必须 > 0`)
+        } else if (anchor === 'right') {
+          assert.equal(res.metrics.earRight, 0, `${variant} 靠右停靠右肩必须为 0`)
+          assert.ok(res.metrics.earLeft > 0, `${variant} 靠右停靠左肩必须 > 0`)
+        } else {
+          assert.equal(res.metrics.earLeft, res.metrics.earRight, `${variant} 居中停靠左右肩必须对称`)
+          assert.ok(res.metrics.earLeft > 0, `${variant} 居中停靠肩宽必须 > 0`)
+        }
+        // 像素掌机全整数像素坐标校验
+        if (variant === 'pixel') {
+          for (const token of (res.fillPath + ' ' + res.strokePath).match(numRe) ?? []) {
+            assert.ok(Number.isInteger(Number(token)), `pixel/${anchor}/${spec.label} 出现非整数坐标: ${token}`)
+          }
+        }
+        // 圆弧族满足 rTop <= H * 0.48 且 rBot <= H * 0.48
+        if (variant === 'standard' || variant === 'telemetry' || variant === 'neon') {
+          assert.ok(res.metrics.earHeight <= spec.height * 0.48 + 0.01, `${variant} rTop 超出 H*0.48`)
+          assert.ok(res.metrics.bottomCorner <= spec.height * 0.48 + 0.01, `${variant} rBot 超出 H*0.48`)
+        }
+      }
+    }
+  }
+})
 if(failed)process.exitCode=1

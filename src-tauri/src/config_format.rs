@@ -26,6 +26,9 @@ fn default_telemetry_style() -> String {
 fn default_motion_mode() -> String {
     "glide".into()
 }
+fn default_island_shape() -> String {
+    crate::state::ISLAND_SHAPE_FLOATING.into()
+}
 fn default_true() -> bool {
     true
 }
@@ -36,6 +39,8 @@ pub struct PortablePreferences {
     pub theme: String,
     pub active_category_id: String,
     pub island_anchor: String,
+    #[serde(default = "default_island_shape")]
+    pub island_shape: String,
     pub island_page: String,
     pub island_hover_ms: u32,
     pub island_leave_ms: u32,
@@ -67,6 +72,7 @@ impl PortablePreferences {
             theme: ui.theme.clone(),
             active_category_id: ui.active_category_id.clone(),
             island_anchor: ui.island_anchor.clone(),
+            island_shape: crate::state::normalize_island_shape(&ui.island_shape),
             island_page: if crate::state::valid_island_page(&ui.island_page) { ui.island_page.clone() } else { crate::state::PANEL_APPLICATIONS.into() },
             island_hover_ms: ui.island_hover_ms,
             island_leave_ms: ui.island_leave_ms,
@@ -86,7 +92,9 @@ impl PortablePreferences {
     }
     pub fn apply(&self, ui: &mut UiState) {
         ui.theme = self.theme.clone(); ui.active_category_id = self.active_category_id.clone();
-        ui.island_anchor = self.island_anchor.clone(); ui.island_page = self.island_page.clone();
+        ui.island_anchor = self.island_anchor.clone();
+        ui.island_shape = crate::state::normalize_island_shape(&self.island_shape);
+        ui.island_page = self.island_page.clone();
         ui.island_hover_ms = self.island_hover_ms; ui.island_leave_ms = self.island_leave_ms;
         ui.island_reduced_motion = self.island_reduced_motion;
         ui.island_appearance.scale = self.scale; ui.island_appearance.webgl = self.webgl;
@@ -176,6 +184,7 @@ pub fn validate(backup: &ConfigurationBackup) -> Result<(), String> {
     let p = &backup.preferences;
     if !crate::state::valid_theme(&p.theme)
         || !matches!(p.island_anchor.as_str(), "left" | "center" | "right")
+        || !crate::state::valid_island_shape(&p.island_shape)
         || !crate::state::valid_island_page(&p.island_page)
         || !(75..=125).contains(&p.scale)
         || !(100..=2000).contains(&p.island_hover_ms)
@@ -222,7 +231,7 @@ pub fn describe(before: &ConfigurationBackup, after: &ConfigurationBackup) -> Ch
     let categories=counts(&before.applications.categories,&after.applications.categories,|v| &v.id);
     let mut preferences=Vec::new();
     let a=serde_json::to_value(&before.preferences).unwrap_or_default();let b=serde_json::to_value(&after.preferences).unwrap_or_default();
-    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryStyle","微读数样式"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryGpu","微读数·显卡"),("telemetryMemory","微读数·内存"),("telemetryPeripherals","键鼠电量显示")] {
+    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("islandShape","灵动岛形态"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryStyle","微读数样式"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryGpu","微读数·显卡"),("telemetryMemory","微读数·内存"),("telemetryPeripherals","键鼠电量显示")] {
         if a[key]!=b[key] { preferences.push(PreferenceChange{label:label.into(),before:a[key].as_str().map(str::to_owned).unwrap_or_else(||a[key].to_string()),after:b[key].as_str().map(str::to_owned).unwrap_or_else(||b[key].to_string())}); }
     }
     let mut app_details=Vec::new();
@@ -277,6 +286,13 @@ mod tests {
         for motion in ["glide", "sweep", "bounce", "focus", "flicker", "step", "unroll"] {
             let mut backup=sample(); backup.preferences.motion=motion.into();
             let restored=parse(&bytes(&backup)).unwrap(); assert_eq!(backup.fingerprint().unwrap(),restored.fingerprint().unwrap()); assert_eq!(restored.preferences.motion,motion);
+        }
+        for shape in ["floating", "notch", "split"] {
+            let mut backup = sample();
+            backup.preferences.island_shape = shape.into();
+            let restored = parse(&bytes(&backup)).unwrap();
+            assert_eq!(backup.fingerprint().unwrap(), restored.fingerprint().unwrap());
+            assert_eq!(restored.preferences.island_shape, shape);
         }
     }
     #[test] fn removed_page_backups_restore_to_applications_without_an_empty_panel() {
@@ -334,12 +350,17 @@ mod tests {
     #[test] fn legacy_backups_without_telemetry_fields_default_cleanly_and_invalid_combinations_fail() {
         let mut value=serde_json::to_value(sample()).unwrap();
         let prefs=value["preferences"].as_object_mut().unwrap();
-        prefs.remove("motion");prefs.remove("telemetryMode");prefs.remove("telemetryStyle");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryGpu");prefs.remove("telemetryMemory");prefs.remove("telemetryPeripherals");
+        prefs.remove("motion");prefs.remove("islandShape");prefs.remove("telemetryMode");prefs.remove("telemetryStyle");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryGpu");prefs.remove("telemetryMemory");prefs.remove("telemetryPeripherals");
         let restored=parse(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(restored.preferences.motion,"glide");
+        assert_eq!(restored.preferences.island_shape,"floating");
         assert_eq!(restored.preferences.telemetry_mode,"smart");
         assert_eq!(restored.preferences.telemetry_style,"bar");
         assert!(restored.preferences.telemetry_net && restored.preferences.telemetry_cpu && restored.preferences.telemetry_gpu && restored.preferences.telemetry_memory && restored.preferences.telemetry_peripherals);
+
+        let mut bad_shape = sample();
+        bad_shape.preferences.island_shape = "island-unknown".into();
+        assert!(parse(&bytes(&bad_shape)).is_err());
 
         let mut bad_motion=sample();
         bad_motion.preferences.motion="warp".into();

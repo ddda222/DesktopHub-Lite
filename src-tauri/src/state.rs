@@ -51,6 +51,30 @@ pub fn normalize_theme(theme: &str) -> String {
 
 pub const CATEGORY_ALL: &str = "all";
 
+pub const ISLAND_SHAPE_FLOATING: &str = "floating";
+pub const ISLAND_SHAPE_NOTCH: &str = "notch";
+pub const ISLAND_SHAPE_SPLIT: &str = "split";
+
+pub fn valid_island_shape(shape: &str) -> bool {
+    matches!(
+        shape,
+        ISLAND_SHAPE_FLOATING | ISLAND_SHAPE_NOTCH | ISLAND_SHAPE_SPLIT
+    )
+}
+
+/// 兼容旧配置或异常字段，统一回退到默认悬浮胶囊形态。
+pub fn normalize_island_shape(shape: &str) -> String {
+    if valid_island_shape(shape) {
+        shape.to_string()
+    } else {
+        ISLAND_SHAPE_FLOATING.to_string()
+    }
+}
+
+fn default_island_shape() -> String {
+    ISLAND_SHAPE_FLOATING.to_string()
+}
+
 /// 本机调音台只保存手动隐藏的标识和名称，设备离线后仍能在设置中恢复。
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +88,8 @@ pub struct MixerVisibility {
 pub struct UiState {
     pub island_expanded: bool,
     pub island_anchor: String,
+    #[serde(default = "default_island_shape")]
+    pub island_shape: String,
     pub island_page: String,
     pub island_hover_ms: u32,
     pub island_leave_ms: u32,
@@ -98,6 +124,7 @@ impl Default for UiState {
         Self {
             island_expanded: false,
             island_anchor: "center".into(),
+            island_shape: default_island_shape(),
             island_page: default_page(),
             island_hover_ms: default_hover(),
             island_leave_ms: default_leave(),
@@ -150,6 +177,8 @@ impl UiStateHandle {
 pub struct UiPreferences {
     #[serde(default = "default_anchor")]
     pub island_anchor: String,
+    #[serde(default = "default_island_shape")]
+    pub island_shape: String,
     #[serde(default = "default_page")]
     pub island_page: String,
     #[serde(default = "default_hover")]
@@ -172,6 +201,7 @@ impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             island_anchor: default_anchor(),
+            island_shape: default_island_shape(),
             island_page: default_page(),
             island_hover_ms: default_hover(),
             island_leave_ms: default_leave(),
@@ -189,6 +219,7 @@ impl UiPreferences {
     pub fn from_state(state: &UiState) -> Self {
         Self {
             island_anchor: state.island_anchor.clone(),
+            island_shape: normalize_island_shape(&state.island_shape),
             island_page: state.island_page.clone(),
             island_hover_ms: state.island_hover_ms,
             island_leave_ms: state.island_leave_ms,

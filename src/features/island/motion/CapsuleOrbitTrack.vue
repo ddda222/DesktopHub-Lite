@@ -16,10 +16,13 @@ const props = withDefaults(defineProps<{
   tone?: 'accent' | 'success' | 'error' | 'warning'
   speed?: number
   reduced?: boolean
+  /** 贴顶形态传入单路径轮廓，使任务巡航光粒紧贴融合肩部运行 */
+  customPath?: string
 }>(), {
   tone: 'accent',
   speed: 1,
-  reduced: false
+  reduced: false,
+  customPath: ''
 })
 
 const overlayEl = ref<HTMLElement | null>(null)
@@ -134,10 +137,11 @@ function tickFrame(): void {
   lastTickMs = now
 
   const { w, h, r } = cachedBox
-  const quantKey = `${w.toFixed(1)}:${h.toFixed(1)}:${r.toFixed(1)}`
+  const custom = props.customPath.trim()
+  const quantKey = custom ? `c:${w.toFixed(1)}:${h.toFixed(1)}:${custom}` : `${w.toFixed(1)}:${h.toFixed(1)}:${r.toFixed(1)}`
   if (quantKey !== cachedKey || !cachedRawPath) {
     cachedKey = quantKey
-    const pathD = buildRoundedRectPath(w, h, r)
+    const pathD = custom || buildRoundedRectPath(w, h, r)
     svgEl.value?.setAttribute('viewBox', `0 0 ${w.toFixed(2)} ${h.toFixed(2)}`)
     railPathEl.value?.setAttribute('d', pathD)
     cachedRawPath = MotionPathPlugin.getRawPath(pathD)
