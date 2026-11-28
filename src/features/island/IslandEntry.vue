@@ -687,8 +687,7 @@ const visibleHeight = computed(() => {
 const topShellHeight = computed(() => (isSplit.value ? splitTopHeight.value : visibleHeight.value))
 const topExpandRatio = computed(() => {
   if (tucked.value) return 0
-  if (isSplit.value) return expanded.value ? 0.14 : 0
-  return Math.max(0, Math.min(1, (visibleHeight.value - 34) / 86))
+  return Math.max(0, Math.min(1, (topShellHeight.value - 34) / 86))
 })
 const topEarMetrics = computed(() => {
   if (isFloating.value) {
@@ -734,8 +733,9 @@ const notchGlassStyle = computed(() => {
   const mask = `linear-gradient(to bottom, transparent 0px, transparent ${fadeTop}px, #000 ${fadeEnd}px)`
   return {
     left: `${earLeft}px`,
-    right: `${earRight}px`,
-    width: 'auto',
+    right: 'auto',
+    // <canvas> 属于 HTML 替换元素，width: auto 会回退到内在位图宽（约 300px）而非拉伸，必须用显式 calc 铺满主体宽。
+    width: `calc(100% - ${earLeft + earRight}px)`,
     maskImage: mask,
     WebkitMaskImage: mask
   }
@@ -751,7 +751,7 @@ const cornerRadius = computed(() => {
 const expandedOuterWidth = computed(() => {
   if (isFloating.value) return expandedWidth.value
   const sampleH = isSplit.value ? splitTopExpandedHeights[variant.value] : 300
-  const sampleRatio = isSplit.value ? 0.14 : 1
+  const sampleRatio = isSplit.value ? Math.max(0, Math.min(1, (sampleH - 34) / 86)) : 1
   const maxEars = computeNotchEarMetrics(sampleH, variant.value, notchAnchor.value, sampleRatio, false)
   return Math.min(availableWidth.value, Math.ceil(expandedWidth.value + maxEars.earLeft + maxEars.earRight))
 })
@@ -1307,6 +1307,9 @@ watch(expandedOuterWidth, () => {
   queueGeometry()
 }, { flush: 'post' })
 watch(islandShape, () => {
+  cancelExpandStaging()
+  clearTimeout(geometryTimer)
+  geometryTimer = undefined
   clearDismissVisual()
   shellTween?.kill()
   shellTween = null
@@ -1421,6 +1424,8 @@ function clearDismissVisual(): void {
   dismissCurrentY = 0
   dismissSession = undefined
   applyDismissVisual(0, 1, false, false)
+  panel.value?.classList.remove('dismiss-dragging')
+  cardShellEl.value?.classList.remove('dismiss-dragging')
 }
 
 function startDismissSnapBack(_initialVelocityPxPerSec: number): void {
@@ -1812,6 +1817,11 @@ watch(page, (nextPage, prevPage) => {
 }, { flush: 'post' })
 watch(() => props.previewKeepOpen, value => { if (!value && !hovering.value) leave() })
 watch(() => state.ui.islandAnchor, () => {
+  cancelExpandStaging()
+  clearTimeout(geometryTimer)
+  geometryTimer = undefined
+  geometryMoving.value = false
+  geometryShrinking = false
   if (isDesktop) void nextTick(queueGeometry)
   else windowDrag.reset()
 }, { flush: 'post' })
@@ -2022,6 +2032,13 @@ function appendNotchRegions(
       ? 2
       : Math.round(metrics.bottomCorner)
   pushSafeRegion(regions, rectW, rectH, x + earL, y, bodyW, h, bodyR)
+  // 靠左/靠右贴屏停靠时，贴屏侧底角应保持 90° 平直贴边，追加无圆角矩形带补齐对称 CreateRoundRectRgn 裁去的贴屏侧底角。
+  if (bodyR > 0 && notchAnchor.value === 'left') {
+    pushSafeRegion(regions, rectW, rectH, x, y, Math.min(bodyW, bodyR + 2), h, 0)
+  } else if (bodyR > 0 && notchAnchor.value === 'right') {
+    const stripW = Math.min(bodyW, bodyR + 2)
+    pushSafeRegion(regions, rectW, rectH, x + w - stripW, y, stripW, h, 0)
+  }
 }
 
 /** 计算当前可见外壳在目标新视口坐标系中的精确贴合区域，用于扩容首帧遮罩未渲染的透明区。 */
@@ -2505,15 +2522,19 @@ watch(expanded, (open) => {
         }
       }
     } else if (ch) {
-      chromeTween = gsap.to(ch, {
-        opacity: 0,
-        y: -3,
-        scaleX: 0.98,
-        scaleY: 0.98,
-        duration: Math.max(0.001, Math.min(0.09, spec.duration * 0.75)),
-        delay: 0.04,
-        ease: 'power2.out'
-      })
+      if (motionMode.value === 'flicker') {
+        gsap.set(ch, { opacity: 0, y: -3, scaleX: 0.98, scaleY: 0.98 })
+      } else {
+        chromeTween = gsap.to(ch, {
+          opacity: 0,
+          y: -3,
+          scaleX: 0.98,
+          scaleY: 0.98,
+          duration: Math.max(0.001, Math.min(0.09, spec.duration * 0.75)),
+          delay: 0.04,
+          ease: 'power2.out'
+        })
+      }
     }
     return
   }
@@ -2810,7 +2831,7 @@ onBeforeUnmount(() => {
         :quality="quality"
         :active="effectsActive"
         :paused="pageSwitching"
-        :corner-radius="variant === 'mecha' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : undefined"
+        :corner-radius="isNotch ? topEarMetrics.bottomCorner : (variant === 'mecha' || variant === 'pixel' ? 4 : variant === 'blueprint' ? 2 : undefined)"
         :palette="glassPalette"
         @unavailable="glassAvailable = false"
       />
@@ -3102,7 +3123,13 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- split 模式透明无视觉指针桥接层：覆盖 7px 视觉缝隙并纳入 SetWindowRgn，跨缝移动绝不误触发 mouseleave -->
-      <div v-if="isSplit && expanded" ref="splitBridgeEl" class="split-pointer-bridge" aria-hidden="true" />
+      <div
+        v-if="isSplit && splitCardVisible"
+        ref="splitBridgeEl"
+        class="split-pointer-bridge"
+        :class="{ 'is-inactive': !expanded }"
+        aria-hidden="true"
+      />
 
       <div
         ref="cardShellEl"
@@ -3356,6 +3383,9 @@ onBeforeUnmount(() => {
   margin: -2px 0;
   background: transparent;
   pointer-events: auto;
+}
+.split-pointer-bridge.is-inactive {
+  pointer-events: none;
 }
 .island-body-shell {
   position: relative;
@@ -3855,9 +3885,13 @@ button {
   transform: scale(.97);
 }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 2; background: var(--success); border-radius: 50%; }
-.island:not(.tucked) > .attention-dot { right: 16px; top: 50%; transform: translateY(-50%); background: var(--success); }
+.attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 4; background: var(--success); border-radius: 50%; }
+.island:not(.tucked) > .attention-dot,
+.island:not(.tucked) .island-top-shell > .attention-dot { right: 16px; top: 50%; transform: translateY(-50%); background: var(--success); }
 .island.expanded > .attention-dot { right: 20px; top: 12px; transform: none; }
+.island.shape-notch:not(.tucked) > .attention-dot,
+.island.shape-split:not(.tucked) .island-top-shell > .attention-dot { right: calc(var(--ear-right) + 12px); }
+.island.shape-notch.expanded > .attention-dot { right: calc(var(--ear-right) + 16px); }
 .attention-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 12px; border-radius: 12px; background: var(--surface-2); font-size: 12px; }
 .attention-strip > span { flex: 1; }
 .attention-strip button { padding: 5px 8px; border-radius: 8px; background: var(--hover); }

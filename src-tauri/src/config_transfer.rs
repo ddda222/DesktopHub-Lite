@@ -104,7 +104,7 @@ pub async fn apply_configuration_import(app: AppHandle, window: WebviewWindow, t
         *pending = None;
         drop(apps); drop(pending);
         if previous.island_page == crate::state::PANEL_TRANSLATION && ui.island_page != previous.island_page { crate::translation::cancel_for_window(&app, crate::windows::BAR); }
-        if previous.island_anchor != ui.island_anchor { state.windows.set_bar_free_position(false); }
+        if previous.island_anchor != ui.island_anchor || previous.island_shape != ui.island_shape { state.windows.set_bar_free_position(false); }
         crate::windows::place_bar(&app, &state.windows);
         crate::broadcast_apps(&app, &config); crate::broadcast_ui(&app);
         Ok(ImportResult { backup_path: backup_path.to_string_lossy().into_owned(), config, ui: state.ui.snapshot() })

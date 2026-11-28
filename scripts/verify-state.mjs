@@ -585,4 +585,52 @@ await test('notchPath 单路径几何覆盖四大主力主题与全停靠边，�
     }
   }
 })
+await test('appendNotchRegions 靠左/靠右停靠补齐贴屏侧 90° 直角底角带且总区域数满足 <= 6 限制', () => {
+  const islandVue = fs.readFileSync(new URL('../src/features/island/IslandEntry.vue', import.meta.url), 'utf8')
+  const islandScript = islandVue.split('<script setup lang="ts">')[1].split('</script>')[0]
+  const topEarMetrics = { value: { earLeft: 0, earRight: 16, earHeight: 16, bottomCorner: 18 } }
+  const notchAnchor = { value: 'left' }
+  const variant = { value: 'standard' }
+  const api = subject(
+    ['pushSafeRegion', 'appendNotchRegions'],
+    { topEarMetrics, notchAnchor, variant },
+    '',
+    islandScript
+  )
+  const rect = { left: 0, top: 0, width: 560, height: 620 }
+  const box = { left: 0, top: 0, width: 520, height: 320 }
+
+  // 居中：双段合并（顶带 + 主体圆角）
+  notchAnchor.value = 'center'
+  topEarMetrics.value = notchApi.computeNotchEarMetrics(320, 'standard', 'center', 1, false)
+  const centerRegions = []
+  api.appendNotchRegions(centerRegions, { left: 10, top: 0, width: 540, height: 320 }, rect, 560, 620)
+  assert.equal(centerRegions.length, 2)
+  assert.equal(centerRegions[0].radius, 0)
+  assert.ok(centerRegions[1].radius > 0)
+
+  // 靠左：三段合并，第 3 段紧贴 x=0 且 radius=0 补齐左下 90° 直角，且 split 总区域 3+2=5 <= 6
+  notchAnchor.value = 'left'
+  topEarMetrics.value = notchApi.computeNotchEarMetrics(320, 'standard', 'left', 1, false)
+  const leftRegions = []
+  api.appendNotchRegions(leftRegions, box, rect, 560, 620)
+  assert.equal(leftRegions.length, 3)
+  assert.equal(leftRegions[2].x, 0)
+  assert.equal(leftRegions[2].y, 0)
+  assert.equal(leftRegions[2].height, 320)
+  assert.equal(leftRegions[2].radius, 0)
+  assert.ok(leftRegions[2].width >= Math.round(topEarMetrics.value.bottomCorner))
+
+  // 靠右：三段合并，第 3 段右缘紧贴 x+w 且 radius=0 补齐右下 90° 直角
+  notchAnchor.value = 'right'
+  topEarMetrics.value = notchApi.computeNotchEarMetrics(320, 'standard', 'right', 1, false)
+  const rightRegions = []
+  api.appendNotchRegions(rightRegions, { left: 40, top: 0, width: 520, height: 320 }, rect, 560, 620)
+  assert.equal(rightRegions.length, 3)
+  assert.equal(rightRegions[2].x + rightRegions[2].width, 560)
+  assert.equal(rightRegions[2].y, 0)
+  assert.equal(rightRegions[2].height, 320)
+  assert.equal(rightRegions[2].radius, 0)
+  assert.ok(rightRegions.length + 2 <= 6, 'split 靠边展开总 HRGN 区域数不得超过 Rust 后端 6 段上限')
+})
 if(failed)process.exitCode=1
