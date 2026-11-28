@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
 import HubMotionConfig from '@/components/HubMotionConfig.vue'
+import InlineToastBar from '@/components/InlineToastBar.vue'
 import TranslationPanel from '@/features/translation/TranslationPanel.vue'
 import { listenHost } from '@/lib/desktop/desktop'
-import { cancelTranslation, subscribeHostEvents } from '@/store'
+import { cancelTranslation, state, subscribeHostEvents } from '@/store'
 
 let disposed = false
 let listeners: Array<() => void> = []
@@ -20,11 +21,14 @@ onBeforeUnmount(() => { disposed = true; listeners.forEach(stop => stop()) })
 
 <template>
   <HubMotionConfig>
-    <main class="translation-window scroll-y"><TranslationPanel standalone /></main>
+    <main class="translation-window scroll-y">
+      <TranslationPanel standalone />
+      <InlineToastBar v-if="state.toasts.length" :items="state.toasts" />
+    </main>
   </HubMotionConfig>
 </template>
 
 <style scoped>
-.translation-window { min-height: 100vh; padding: 12px; background: var(--surface); }
+.translation-window { position: relative; min-height: 100vh; padding: 12px; background: var(--surface); }
 .translation-window :deep(.panel) { width: 100%; max-height: none; }
 </style>

@@ -431,7 +431,7 @@
   outline-color: var(--accent);
 }
 
-/* 6. 独立轻提示与图片预览窗（ToastWindow / ImagePreviewWindow） */
+/* 6. 窗内轻提示条与图片预览窗（InlineToastBar / ImagePreviewWindow） */
 :root[data-theme='midnight'] .toast {
   border-radius: 6px;
   border-color: rgba(109, 182, 255, 0.32);

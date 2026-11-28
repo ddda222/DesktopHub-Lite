@@ -253,35 +253,6 @@ export async function requestIslandShape(shape: IslandShape): Promise<void> {
   await invokeHost('set_island_shape', { shape })
 }
 
-/** 弹一条轻提示。提示由独立的 toast 窗口渲染。 */
-export async function requestToast(message: string, kind: 'info' | 'error' | 'success' = 'info'): Promise<void> {
-  if (!isDesktop) return
-  try {
-    await invokeHost('show_toast', { message, kind })
-  } catch {
-    // 提示发不出去不该打断主流程
-  }
-}
-
-/** 收起轻提示窗口。 */
-export async function dismissToast(): Promise<void> {
-  if (!isDesktop) return
-  await invokeHost('hide_toast')
-}
-
-/** 提示窗口按内容自适应尺寸。只在 toast 窗口调用。 */
-export async function resizeToast(width: number, height: number): Promise<void> {
-  if (!isDesktop) return
-  await invokeHost('set_toast_size', { width: Math.round(width), height: Math.round(height) })
-}
-
-/** 订阅轻提示事件；返回取消订阅函数。 */
-export async function onToast(
-  handler: (payload: { message: string; kind: string }) => void
-): Promise<() => void> {
-  return listenHost<{ message: string; kind: string }>('toast', handler)
-}
-
 /** 窗口失焦时回调；返回取消订阅函数。浏览器里无操作。 */
 export function onWindowBlur(handler: () => void): () => void {
   if (!isDesktop) return () => {}

@@ -34,8 +34,6 @@ function pickRoot(): { load: RootLoader; shell: string } {
       return { load: () => import('./windows/TranslationWindow.vue'), shell: 'translation' }
     case 'capture':
       return { load: () => import('./windows/CaptureOverlay.vue'), shell: 'capture' }
-    case 'toast':
-      return { load: () => import('./windows/ToastWindow.vue'), shell: 'toast' }
     default:
       return { load: () => import('./windows/BrowserPreview.vue'), shell: 'browser' }
   }

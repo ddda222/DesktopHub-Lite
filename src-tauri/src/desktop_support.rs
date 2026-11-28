@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use crate::{AppState, windows, toggle_panel, show_window, set_island_expanded};
 
@@ -44,7 +44,15 @@ pub fn register(app: &AppHandle) {
                 let handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Err(error) = crate::ocr::start_screen_ocr(handle.clone()).await {
-                        let _ = crate::show_toast(handle, error, Some("error".into()));
+                        let _ = handle.emit_to(
+                            windows::BAR,
+                            "island-feedback",
+                            serde_json::json!({
+                                "kind": "app-error",
+                                "label": error,
+                                "urgent": true,
+                            }),
+                        );
                     }
                 });
                 return;

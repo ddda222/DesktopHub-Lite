@@ -148,7 +148,7 @@ async function save(): Promise<void> {
       appearance: { ...appearance.value }, anchor: anchor.value,
       hoverMs: hoverMs.value, leaveMs: leaveMs.value, reducedMotion: reducedMotion.value
     })
-    applied.value = submitted; failed.value = false; feedback.value = '设置已应用'
+    applied.value = submitted; failed.value = false; feedback.value = ''
     pushToast('灵动岛设置已保存', 'success')
   } catch (error) { failed.value = true; feedback.value = `应用失败：${String(error)}`; pushToast(String(error), 'error') }
   finally { saving.value = false }

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { version as appVersion } from '../../../package.json'
 import GsapPresence from '@/components/GsapPresence.vue'
 import Icon from '@/components/Icon.vue'
+import InlineToastBar from '@/components/InlineToastBar.vue'
 import MotionSaveButton from '@/components/MotionSaveButton.vue'
 import MotionSwitch from '@/components/MotionSwitch.vue'
 import SegmentedControl from '@/components/SegmentedControl.vue'
@@ -761,6 +762,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </div>
+      <InlineToastBar v-if="(props.standalone || isDesktop) && state.toasts.length" :items="state.toasts" />
     </div>
   </div>
 </template>

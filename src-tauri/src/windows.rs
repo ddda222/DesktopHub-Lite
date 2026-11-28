@@ -21,9 +21,6 @@ pub const BAR: &str = "bar";
 pub const POP: &str = "pop";
 pub const SETTINGS: &str = "settings";
 pub const TRANSLATION: &str = "translation";
-/// 轻提示窗口：图标条窗口刚好等于图标条本身，放不下提示，
-/// 所以提示单独用一个按内容自适应的小窗口，浮在图标条上方。
-pub const TOAST: &str = "toast";
 
 pub const WINDOW_STATE_FILE: &str = "window-state.json";
 
@@ -61,7 +58,6 @@ pub struct WindowsHandle {
     pop_size: Mutex<(f64, f64)>,
     /// 弹层相对图标条的水平对齐：center / left / right
     pop_align: Mutex<String>,
-    toast_size: Mutex<(f64, f64)>,
     /// 弹层窗口显示的时刻。刚显示时系统会给它一次焦点，
     /// 之后紧接着的失焦并不代表用户点了别处，需要忽略这一小段。
     pop_shown_at: Mutex<Option<Instant>>,
@@ -84,7 +80,6 @@ impl WindowsHandle {
             bar_regions_expanded: Mutex::new(false),
             pop_size: Mutex::new((384.0, 480.0)),
             pop_align: Mutex::new("center".to_string()),
-            toast_size: Mutex::new((360.0, 40.0)),
             pop_shown_at: Mutex::new(None),
             bar_expanded_at: Mutex::new(None),
             last_auto_close: Mutex::new(None),
@@ -189,15 +184,6 @@ impl WindowsHandle {
     pub fn set_pop_size(&self, width: f64, height: f64) {
         let mut size = self.pop_size.lock().unwrap_or_else(|e| e.into_inner());
         *size = (width.max(160.0), height.max(80.0));
-    }
-
-    pub fn toast_size(&self) -> (f64, f64) {
-        *self.toast_size.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    pub fn set_toast_size(&self, width: f64, height: f64) {
-        let mut size = self.toast_size.lock().unwrap_or_else(|e| e.into_inner());
-        *size = (width.clamp(120.0, 640.0), height.clamp(28.0, 200.0));
     }
 
     pub fn remember(&self, x: i32, y: i32) {
@@ -540,71 +526,6 @@ pub fn ensure_translation(app: &AppHandle) -> Result<WebviewWindow, String> {
         .visible(false)
         .focused(false)
         .build().map_err(|error| format!("无法打开翻译窗口：{error}"))
-}
-
-/// 轻提示窗口：不抢焦点、不进任务栏、尺寸随内容变化。
-pub fn ensure_toast(app: &AppHandle) -> Result<WebviewWindow, String> {
-    if let Some(window) = app.get_webview_window(TOAST) {
-        return Ok(window);
-    }
-    let (width, height) = (360.0, 40.0);
-    let window = WebviewWindowBuilder::new(app, TOAST, WebviewUrl::App("index.html".into()))
-        .title("DesktopHub Lite 提示")
-        .inner_size(width, height)
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .shadow(false)
-        .visible(false)
-        .focused(false)
-        .build()
-        .map_err(|error| format!("创建提示窗口失败：{error}"))?;
-    // 提示是纯展示，绝不能吃掉鼠标：否则它盖住的桌面区域会点不动。
-    let _ = window.set_ignore_cursor_events(true);
-    Ok(window)
-}
-
-/// 把提示窗口放到「弹层上方」或「图标条上方」，水平居中。
-pub fn place_toast(app: &AppHandle, handle: &WindowsHandle) {
-    let Some(toast) = app.get_webview_window(TOAST) else {
-        return;
-    };
-    let Some(bar) = app.get_webview_window(BAR) else {
-        return;
-    };
-    let Ok(bar_pos) = bar.outer_position() else {
-        return;
-    };
-    let scale = bar.scale_factor().unwrap_or(1.0);
-    let (bar_w, _bar_h) = handle.bar_size();
-    let (toast_w, toast_h) = handle.toast_size();
-    let bar_w = (bar_w * scale).round() as i32;
-    let toast_w = (toast_w * scale).round() as i32;
-    let toast_h = (toast_h * scale).round() as i32;
-    let gap = (POP_GAP * scale).round() as i32;
-
-    // 有弹层时叠在弹层上方，避免提示被弹层盖住。
-    let anchor_top = app
-        .get_webview_window(POP)
-        .filter(|pop| pop.is_visible().unwrap_or(false))
-        .and_then(|pop| pop.outer_position().ok())
-        .map(|pos| pos.y)
-        .unwrap_or(bar_pos.y);
-
-    let mut x = bar_pos.x + (bar_w - toast_w) / 2;
-    let mut y = anchor_top - toast_h - gap;
-
-    if let Some((ax, ay, aw, ah)) = work_area(app) {
-        if y < ay {
-            y = anchor_top + gap;
-        }
-        x = x.clamp(ax, (ax + aw as i32 - toast_w).max(ax));
-        y = y.clamp(ay, (ay + ah as i32 - toast_h).max(ay));
-    }
-
-    let _ = toast.set_position(tauri::Position::Physical(PhysicalPosition::new(x, y)));
 }
 
 fn center_window(window: &WebviewWindow, size: (f64, f64)) {

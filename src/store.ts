@@ -1,7 +1,7 @@
 /**
  * 界面状态与动作。
  *
- * 多窗口注意：桌面版里 bar / pop / settings / toast 是四个独立 WebView，
+ * 多窗口注意：桌面版里 bar / pop / settings / translation 是独立 WebView，
  * 各自有一份 store。所以「哪个弹层打开、当前分类、主题、暂停」这些跨窗口状态
  * 以 Rust 为准，这里只保留一份镜像并订阅 `ui-state` 广播。
  * 业务数据（应用配置、剪贴板、翻译设置）也来自 Rust 命令，不再用合成数据。
@@ -32,7 +32,6 @@ import {
   requestPanel,
   requestSettings,
   requestTheme,
-  requestToast,
   type SettingsSection,
   type UiState
 } from '@/lib/desktop/desktop'
@@ -448,32 +447,66 @@ export async function subscribeApplications(): Promise<() => void> {
  * 所以统一从这里订阅，窗口只负责在卸载时调用返回的取消函数。
  */
 export async function subscribeHostEvents(): Promise<() => void> {
+  // 后台全局错误/剪贴板告警仅由 bar 主窗响应，避免设置窗或独立翻译窗同时打开时重复弹出多条提示。
+  const handleGlobalNotice = !isDesktop || windowLabel === 'bar'
   const offs = await Promise.all([
     subscribeUiState(), subscribeApplications(),
-    listenHost('clipboard-changed', () => { void refreshClipboard().catch(() => pushToast('读取剪贴板历史失败', 'error')) }),
+    listenHost('clipboard-changed', () => {
+      void refreshClipboard().catch(() => {
+        if (handleGlobalNotice) pushToast('读取剪贴板历史失败', 'error')
+      })
+    }),
     listenHost<SnippetPayload>('snippets-changed', (payload) => applySnippets(payload)),
-    listenHost<string>('clipboard-notice', (message) => pushToast(message, 'error')),
-    listenHost('translation-settings-changed', () => { void refreshTranslationSettings().catch(() => pushToast('读取模型设置失败', 'error')) })
+    listenHost<string>('clipboard-notice', (message) => {
+      if (handleGlobalNotice) pushToast(message, 'error')
+    }),
+    listenHost('translation-settings-changed', () => {
+      void refreshTranslationSettings().catch(() => {
+        if (handleGlobalNotice) pushToast('读取模型设置失败', 'error')
+      })
+    })
   ])
   return () => offs.forEach((off) => off())
 }
 
-/* ---------- 轻提示 ---------- */
+/* ---------- 窗内与岛内轻提示 ---------- */
 
 let toastSeq = 0
+const toastTimers = new Map<number, number>()
 
 export function pushToast(text: string, kind: ToastKind = 'info'): void {
-  if (isDesktop) {
-    // 桌面版提示由独立的 toast 窗口渲染：图标条窗口只有图标条大小，放不下提示。
-    void requestToast(text, kind)
-    return
+  const clean = text.trim()
+  if (!clean) return
+  // 同文案防抖去重，避免短时间连点把提示条堆叠得过高。
+  const dupIdx = state.toasts.findIndex((item) => item.text === clean && item.kind === kind)
+  if (dupIdx >= 0) {
+    const existing = state.toasts[dupIdx]!
+    const prevTimer = toastTimers.get(existing.id)
+    if (prevTimer !== undefined) {
+      window.clearTimeout(prevTimer)
+      toastTimers.delete(existing.id)
+    }
+    state.toasts.splice(dupIdx, 1)
   }
-  const toast: Toast = { id: ++toastSeq, text, kind }
+  const toast: Toast = { id: ++toastSeq, text: clean, kind }
   state.toasts.push(toast)
-  window.setTimeout(() => {
+  while (state.toasts.length > 2) {
+    const dropped = state.toasts.shift()
+    if (dropped) {
+      const oldTimer = toastTimers.get(dropped.id)
+      if (oldTimer !== undefined) {
+        window.clearTimeout(oldTimer)
+        toastTimers.delete(dropped.id)
+      }
+    }
+  }
+  const duration = kind === 'error' ? 4000 : 2600
+  const timer = window.setTimeout(() => {
+    toastTimers.delete(toast.id)
     const index = state.toasts.findIndex((item) => item.id === toast.id)
     if (index >= 0) state.toasts.splice(index, 1)
-  }, 2600)
+  }, duration)
+  toastTimers.set(toast.id, timer)
 }
 
 /* ---------- 计算属性 ---------- */

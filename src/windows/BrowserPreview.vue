@@ -259,7 +259,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); browserI
       <header ref="imageDemoHeader" class="image-demo-header"><span>网页演示 · 置顶仅展示状态</span><div><button type="button" :aria-pressed="state.settings.theme === 'light'" @click="setTheme('light')">浅色</button><button type="button" :aria-pressed="state.settings.theme === 'dark'" @click="setTheme('dark')">深色</button><button type="button" :aria-pressed="state.settings.theme === 'midnight'" @click="setTheme('midnight')">星舰仪表</button></div></header>
       <ImagePreviewWindow v-if="browserImagePreview" :demo-content="browserImagePreview" @close="closeImageDemo" @resize="resizeImageDemo" />
     </dialog>
-    <div class="toasts" role="status" aria-live="polite">
+    <div v-if="!state.ui.settingsOpen && !state.ui.islandExpanded" class="toasts" role="status" aria-live="polite">
       <GsapPresence
         group
         tag="div"

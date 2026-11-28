@@ -6,6 +6,7 @@ import CapsuleMorphGlyph from './CapsuleMorphGlyph.vue'
 import CapsuleOrbitTrack from './motion/CapsuleOrbitTrack.vue'
 import { animateFlipFromState, animateScrambleText, captureFlipSnapshot, Flip, gsap, playFlipSnapshot, vGsapHover, vGsapPress } from '@/lib/gsapMotion'
 import Icon from '@/components/Icon.vue'
+import InlineToastBar from '@/components/InlineToastBar.vue'
 import GlassLight from '@/components/GlassLight.vue'
 import LiquidSkin, { type IslandVariant } from './motion/LiquidSkin.vue'
 import {
@@ -951,12 +952,39 @@ function showFeedback(kind: string, customLabel?: string, customTooltip?: string
 
 function handleHostFeedback(payload: HostFeedbackPayload): void {
   if (typeof payload === 'string') {
-    showFeedback(payload)
+    if (expanded.value) {
+      const label = payload === 'copied' ? '已复制' : payload === 'translated' ? '翻译完成' : payload === 'translation-error' ? '翻译失败' : ''
+      if (label) pushToast(label, payload === 'translation-error' ? 'error' : 'success')
+    } else {
+      showFeedback(payload)
+    }
     return
   }
   if (!payload || typeof payload !== 'object') return
-  showFeedback(payload.kind || 'copied', payload.label, payload.tooltip, !!payload.urgent)
+  const kind = payload.kind || 'copied'
+  const isError = kind === 'translation-error' || kind === 'task-error' || kind === 'task-cancelled' || kind === 'app-error' || kind === 'battery-low' || kind === 'battery-critical' || kind === 'gpu-overheat'
+  if (expanded.value && payload.label) {
+    pushToast(payload.label, isError ? 'error' : 'success')
+  } else {
+    showFeedback(kind, payload.label, payload.tooltip, !!payload.urgent)
+  }
 }
+
+// 灵动岛自治反馈分流：展开态直接展示在岛内底部轻提示条；收起态/细线态消费并转入胶囊原位反馈（细线态仅错误紧急短浮）。
+let lastHandledToastId = 0
+watch(
+  () => state.toasts.map(item => item.id),
+  () => {
+    if (!isDesktop || expanded.value || !state.toasts.length) return
+    const latest = state.toasts[state.toasts.length - 1]
+    if (!latest || latest.id === lastHandledToastId) return
+    lastHandledToastId = latest.id
+    const kind = latest.kind === 'error' ? 'app-error' : latest.kind === 'success' ? 'copied' : 'app-launched'
+    showFeedback(kind, latest.text, latest.text, latest.kind === 'error')
+    state.toasts.splice(0, state.toasts.length)
+  },
+  { flush: 'sync' }
+)
 
 async function focusOrcaFromBadge(): Promise<void> {
   if (!isDesktop) {
@@ -3377,6 +3405,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         </div>
+        <InlineToastBar v-if="expanded && !state.ui.settingsOpen && state.toasts.length" compact :items="state.toasts" />
         <button
           v-if="expanded && !approval"
           ref="dismissHandle"
@@ -3645,6 +3674,9 @@ onBeforeUnmount(() => {
   left: var(--ear-left);
   right: var(--ear-right);
   width: auto;
+}
+.shape-notch :deep(.inline-toast-stack) {
+  left: calc(50% + (var(--ear-left) - var(--ear-right)) / 2);
 }
 .island-chrome.is-split-chrome {
   position: absolute;

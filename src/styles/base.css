@@ -36,11 +36,9 @@ body {
 :root[data-shell='bar'],
 :root[data-shell='pop'],
 :root[data-shell='settings'],
-:root[data-shell='toast'],
 :root[data-shell='bar'] body,
 :root[data-shell='pop'] body,
-:root[data-shell='settings'] body,
-:root[data-shell='toast'] body {
+:root[data-shell='settings'] body {
   background: transparent !important;
   box-shadow: none !important;
   border: 0 !important;
@@ -49,8 +47,7 @@ body {
 
 :root[data-shell='bar'] #app,
 :root[data-shell='pop'] #app,
-:root[data-shell='settings'] #app,
-:root[data-shell='toast'] #app {
+:root[data-shell='settings'] #app {
   display: inline-block;
   height: auto;
   background: transparent;

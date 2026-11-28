@@ -70,8 +70,6 @@ static CATEGORY_SEQ: AtomicU64 = AtomicU64::new(0);
 pub const UI_STATE_EVENT: &str = "ui-state";
 /// 应用配置变化事件：图标条、溢出网格、设置窗口各自持有一份镜像，靠它刷新。
 pub const APPLICATIONS_EVENT: &str = "applications-changed";
-/// 轻提示事件：toast 窗口收到后渲染并回报尺寸。
-pub const TOAST_EVENT: &str = "toast";
 /// 灵动岛主窗失焦通知：由前端结合交互保护态决定是否自动收起。
 pub const ISLAND_WINDOW_BLUR_EVENT: &str = "island-window-blur";
 /// 需要跨重启保留的界面偏好。
@@ -452,7 +450,7 @@ async fn set_category(app: AppHandle, category_id: String) -> Result<UiState, St
 #[tauri::command]
 fn selftest_windows(app: AppHandle) -> Vec<String> {
     let mut report = Vec::new();
-    for label in [windows::BAR, windows::POP, windows::SETTINGS, windows::TOAST] {
+    for label in [windows::BAR, windows::POP, windows::SETTINGS] {
         let Some(window) = app.get_webview_window(label) else {
             report.push(format!("{label}: 未创建"));
             continue;
@@ -538,50 +536,6 @@ async fn set_island_shape(app: AppHandle, shape: String) -> Result<UiState, Stri
     })
     .await
     .map_err(|_| "灵动岛形态保存中断".to_string())?
-}
-
-/// 弹一条轻提示。提示由独立的 toast 窗口渲染，避免被图标条窗口裁掉。
-#[tauri::command]
-fn show_toast(app: AppHandle, message: String, kind: Option<String>) -> Result<(), String> {
-    if message.trim().is_empty() {
-        return Err("提示内容为空".into());
-    }
-    let window = windows::ensure_toast(&app)?;
-    let payload = serde_json::json!({
-        "message": message,
-        "kind": kind.unwrap_or_else(|| "info".to_string()),
-    });
-    window
-        .emit(TOAST_EVENT, payload)
-        .map_err(|error| format!("发送提示失败：{error}"))?;
-
-    let state = app.state::<AppState>();
-    // 先按上一次的尺寸摆放，界面量出真实尺寸后再修正一次。
-    windows::place_toast(&app, &state.windows);
-    let _ = window.show();
-    Ok(())
-}
-
-/// 提示窗口量出真实尺寸后回调。
-#[tauri::command]
-fn set_toast_size(app: AppHandle, width: f64, height: f64) {
-    let state = app.state::<AppState>();
-    state.windows.set_toast_size(width, height);
-    let Some(window) = app.get_webview_window(windows::TOAST) else {
-        return;
-    };
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let (width, height) = state.windows.toast_size();
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(
-        (width * scale).round() as u32,
-        (height * scale).round() as u32,
-    )));
-    windows::place_toast(&app, &state.windows);
-}
-
-#[tauri::command]
-fn hide_toast(app: AppHandle) {
-    hide_window(&app, windows::TOAST);
 }
 
 // ---------------------------------------------------------------- 应用命令
@@ -1114,16 +1068,6 @@ fn spawn_selftest(app: AppHandle) {
             sleep(300);
         }
 
-        log_info!("[自检] 弹提示");
-        if let Err(error) = show_toast(app.clone(), "自检提示".to_string(), Some("info".into())) {
-            log_warn!("[自检] 提示失败：{error}");
-        } else {
-            sleep(400);
-            probe(&app, windows::TOAST, "提示");
-            sleep(hold);
-            let _ = hide_toast(app.clone());
-        }
-
         sleep(300);
         log_info!("[自检] 结束");
     });
@@ -1377,7 +1321,6 @@ pub fn run() {
                 windows::place_bar(&handle, &state.windows);
                 let _ = windows::ensure_pop(&handle);
                 let _ = windows::ensure_settings(&handle);
-                let _ = windows::ensure_toast(&handle);
             }
             // 初始窗口不可见，先确认捕获排除再显示，避免重启时闪出未受保护的内容。
             if capture_privacy::prepare_to_show(&handle) {
@@ -1573,15 +1516,12 @@ pub fn run() {
             close_settings,
             set_bar_size,
             set_pop_size,
-            set_toast_size,
             start_bar_drag,
             set_category,
             set_theme,
             set_motion,
             set_island_shape,
             selftest_windows,
-            show_toast,
-            hide_toast,
             list_applications,
             open_application,
             save_application,
