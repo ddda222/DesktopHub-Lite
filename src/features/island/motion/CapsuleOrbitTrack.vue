@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * 07 · MotionPath 灵动岛边缘任务巡航光粒（逐帧锁定实时边界）：
- * - 通过 gsap.ticker 每帧读取宿主 `.island` 实测宽高与实时 border-radius，
- *   配合 MotionPathPlugin.getRawPath / cacheRawPathMeasurements / getPositionOnPath，
- *   保证展开、切换、收起过程光粒与边缘轨迹始终贴紧外轮廓，绝不内缩漂移或裁切丢失。
+ * 07 · MotionPath 灵动岛边缘任务巡航光粒（ResizeObserver 缓存轮廓，静止态零强制回流）：
+ * - 通过 ResizeObserver 订阅宿主 `.island` 尺寸变化并缓存宽高与实时圆角，
+ *   静止态 `tickFrame` 仅消费缓存路径并更新 transform，零 `getComputedStyle` DOM 读操作；
+ * - 展开、切换、收起过程由 ResizeObserver 实时刷新路径，保证光粒紧贴外轮廓不漂移。
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { gsap, MotionPathPlugin } from '@/lib/gsapMotion'
@@ -33,6 +33,12 @@ let phase1 = 0
 let lastTickMs = 0
 let cachedKey = ''
 let cachedRawPath: ReturnType<typeof MotionPathPlugin.getRawPath> | null = null
+let hostObserver: ResizeObserver | null = null
+let cachedBox = {
+  w: Math.max(40, props.width),
+  h: Math.max(12, props.height),
+  r: Math.max(2, props.cornerRadius)
+}
 
 const PATH_INSET = 1.75
 
@@ -58,23 +64,53 @@ function buildRoundedRectPath(w: number, h: number, cornerR: number): string {
   ].join(' ')
 }
 
-function readLiveShellBox(): { w: number; h: number; r: number } {
+/** 从宿主内联样式或已知属性读取实时圆角，避免在帧循环里触发 getComputedStyle 强制回流。 */
+function readInlineCornerRadius(host: HTMLElement | null): number {
+  if (host) {
+    const inlineR = parseFloat(host.style.borderRadius || host.style.borderTopLeftRadius)
+    if (Number.isFinite(inlineR) && inlineR >= 0) return inlineR
+  }
+  return Math.max(2, props.cornerRadius)
+}
+
+function syncCachedBoxFromHost(useComputedFallback = false): void {
   const host = overlayEl.value?.parentElement
   if (!host) {
-    return {
+    cachedBox = {
       w: Math.max(40, props.width),
       h: Math.max(12, props.height),
       r: Math.max(2, props.cornerRadius)
     }
+    return
   }
-  const style = getComputedStyle(host)
-  const parsedW = parseFloat(style.width)
-  const parsedH = parseFloat(style.height)
-  const parsedR = parseFloat(style.borderTopLeftRadius)
-  const w = Math.max(40, Number.isFinite(parsedW) && parsedW > 0 ? parsedW : (host.clientWidth || props.width))
-  const h = Math.max(12, Number.isFinite(parsedH) && parsedH > 0 ? parsedH : (host.clientHeight || props.height))
-  const r = Number.isFinite(parsedR) ? parsedR : props.cornerRadius
-  return { w, h, r }
+  let r = readInlineCornerRadius(host)
+  if (useComputedFallback && !host.style.borderRadius && !host.style.borderTopLeftRadius) {
+    const parsedR = parseFloat(getComputedStyle(host).borderTopLeftRadius)
+    if (Number.isFinite(parsedR) && parsedR >= 0) r = parsedR
+  }
+  const w = Math.max(40, host.clientWidth || props.width)
+  const h = Math.max(12, host.clientHeight || props.height)
+  cachedBox = { w, h, r }
+}
+
+function attachHostObserver(): void {
+  hostObserver?.disconnect()
+  hostObserver = null
+  const host = overlayEl.value?.parentElement
+  if (!host || typeof ResizeObserver === 'undefined') return
+  hostObserver = new ResizeObserver((entries) => {
+    const entry = entries[entries.length - 1]
+    if (!entry) return
+    const borderBox = Array.isArray(entry.borderBoxSize) ? entry.borderBoxSize[0] : entry.borderBoxSize
+    const nextW = borderBox?.inlineSize || entry.contentRect.width || props.width
+    const nextH = borderBox?.blockSize || entry.contentRect.height || props.height
+    cachedBox = {
+      w: Math.max(40, nextW),
+      h: Math.max(12, nextH),
+      r: readInlineCornerRadius(host)
+    }
+  })
+  hostObserver.observe(host)
 }
 
 function placeGlint(el: HTMLElement, rawPath: ReturnType<typeof MotionPathPlugin.getRawPath>, progress: number): void {
@@ -95,7 +131,7 @@ function tickFrame(): void {
   const dtSec = lastTickMs > 0 ? Math.min(0.064, Math.max(0.001, (now - lastTickMs) / 1000)) : 1 / 60
   lastTickMs = now
 
-  const { w, h, r } = readLiveShellBox()
+  const { w, h, r } = cachedBox
   const quantKey = `${w.toFixed(1)}:${h.toFixed(1)}:${r.toFixed(1)}`
   if (quantKey !== cachedKey || !cachedRawPath) {
     cachedKey = quantKey
@@ -120,6 +156,8 @@ function startOrbit(): void {
     stopOrbit()
     return
   }
+  syncCachedBoxFromHost(true)
+  if (!hostObserver) attachHostObserver()
   if (!tickerBound) {
     lastTickMs = performance.now()
     gsap.ticker.add(tickFrame)
@@ -133,9 +171,18 @@ function stopOrbit(): void {
     gsap.ticker.remove(tickFrame)
     tickerBound = false
   }
+  hostObserver?.disconnect()
+  hostObserver = null
   lastTickMs = 0
 }
 
+watch(() => [props.width, props.height, props.cornerRadius], () => {
+  cachedBox = {
+    w: cachedBox.w || Math.max(40, props.width),
+    h: cachedBox.h || Math.max(12, props.height),
+    r: readInlineCornerRadius(overlayEl.value?.parentElement ?? null)
+  }
+})
 watch(() => [props.active, props.reduced], startOrbit, { flush: 'post' })
 onMounted(startOrbit)
 onBeforeUnmount(stopOrbit)
@@ -166,22 +213,22 @@ onBeforeUnmount(stopOrbit)
   overflow: hidden;
   border-radius: inherit;
   --orbit-c1: var(--accent);
-  --orbit-c2: color-mix(in srgb, var(--accent) 65%, #38bdf8);
+  --orbit-c2: var(--accent-hover);
 }
 
 .orbit-overlay.tone-success {
-  --orbit-c1: #10b981;
-  --orbit-c2: #34d399;
+  --orbit-c1: var(--success);
+  --orbit-c2: color-mix(in srgb, var(--success) 72%, #fff);
 }
 
 .orbit-overlay.tone-warning {
-  --orbit-c1: #f59e0b;
-  --orbit-c2: #fbbf24;
+  --orbit-c1: var(--warning);
+  --orbit-c2: color-mix(in srgb, var(--warning) 72%, #fff);
 }
 
 .orbit-overlay.tone-error {
-  --orbit-c1: #ef4444;
-  --orbit-c2: #f87171;
+  --orbit-c1: var(--danger);
+  --orbit-c2: color-mix(in srgb, var(--danger) 72%, #fff);
 }
 
 .orbit-svg {

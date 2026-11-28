@@ -8,16 +8,20 @@
 import { onBeforeUnmount, onMounted } from 'vue'
 import HubMotionConfig from '@/components/HubMotionConfig.vue'
 import SettingsWindow from '@/features/settings/SettingsWindow.vue'
-import { bootstrap, subscribeHostEvents } from '@/store'
+import { subscribeHostEvents } from '@/store'
 
 let unsubscribe: (() => void) | null = null
+let disposed = false
 
+// main.ts 已在挂载前完成 store.bootstrap()，此处仅订阅跨窗口状态广播，避免冷启动双倍拉取 IPC。
 onMounted(async () => {
-  unsubscribe = await subscribeHostEvents()
-  await bootstrap()
+  const stop = await subscribeHostEvents()
+  if (disposed) stop()
+  else unsubscribe = stop
 })
 
 onBeforeUnmount(() => {
+  disposed = true
   unsubscribe?.()
 })
 </script>

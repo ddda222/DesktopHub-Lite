@@ -273,42 +273,53 @@ function dropIcon(target: string): void {
  * 不能悄悄退回合成数据让用户以为一切正常。
  */
 const mockPasswordVault = new Map<string, string>()
+let bootstrapPromise: Promise<void> | null = null
 
-export async function bootstrap(): Promise<void> {
-  if (!isDesktop) {
-    // 浏览器样稿：按需加载合成数据，避免正式桌面包携带演示代码；并明确标注不是真实数据。
-    const mock = await import('@/mock/data')
-    state.apps = mock.apps.map((app) => ({ ...app }))
-    state.categories = mock.categories.map((cat) => ({ ...cat }))
-    state.clips = mock.clips.map((clip) => ({ ...clip }))
-    state.groups = [...mock.groups]
-    state.snippets = mock.snippets.map((item) => ({ ...item }))
-    state.snippetGroups = [...mock.snippetGroups]
-    mockPasswordVault.clear()
-    for (const [id, pw] of Object.entries(mock.mockSnippetPasswords)) {
-      mockPasswordVault.set(id, pw)
+/** 幂等且防重入的窗口冷启动初始化：已就绪时直接返回，在途期间复用同一 Promise。 */
+export async function bootstrap(force = false): Promise<void> {
+  if (!force && state.ready) return
+  if (bootstrapPromise) return bootstrapPromise
+
+  bootstrapPromise = (async () => {
+    if (!isDesktop) {
+      // 浏览器样稿：按需加载合成数据，避免正式桌面包携带演示代码；并明确标注不是真实数据。
+      const mock = await import('@/mock/data')
+      state.apps = mock.apps.map((app) => ({ ...app }))
+      state.categories = mock.categories.map((cat) => ({ ...cat }))
+      state.clips = mock.clips.map((clip) => ({ ...clip }))
+      state.groups = [...mock.groups]
+      state.snippets = mock.snippets.map((item) => ({ ...item }))
+      state.snippetGroups = [...mock.snippetGroups]
+      mockPasswordVault.clear()
+      for (const [id, pw] of Object.entries(mock.mockSnippetPasswords)) {
+        mockPasswordVault.set(id, pw)
+      }
+      state.translationSettings = { ...mock.defaultTranslationSettings }
+      state.ready = true
+      return
     }
-    state.translationSettings = { ...mock.defaultTranslationSettings }
-    state.ready = true
-    return
-  }
 
-  try {
-    const config = await invokeHost<AppConfig>('list_applications')
-    applyApps(config)
-    await refreshClipboard()
-    await refreshSnippets()
-    const loadedShortcuts = await invokeHost<typeof state.shortcuts>('get_shortcuts')
-    state.shortcuts = { ...loadedShortcuts, ocr: loadedShortcuts.ocr ?? 'Ctrl+Shift+O' }
-    state.settings.clipboardHotkey = state.shortcuts.clipboard
-    await refreshTranslationSettings()
-    const ui = await invokeHost<UiState>('ui_state')
-    applyUiState(ui)
-    state.ready = true
-    state.loadError = ''
-  } catch (error) {
-    state.loadError = error instanceof Error ? error.message : String(error)
-  }
+    try {
+      const config = await invokeHost<AppConfig>('list_applications')
+      applyApps(config)
+      await refreshClipboard()
+      await refreshSnippets()
+      const loadedShortcuts = await invokeHost<typeof state.shortcuts>('get_shortcuts')
+      state.shortcuts = { ...loadedShortcuts, ocr: loadedShortcuts.ocr ?? 'Ctrl+Shift+O' }
+      state.settings.clipboardHotkey = state.shortcuts.clipboard
+      await refreshTranslationSettings()
+      const ui = await invokeHost<UiState>('ui_state')
+      applyUiState(ui)
+      state.ready = true
+      state.loadError = ''
+    } catch (error) {
+      state.loadError = error instanceof Error ? error.message : String(error)
+    }
+  })().finally(() => {
+    bootstrapPromise = null
+  })
+
+  return bootstrapPromise
 }
 
 let lastSettingsRequest = 0

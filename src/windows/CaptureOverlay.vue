@@ -43,6 +43,21 @@ const pixelBadge = computed(() => {
   return `${pw} × ${ph} px`
 })
 
+/** 贴近屏幕上沿（top < 32）时自动翻转标牌位置，避免被视口顶边裁切；靠近右边界时右对齐。 */
+const badgePlacementClass = computed(() => {
+  const rect = boxRect.value
+  if (!rect) return []
+  const classes: string[] = []
+  if (rect.top < 32) {
+    classes.push(rect.height >= 30 ? 'is-inside' : 'is-below')
+  }
+  const vw = canvasEl.value?.clientWidth || window.innerWidth
+  if (vw > 0 && rect.left > vw - 116) {
+    classes.push('is-right')
+  }
+  return classes
+})
+
 function buildBrowserDemoUri(): string {
   const canvas = document.createElement('canvas')
   canvas.width = 1280
@@ -196,6 +211,29 @@ onBeforeUnmount(() => {
   >
     <img v-if="session" class="frozen-screen" :src="session.dataUri" alt="" draggable="false" />
     <div v-if="!boxRect" class="full-mask" aria-hidden="true" />
+    <!-- 4 块精准矩形遮罩替代 9999px 大半径 box-shadow，避免超大阴影合成开销与跨屏精度偏差 -->
+    <template v-else>
+      <div
+        class="mask-part"
+        :style="{ left: '0px', top: '0px', right: '0px', height: `${boxRect.top}px` }"
+        aria-hidden="true"
+      />
+      <div
+        class="mask-part"
+        :style="{ left: '0px', top: `${boxRect.top + boxRect.height}px`, right: '0px', bottom: '0px' }"
+        aria-hidden="true"
+      />
+      <div
+        class="mask-part"
+        :style="{ left: '0px', top: `${boxRect.top}px`, width: `${boxRect.left}px`, height: `${boxRect.height}px` }"
+        aria-hidden="true"
+      />
+      <div
+        class="mask-part"
+        :style="{ left: `${boxRect.left + boxRect.width}px`, top: `${boxRect.top}px`, right: '0px', height: `${boxRect.height}px` }"
+        aria-hidden="true"
+      />
+    </template>
     <div
       v-if="boxRect"
       class="selection-box"
@@ -206,7 +244,7 @@ onBeforeUnmount(() => {
         height: `${boxRect.height}px`
       }"
     >
-      <span v-if="pixelBadge" class="size-badge">{{ pixelBadge }}</span>
+      <span v-if="pixelBadge" class="size-badge" :class="badgePlacementClass">{{ pixelBadge }}</span>
     </div>
 
     <div class="hint-pill" role="status" aria-live="polite">
@@ -240,10 +278,15 @@ onBeforeUnmount(() => {
   background: rgb(0 0 0 / .38);
   pointer-events: none;
 }
+.mask-part {
+  position: absolute;
+  background: rgb(0 0 0 / .44);
+  pointer-events: none;
+}
 .selection-box {
   position: absolute;
   border: 2px solid #38bdf8;
-  box-shadow: 0 0 0 9999px rgb(0 0 0 / .44);
+  box-shadow: 0 0 0 1px rgb(15 23 42 / .55);
   background: transparent;
   pointer-events: none;
 }
@@ -259,6 +302,21 @@ onBeforeUnmount(() => {
   font-size: 11px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.size-badge.is-inside {
+  top: 6px;
+  left: 6px;
+}
+.size-badge.is-below {
+  top: calc(100% + 6px);
+  left: 0;
+}
+.size-badge.is-right {
+  left: auto;
+  right: 0;
+}
+.size-badge.is-inside.is-right {
+  right: 6px;
 }
 .hint-pill {
   position: fixed;

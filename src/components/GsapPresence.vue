@@ -30,6 +30,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   'animation-complete': []
+  'after-leave': []
 }>()
 
 function buildFromVars(pose: GsapPose): gsap.TweenVars {
@@ -118,6 +119,7 @@ function onCancel(el: Element): void {
     :appear="appear"
     @enter="onEnter"
     @leave="onLeave"
+    @after-leave="emit('after-leave')"
     @enter-cancelled="onCancel"
     @leave-cancelled="onCancel"
   >
@@ -130,6 +132,7 @@ function onCancel(el: Element): void {
     :appear="appear"
     @enter="onEnter"
     @leave="onLeave"
+    @after-leave="emit('after-leave')"
     @enter-cancelled="onCancel"
     @leave-cancelled="onCancel"
   >

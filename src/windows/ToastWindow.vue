@@ -29,6 +29,7 @@ const toastSeq = ref(0)
 const boxEl = ref<HTMLElement | null>(null)
 let unsubscribe: (() => void) | null = null
 let hideTimer: number | null = null
+let dismissPending = false
 
 const toastTransition = computed(() =>
   state.ui.islandReducedMotion ? INSTANT_TRANSITION : activeMotionPreset.value.popTransition
@@ -47,20 +48,32 @@ function clearTimer(): void {
   }
 }
 
+function onAfterLeave(): void {
+  // 仅当本次退场源自自动过期且未有新提示接替时，再通知宿主隐藏窗口，防止截断退场动画或误关新提示。
+  if (!dismissPending || payload.value !== null) return
+  dismissPending = false
+  void dismissToast()
+}
+
 async function show(next: ToastPayload): Promise<void> {
-  payload.value = next
-  toastSeq.value += 1
   clearTimer()
+  dismissPending = false
+  payload.value = next
+  const currentSeq = toastSeq.value + 1
+  toastSeq.value = currentSeq
   // 等 DOM 更新后量出真实高度；宽度固定，避免换行与测量互相影响。
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  if (currentSeq !== toastSeq.value) return
   const el = boxEl.value
   if (el) {
     const height = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight)) + 2
     void resizeToast(TOAST_WIDTH, height)
   }
   hideTimer = window.setTimeout(() => {
+    hideTimer = null
+    if (currentSeq !== toastSeq.value) return
+    dismissPending = true
     payload.value = null
-    void dismissToast()
   }, 2400)
 }
 
@@ -84,6 +97,7 @@ onBeforeUnmount(() => {
       :animate="{ opacity: 1, y: 0, scale: 1 }"
       :exit="state.ui.islandReducedMotion ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.96 }"
       :transition="toastTransition"
+      @after-leave="onAfterLeave"
     >
       <div
         v-if="payload"

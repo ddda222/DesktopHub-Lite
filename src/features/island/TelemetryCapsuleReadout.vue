@@ -20,6 +20,7 @@ const props = withDefaults(defineProps<{
 const rootEl = ref<HTMLElement | null>(null)
 const pulseGridRefs = new Map<'cpu' | 'memory', HTMLElement>()
 const pulseTweens = new Map<'cpu' | 'memory', gsap.core.Tween>()
+const lastPulseSig = new Map<'cpu' | 'memory', string>()
 
 const cpuTarget = computed(() =>
   props.readout.segments.find(item => item.metric === 'cpu')?.percent ?? null
@@ -27,6 +28,17 @@ const cpuTarget = computed(() =>
 const memoryTarget = computed(() =>
   props.readout.segments.find(item => item.metric === 'memory')?.percent ?? null
 )
+
+/** 仅捕捉脉冲档位（点亮柱数 + 快慢节拍），避免 1% 读数波动触发每秒重建跳帧 */
+function pulseTierOf(percent: number | null): string {
+  if (percent === null) return 'none'
+  const bars = activeBarsCount(percent)
+  const tempo = percent >= 65 ? 'fast' : 'slow'
+  return `${bars}:${tempo}`
+}
+
+const cpuPulseTier = computed(() => pulseTierOf(cpuTarget.value))
+const memoryPulseTier = computed(() => pulseTierOf(memoryTarget.value))
 
 const animated = reactive({
   cpu: cpuTarget.value ?? 0,
@@ -40,6 +52,7 @@ function setPulseRef(metric: 'cpu' | 'memory', el: unknown): void {
     pulseGridRefs.set(metric, el)
   } else {
     pulseGridRefs.delete(metric)
+    killMetricPulse(metric)
   }
 }
 
@@ -77,15 +90,40 @@ function activeBarsCount(percent: number | null | undefined): number {
   return Math.max(1, Math.min(4, Math.ceil(percent / 25)))
 }
 
-function syncPulseAnimation(): void {
-  pulseTweens.forEach(t => t.kill())
-  pulseTweens.clear()
-  if (props.styleMode !== 'pulse' || props.reduced) return
+function killMetricPulse(metric: 'cpu' | 'memory'): void {
+  const existing = pulseTweens.get(metric)
+  if (existing) {
+    existing.kill()
+    pulseTweens.delete(metric)
+  }
+  const grid = pulseGridRefs.get(metric)
+  if (grid) {
+    const bars = grid.querySelectorAll<HTMLElement>('i')
+    if (bars.length) gsap.set(bars, { clearProps: 'transform,opacity' })
+  }
+  lastPulseSig.delete(metric)
+}
+
+function syncPulseAnimation(force = false): void {
+  if (props.styleMode !== 'pulse' || props.reduced) {
+    killMetricPulse('cpu')
+    killMetricPulse('memory')
+    return
+  }
   for (const metric of ['cpu', 'memory'] as const) {
+    const tier = metric === 'cpu' ? cpuPulseTier.value : memoryPulseTier.value
     const grid = pulseGridRefs.get(metric)
-    const rawPct = metric === 'cpu' ? cpuTarget.value : memoryTarget.value
-    if (!grid || rawPct === null) continue
-    const activeIdx = activeBarsCount(rawPct) - 1
+    if (!grid || tier === 'none') {
+      killMetricPulse(metric)
+      continue
+    }
+    // 档位未变且补间仍在运行，跳过重建以保持呼吸律动连续无跳帧
+    if (!force && lastPulseSig.get(metric) === tier && pulseTweens.has(metric)) {
+      continue
+    }
+    killMetricPulse(metric)
+    const [barsStr, tempo] = tier.split(':')
+    const activeIdx = Math.max(0, Number(barsStr) - 1)
     const bars = grid.querySelectorAll<HTMLElement>('i')
     const peakBar = bars[activeIdx]
     if (!peakBar) continue
@@ -95,33 +133,40 @@ function syncPulseAnimation(): void {
       {
         scaleY: 1.18,
         opacity: 1,
-        duration: rawPct >= 65 ? 0.55 : 0.9,
+        duration: tempo === 'fast' ? 0.55 : 0.9,
         yoyo: true,
         repeat: -1,
         ease: 'sine.inOut'
       }
     )
     pulseTweens.set(metric, tween)
+    lastPulseSig.set(metric, tier)
   }
 }
 
 function updateMetricTween(key: 'cpu' | 'memory', target: number | null): void {
   const flagKey = key === 'cpu' ? 'cpuHasValue' : 'memoryHasValue'
   if (target === null) {
+    gsap.killTweensOf(animated, key)
     animated[flagKey] = false
     return
   }
   const safeTarget = Math.max(0, Math.min(100, target))
   if (!animated[flagKey] || props.reduced) {
+    gsap.killTweensOf(animated, key)
     animated[flagKey] = true
     animated[key] = safeTarget
     return
   }
+  if (Math.abs(animated[key] - safeTarget) < 0.01) return
+  const integerOnly = props.styleMode === 'text' || props.styleMode === 'pulse'
   gsap.to(animated, {
     [key]: safeTarget,
     duration: 0.52,
     ease: 'power2.out',
-    overwrite: 'auto'
+    overwrite: 'auto',
+    // 文本与脉冲模式仅展示整百分比，启用 snap 避免小数中间帧引起无效模板重渲染
+    ...(integerOnly ? { snap: { [key]: 1 } } : {})
   })
 }
 
@@ -129,17 +174,18 @@ watch(cpuTarget, val => updateMetricTween('cpu', val), { immediate: true })
 watch(memoryTarget, val => updateMetricTween('memory', val), { immediate: true })
 
 watch(
-  [() => props.styleMode, () => props.reduced, cpuTarget, memoryTarget],
-  () => {
-    void nextTick(() => syncPulseAnimation())
+  [() => props.styleMode, () => props.reduced, cpuPulseTier, memoryPulseTier],
+  ([nextStyle, nextReduced], prev) => {
+    const modeChanged = !prev || nextStyle !== prev[0] || nextReduced !== prev[1]
+    void nextTick(() => syncPulseAnimation(modeChanged))
   },
   { immediate: true, flush: 'post' }
 )
 
 onBeforeUnmount(() => {
   gsap.killTweensOf(animated)
-  pulseTweens.forEach(t => t.kill())
-  pulseTweens.clear()
+  killMetricPulse('cpu')
+  killMetricPulse('memory')
 })
 </script>
 
@@ -232,7 +278,7 @@ onBeforeUnmount(() => {
   --tel-color: var(--accent);
 }
 .tel-seg.level-warm {
-  --tel-color: #f59e0b;
+  --tel-color: var(--warning);
 }
 .tel-seg.level-hot {
   --tel-color: var(--danger);

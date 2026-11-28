@@ -500,7 +500,9 @@ const lineHeights: Record<IslandVariant, number> = { standard: 5, telemetry: 7, 
 const compactHeights: Record<IslandVariant, number> = { standard: 32, telemetry: 32, mecha: 34, pixel: 36, blueprint: 34, neon: 34 }
 const maxExpandedHeight = computed(() => Math.max(220, window.screen.availHeight - 60))
 const rawExpandedHeight = computed(() =>
-  48 + (approval.value ? 0 : chromeHeight.value) + (!approval.value && !viewingMail.value && !ocrPanelOpen.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value)
+  (variant.value === 'blueprint' ? 58 : 48) +
+  (approval.value ? 0 : chromeHeight.value) +
+  (!approval.value && !viewingMail.value && !ocrPanelOpen.value && page.value === 'clipboard' && !state.ui.detailId ? 420 : contentHeight.value)
 )
 const needsOuterScroll = computed(() =>
   expanded.value && !geometryMoving.value && !pageSwitching.value && rawExpandedHeight.value > maxExpandedHeight.value
@@ -1428,10 +1430,11 @@ function keydown(event: KeyboardEvent): void {
   if (!expanded.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
   const inTextField = !!target?.closest('input, textarea, select, [contenteditable="true"]')
+  const onApplicationsPage = page.value === 'applications' && !viewingMail.value && !ocrPanelOpen.value
 
-  // Alt+1~N 或非输入态 1~N 快切功能页（N 随标签数量变化）
+  // 应用页仅允许 Alt+1~N 快捷切页，把普通数字键留给应用首字搜索；其余页面兼容非输入态 1~N 与 Alt+1~N
   const digit = Number(event.key)
-  if ((event.altKey || !inTextField) && !event.ctrlKey && !event.metaKey && Number.isInteger(digit) && digit >= 1 && digit <= sections.length) {
+  if ((event.altKey || (!inTextField && !onApplicationsPage)) && !event.ctrlKey && !event.metaKey && Number.isInteger(digit) && digit >= 1 && digit <= sections.length) {
     const section = sections[digit - 1]
     if (section) {
       event.preventDefault()
@@ -1455,9 +1458,18 @@ function keydown(event: KeyboardEvent): void {
     showFeedback('copied', pinned.value ? '已钉住展开' : '已取消钉住')
     return
   }
-  // 在应用页直接敲字母/数字自动聚焦搜索框筛选应用
-  if (page.value === 'applications' && !viewingMail.value && !inTextField && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1 && /\S/.test(event.key)) {
-    appSearchEl.value?.focus()
+  // 在应用页未聚焦输入框时键入普通字符（含数字），直接聚焦搜索框并写入首字符，避免首字丢失
+  if (onApplicationsPage && !inTextField && !event.ctrlKey && !event.metaKey && !event.altKey && event.key.length === 1 && /\S/.test(event.key)) {
+    event.preventDefault()
+    appSearch.value += event.key
+    const input = appSearchEl.value
+    if (input) {
+      input.focus()
+      void nextTick(() => {
+        const end = appSearch.value.length
+        input.setSelectionRange(end, end)
+      })
+    }
   }
 }
 
@@ -2206,7 +2218,7 @@ onBeforeUnmount(() => {
           <header class="toolbar">
             <nav ref="modeNav" class="mode-nav" aria-label="灵动岛功能">
               <button v-for="(section, idx) in sections" :key="section.value" v-gsap-press="actionTapPose" type="button"
-                :title="`${section.label}（按 ${idx + 1} 或 Alt+${idx + 1}）`" :aria-label="section.label" :aria-pressed="!viewingMail && !ocrPanelOpen && page === section.value"
+                :title="`${section.label}（Alt+${idx + 1}）`" :aria-label="section.label" :aria-pressed="!viewingMail && !ocrPanelOpen && page === section.value"
                 :class="{ selected: !viewingMail && !ocrPanelOpen && page === section.value }"
                 @click="selectPage(section.value)">
                 <span
@@ -2446,15 +2458,15 @@ onBeforeUnmount(() => {
 }
 .capsule-pack-strip:hover { border-color: var(--line-strong); color: var(--text); }
 .capsule-pack-strip.is-err { border-color: color-mix(in srgb, var(--danger) 48%, var(--line)); background: color-mix(in srgb, var(--danger) 10%, var(--surface-2)); }
-.capsule-pack-strip.is-done { border-color: color-mix(in srgb, #10b981 48%, var(--line)); background: color-mix(in srgb, #10b981 10%, var(--surface-2)); }
+.capsule-pack-strip.is-done { border-color: color-mix(in srgb, var(--success) 48%, var(--line)); background: color-mix(in srgb, var(--success) 10%, var(--surface-2)); }
 .pack-badge {
   flex: none; padding: 1px 5px; border-radius: 5px;
   font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; letter-spacing: .04em;
   background: var(--accent-weak); color: var(--accent);
 }
-.capsule-pack-strip.is-warn .pack-badge { background: color-mix(in srgb, #f59e0b 16%, transparent); color: #d97706; }
+.capsule-pack-strip.is-warn .pack-badge { background: var(--warning-weak); color: var(--warning); }
 .capsule-pack-strip.is-err .pack-badge { background: var(--danger-weak); color: var(--danger); }
-.capsule-pack-strip.is-done .pack-badge { background: color-mix(in srgb, #10b981 16%, transparent); color: #10b981; }
+.capsule-pack-strip.is-done .pack-badge { background: var(--success-weak); color: var(--success); }
 .pack-msg { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
 .pack-jump { flex: none; font-size: 10.5px; font-weight: 650; color: var(--danger); }
 .pack-dismiss {
@@ -2558,8 +2570,8 @@ onBeforeUnmount(() => {
   white-space: nowrap; cursor: pointer;
 }
 .toolbar-pack-pill.is-done {
-  border-color: color-mix(in srgb, #10b981 48%, var(--line));
-  background: color-mix(in srgb, #10b981 12%, var(--surface)); color: #10b981;
+  border-color: color-mix(in srgb, var(--success) 48%, var(--line));
+  background: var(--success-weak); color: var(--success);
 }
 .toolbar-pack-pill.is-err {
   border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
@@ -2697,13 +2709,13 @@ button {
   touch-action: manipulation;
   transition: background-color 110ms ease, color 110ms ease, border-color 110ms ease;
 }
-.feature-pane button:active:not(:disabled),
+.feature-pane button:active:not(:disabled):not(.row-trigger),
 .attention-strip button:active:not(:disabled) {
   transform: scale(.97);
 }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-dot { position: absolute; right: 8px; top: 0; width: 5px; height: 5px; z-index: 2; background: var(--success); border-radius: 50%; }
-.island:not(.tucked) > .attention-dot { right: 16px; top: 50%; transform: translateY(-50%); background: #42d580; }
+.island:not(.tucked) > .attention-dot { right: 16px; top: 50%; transform: translateY(-50%); background: var(--success); }
 .island.expanded > .attention-dot { right: 20px; top: 12px; transform: none; }
 .attention-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 12px; border-radius: 12px; background: var(--surface-2); font-size: 12px; }
 .attention-strip > span { flex: 1; }
@@ -2755,7 +2767,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   background: var(--accent); box-shadow: 0 0 8px var(--accent);
   animation: telemetryPulse 2.2s ease-in-out infinite;
 }
-.telemetry-led.working { background: #7de2ff; box-shadow: 0 0 10px #7de2ff; animation-duration: .95s; }
+.telemetry-led.working { background: var(--accent-hover); box-shadow: 0 0 10px var(--accent-hover); animation-duration: .95s; }
 .telemetry-led.telemetry { background: var(--accent); box-shadow: 0 0 9px var(--accent); animation-duration: 1.5s; }
 .telemetry-led.feedback { background: var(--success); box-shadow: 0 0 8px var(--success); animation: none; }
 .telemetry-led.paused { background: var(--text-3); box-shadow: none; animation: none; opacity: .75; }
@@ -2830,7 +2842,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .variant-pixel:not(.expanded) .capsule-label.is-telemetry { padding: 1px 6px; font-size: 11.5px; }
 .variant-pixel:not(.expanded) :deep(.tel-pre) { color: #86efac; }
 .variant-pixel:not(.expanded) :deep(.tel-pre.accent) { color: #facc15; }
-.variant-pixel:not(.expanded) :deep(.tel-val) { color: #bef264; }
+.variant-pixel:not(.expanded) :deep(.tel-seg:not(.level-warm):not(.level-hot) .tel-val) { color: #bef264; }
 .variant-pixel:not(.expanded) :deep(.tel-bar-track),
 .variant-pixel:not(.expanded) :deep(.tel-pulse-bar) { border-radius: 0; }
 

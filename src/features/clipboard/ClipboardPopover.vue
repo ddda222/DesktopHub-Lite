@@ -1380,12 +1380,8 @@ function openDetectedUrl(url: string): void {
             v-for="(clip, localIdx) in pagedClips"
             :key="clip.id"
             class="row"
-            role="button"
-            tabindex="-1"
             :data-index="pageOffset + localIdx"
             :class="{ 'is-active': pageOffset + localIdx === state.ui.activeIndex }"
-            :aria-label="`${clipSummary(clip)}，${clip.group}，${relativeTime(clip.copiedAt)}`"
-            @click="selecting ? toggleSelected(clip.id) : onCopy(clip)"
             @mouseenter="setActive(pageOffset + localIdx)"
           >
             <input
@@ -1393,34 +1389,42 @@ function openDetectedUrl(url: string): void {
               type="checkbox"
               :checked="selectedIds.has(clip.id)"
               :aria-label="`选择：${clipSummary(clip)}`"
-              @click.stop="toggleSelected(clip.id)"
+              @change="toggleSelected(clip.id)"
             />
-            <div class="thumb" :class="{ 'is-broken': isImageBroken(clip) }">
-              <img v-if="clip.kind === 'image' && !isImageBroken(clip)" :src="clip.imageUrl" alt="" />
-              <span
-                v-else-if="inspectClipKind(clip)?.type === 'color'"
-                class="color-swatch"
-                :style="{ background: inspectClipKind(clip)?.color }"
-                :title="`颜色预览：${inspectClipKind(clip)?.color}`"
-              />
-              <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
-              <Icon v-else name="text" :size="16" />
-              <span v-if="!selecting && localIdx < 9" class="index-kbd" :title="`按 Alt+${localIdx + 1} 快捷复制`">{{ localIdx + 1 }}</span>
-            </div>
-
-            <div class="row-main">
-              <div class="row-title">{{ clip.favorite ? '★ ' : '' }}{{ clipSummary(clip) }}</div>
-              <div class="row-meta">
-                <span v-if="inspectClipKind(clip)" class="smart-tag" :class="`is-${inspectClipKind(clip)?.type}`">{{ inspectClipKind(clip)?.label }}</span>
-                <span class="row-meta-text">
-                  {{ clip.group }} · {{ relativeTime(clip.copiedAt) }}
-                </span>
-                <span v-if="clip.note" class="row-meta-text" :title="clip.note">
-                  {{ clip.note }}
-                </span>
-                <span v-if="clip.imageMissing" class="tag-missing">图片缺失</span>
+            <button
+              class="row-trigger"
+              type="button"
+              tabindex="-1"
+              :aria-label="`${clipSummary(clip)}，${clip.group}，${relativeTime(clip.copiedAt)}`"
+              @click="selecting ? toggleSelected(clip.id) : onCopy(clip)"
+            >
+              <div class="thumb" :class="{ 'is-broken': isImageBroken(clip) }">
+                <img v-if="clip.kind === 'image' && !isImageBroken(clip)" :src="clip.imageUrl" alt="" />
+                <span
+                  v-else-if="inspectClipKind(clip)?.type === 'color'"
+                  class="color-swatch"
+                  :style="{ background: inspectClipKind(clip)?.color }"
+                  :title="`颜色预览：${inspectClipKind(clip)?.color}`"
+                />
+                <Icon v-else-if="clip.kind === 'image'" name="image" :size="16" />
+                <Icon v-else name="text" :size="16" />
+                <span v-if="!selecting && localIdx < 9" class="index-kbd" :title="`按 Alt+${localIdx + 1} 快捷复制`">{{ localIdx + 1 }}</span>
               </div>
-            </div>
+
+              <div class="row-main">
+                <div class="row-title">{{ clip.favorite ? '★ ' : '' }}{{ clipSummary(clip) }}</div>
+                <div class="row-meta">
+                  <span v-if="inspectClipKind(clip)" class="smart-tag" :class="`is-${inspectClipKind(clip)?.type}`">{{ inspectClipKind(clip)?.label }}</span>
+                  <span class="row-meta-text">
+                    {{ clip.group }} · {{ relativeTime(clip.copiedAt) }}
+                  </span>
+                  <span v-if="clip.note" class="row-meta-text" :title="clip.note">
+                    {{ clip.note }}
+                  </span>
+                  <span v-if="clip.imageMissing" class="tag-missing">图片缺失</span>
+                </div>
+              </div>
+            </button>
 
             <div v-if="!selecting" class="row-actions">
               <button
@@ -1856,85 +1860,90 @@ function openDetectedUrl(url: string): void {
             v-for="(snippet, index) in filteredSnippets"
             :key="snippet.id"
             class="row snippet-row"
-            role="button"
-            tabindex="-1"
             :data-index="index"
             :class="{
               'is-active': index === state.ui.snippetActiveIndex,
               'is-credential': snippet.kind === 'credential'
             }"
-            :aria-label="
-              snippet.kind === 'credential'
-                ? `${snippet.title}，账密，账号 ${snippet.account ?? ''}`
-                : `${snippet.title}，${snippet.group}`
-            "
-            @click="onCopySnippet(snippet)"
             @mouseenter="state.ui.snippetActiveIndex = index"
           >
-            <div
-              class="thumb snippet-thumb"
-              :class="{
-                'is-pinned': snippet.pinned,
-                'is-credential': snippet.kind === 'credential'
-              }"
-            >
-              <Icon
-                :name="snippet.kind === 'credential' ? 'key' : snippet.pinned ? 'pin' : 'bookmark'"
-                :size="15"
-              />
-            </div>
+            <div class="row-body">
+              <button
+                class="row-trigger"
+                type="button"
+                tabindex="-1"
+                :aria-label="
+                  snippet.kind === 'credential'
+                    ? `${snippet.title}，账密，账号 ${snippet.account ?? ''}`
+                    : `${snippet.title}，${snippet.group}`
+                "
+                @click="onCopySnippet(snippet)"
+              >
+                <div
+                  class="thumb snippet-thumb"
+                  :class="{
+                    'is-pinned': snippet.pinned,
+                    'is-credential': snippet.kind === 'credential'
+                  }"
+                >
+                  <Icon
+                    :name="snippet.kind === 'credential' ? 'key' : snippet.pinned ? 'pin' : 'bookmark'"
+                    :size="15"
+                  />
+                </div>
 
-            <div class="row-main">
-              <div class="row-title snippet-title-line">
-                <span class="snippet-title-text">{{ snippet.title }}</span>
-                <span v-if="snippet.kind === 'credential'" class="tag-credential">账密</span>
-                <span v-else-if="hasSnippetVariables(snippet.content)" class="tag-dynamic">动态</span>
-              </div>
-              <template v-if="snippet.kind === 'credential'">
-                <div class="row-meta cred-row-meta">
-                  <span class="row-meta-text" :title="`账号：${snippet.account || ''}`">
-                    账号：{{ snippet.account || '未填写'
-                    }}<template v-if="snippet.content"> · {{ snippetSummary(snippet.content) }}</template>
-                  </span>
+                <div class="row-main">
+                  <div class="row-title snippet-title-line">
+                    <span class="snippet-title-text">{{ snippet.title }}</span>
+                    <span v-if="snippet.kind === 'credential'" class="tag-credential">账密</span>
+                    <span v-else-if="hasSnippetVariables(snippet.content)" class="tag-dynamic">动态</span>
+                  </div>
+                  <div v-if="snippet.kind === 'credential'" class="row-meta cred-row-meta">
+                    <span class="row-meta-text" :title="`账号：${snippet.account || ''}`">
+                      账号：{{ snippet.account || '未填写'
+                      }}<template v-if="snippet.content"> · {{ snippetSummary(snippet.content) }}</template>
+                    </span>
+                  </div>
+                  <div v-else class="row-meta">
+                    <span class="row-meta-text">
+                      {{ snippet.group }} · {{ snippetSummary(snippet.content) }}
+                    </span>
+                  </div>
                 </div>
-                <div class="cred-quick-bar">
-                  <button
-                    class="cred-copy-btn"
-                    :class="{ 'is-copied': copiedBadgeKey === `${snippet.id}:account` }"
-                    type="button"
-                    :aria-label="`复制账号：${snippet.title}`"
-                    @click.stop="onCopySnippet(snippet, false, 'account')"
-                  >
-                    <Icon
-                      :name="copiedBadgeKey === `${snippet.id}:account` ? 'check' : 'copy'"
-                      :size="11"
-                    />
-                    <span>{{
-                      copiedBadgeKey === `${snippet.id}:account` ? '已复制账号' : '复制账号'
-                    }}</span>
-                  </button>
-                  <button
-                    class="cred-copy-btn is-secret"
-                    :class="{ 'is-copied': copiedBadgeKey === `${snippet.id}:password` }"
-                    type="button"
-                    title="复制密码（不记入剪贴板历史）"
-                    :aria-label="`复制密码：${snippet.title}`"
-                    @click.stop="onCopySnippet(snippet, false, 'password')"
-                  >
-                    <Icon
-                      :name="copiedBadgeKey === `${snippet.id}:password` ? 'check' : 'key'"
-                      :size="11"
-                    />
-                    <span>{{
-                      copiedBadgeKey === `${snippet.id}:password` ? '已复制密码' : '复制密码'
-                    }}</span>
-                  </button>
-                </div>
-              </template>
-              <div v-else class="row-meta">
-                <span class="row-meta-text">
-                  {{ snippet.group }} · {{ snippetSummary(snippet.content) }}
-                </span>
+              </button>
+
+              <div v-if="snippet.kind === 'credential'" class="cred-quick-bar">
+                <button
+                  class="cred-copy-btn"
+                  :class="{ 'is-copied': copiedBadgeKey === `${snippet.id}:account` }"
+                  type="button"
+                  :aria-label="`复制账号：${snippet.title}`"
+                  @click="onCopySnippet(snippet, false, 'account')"
+                >
+                  <Icon
+                    :name="copiedBadgeKey === `${snippet.id}:account` ? 'check' : 'copy'"
+                    :size="11"
+                  />
+                  <span>{{
+                    copiedBadgeKey === `${snippet.id}:account` ? '已复制账号' : '复制账号'
+                  }}</span>
+                </button>
+                <button
+                  class="cred-copy-btn is-secret"
+                  :class="{ 'is-copied': copiedBadgeKey === `${snippet.id}:password` }"
+                  type="button"
+                  title="复制密码（不记入剪贴板历史）"
+                  :aria-label="`复制密码：${snippet.title}`"
+                  @click="onCopySnippet(snippet, false, 'password')"
+                >
+                  <Icon
+                    :name="copiedBadgeKey === `${snippet.id}:password` ? 'check' : 'key'"
+                    :size="11"
+                  />
+                  <span>{{
+                    copiedBadgeKey === `${snippet.id}:password` ? '已复制密码' : '复制密码'
+                  }}</span>
+                </button>
               </div>
             </div>
 
@@ -2363,9 +2372,37 @@ function openDetectedUrl(url: string): void {
   gap: 8px;
   padding: 6px 8px;
   border-radius: var(--r-tile);
-  cursor: pointer;
   user-select: none;
   transition: background var(--dur-fast) var(--ease);
+}
+
+.row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row-trigger {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-trigger:active {
+  transform: none;
+}
+
+.row-body > .cred-quick-bar {
+  padding-left: 36px;
 }
 
 .row + .row {
@@ -2539,7 +2576,8 @@ function openDetectedUrl(url: string): void {
 }
 
 .row:hover .row-actions,
-.row.is-active .row-actions {
+.row.is-active .row-actions,
+.row:focus-within .row-actions {
   opacity: 1;
   visibility: visible;
 }
@@ -3240,7 +3278,7 @@ function openDetectedUrl(url: string): void {
   gap: 8px;
   padding: 5px 10px;
   border-top: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--pane-surface, var(--surface));
 }
 .pager-summary {
   font-size: 11px;
