@@ -15,10 +15,12 @@ pub struct Session {
     pub id: String, pub name: String, pub device_id: String, pub device_name: String,
     pub app_key: Option<String>, pub pid: u32, pub volume: f32, pub muted: bool, pub active: bool,
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OutputDevice {
-    id: String,
-    name: String,
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
 }
 #[derive(Serialize)]
 pub struct Snapshot {
@@ -60,6 +62,16 @@ async fn run<T: Send + 'static>(job: impl FnOnce() -> Result<T, String> + Send +
 pub async fn list_audio_sessions(state: State<'_, AudioState>) -> Result<Snapshot, String> {
     let _guard = state.operations.lock().await;
     run(platform::snapshot).await
+}
+
+#[tauri::command]
+pub async fn set_default_audio_device(state: State<'_, AudioState>, device_id: String) -> Result<Snapshot, String> {
+    let trimmed = device_id.trim().to_string();
+    if trimmed.is_empty() || trimmed.len() > 4096 {
+        return Err("播放设备标识无效".into());
+    }
+    let _guard = state.operations.lock().await;
+    run(move || platform::set_default_device(&trimmed)).await
 }
 
 #[derive(Deserialize)]
@@ -196,6 +208,10 @@ mod platform {
     fn enumerate() -> Result<AudioEnumeration, String> {
         unsafe {
             let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|_| "Windows 音频服务不可用")?;
+            let default_device_id = enumerator
+                .GetDefaultAudioEndpoint(eRender, eConsole)
+                .ok()
+                .and_then(|dev| dev.GetId().ok().map(|raw| owned_string(raw)));
             let devices = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE).map_err(|_| "无法枚举播放设备")?;
             let count = devices.GetCount().map_err(|_| "无法读取播放设备数量")?;
             let mut result = AudioEnumeration::default();
@@ -204,7 +220,8 @@ mod platform {
                     let device = devices.Item(index)?;
                     let device_id = owned_string(device.GetId()?);
                     let device_name = device_name(&device, index);
-                    result.devices.push(OutputDevice { id: device_id.clone(), name: device_name.clone() });
+                    let is_default = default_device_id.as_deref() == Some(device_id.as_str());
+                    result.devices.push(OutputDevice { id: device_id.clone(), name: device_name.clone(), is_default });
                     let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None)?;
                     let sessions = manager.GetSessionEnumerator()?;
                     for number in 0..sessions.GetCount()? {
@@ -262,6 +279,89 @@ mod platform {
         }
         Ok(entry.info)
     }
+
+    /// 通过 Windows COM `IPolicyConfig::SetDefaultEndpoint` 切换系统默认音频播放设备（同时覆盖控制台/多媒体/通信三角色）。
+    pub fn set_default_device(device_id: &str) -> Result<Snapshot, String> {
+        use core::ffi::c_void;
+        use windows::core::{GUID, HRESULT};
+
+        // 先校验目标设备确实处于当前活动的播放端点列表
+        let before = enumerate()?;
+        if !before.devices.iter().any(|d| d.id == device_id) {
+            return Err("目标播放设备已断开或不可用，请刷新列表".into());
+        }
+
+        // CLSID_CPolicyConfigClient: {870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}
+        const CLSID_POLICY_CONFIG_CLIENT: GUID =
+            GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+        // IID_IPolicyConfig (Win7/10/11): {F8679F50-850A-41CF-9C72-430F290290C8}
+        const IID_POLICY_CONFIG: GUID =
+            GUID::from_u128(0xf8679f50_850a_41cf_9c72_430f290290c8);
+        // IID_IPolicyConfigVista (兼容回退): {568B9108-44BF-40B4-9006-86AFE5B5A620}
+        const IID_POLICY_CONFIG_VISTA: GUID =
+            GUID::from_u128(0x568b9108_44bf_40b4_9006_86afe5b5a620);
+
+        #[link(name = "ole32")]
+        extern "system" {
+            #[link_name = "CoCreateInstance"]
+            fn ole32_co_create_instance(
+                rclsid: *const GUID,
+                punk_outer: *mut c_void,
+                dw_cls_context: u32,
+                riid: *const GUID,
+                ppv: *mut *mut c_void,
+            ) -> i32;
+        }
+
+        let wide_id: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let mut raw_ptr: *mut c_void = core::ptr::null_mut();
+            let mut hr = ole32_co_create_instance(
+                &CLSID_POLICY_CONFIG_CLIENT,
+                core::ptr::null_mut(),
+                CLSCTX_ALL.0,
+                &IID_POLICY_CONFIG,
+                &mut raw_ptr,
+            );
+            if hr < 0 || raw_ptr.is_null() {
+                raw_ptr = core::ptr::null_mut();
+                hr = ole32_co_create_instance(
+                    &CLSID_POLICY_CONFIG_CLIENT,
+                    core::ptr::null_mut(),
+                    CLSCTX_ALL.0,
+                    &IID_POLICY_CONFIG_VISTA,
+                    &mut raw_ptr,
+                );
+            }
+            if hr < 0 || raw_ptr.is_null() {
+                return Err("当前系统不支持快速切换默认播放设备".into());
+            }
+
+            // COM 虚表布局：slot 2 = IUnknown::Release，slot 13 = IPolicyConfig::SetDefaultEndpoint(PCWSTR, ERole)
+            let vtable = *(raw_ptr as *const *const *const c_void);
+            let release: unsafe extern "system" fn(*mut c_void) -> u32 =
+                core::mem::transmute(*vtable.add(2));
+            let set_default: unsafe extern "system" fn(*mut c_void, *const u16, u32) -> HRESULT =
+                core::mem::transmute(*vtable.add(13));
+
+            let mut failed_role = false;
+            for role in [0u32, 1u32, 2u32] {
+                if set_default(raw_ptr, wide_id.as_ptr(), role).is_err() {
+                    failed_role = true;
+                }
+            }
+            release(raw_ptr);
+
+            if failed_role {
+                let after = snapshot()?;
+                if after.devices.iter().any(|d| d.id == device_id && d.is_default) {
+                    return Ok(after);
+                }
+                return Err("切换系统默认音频输出设备失败，请重试".into());
+            }
+        }
+        snapshot()
+    }
 }
 #[cfg(not(windows))]
 mod platform {
@@ -269,6 +369,7 @@ mod platform {
     pub fn with_com<T>(job: impl FnOnce() -> Result<T, String>) -> Result<T, String> { job() }
     pub fn snapshot() -> Result<Snapshot, String> { Err("当前系统不支持 Windows 应用声音调节".into()) }
     pub fn update(_: &str, _: Option<f32>, _: Option<bool>) -> Result<Session, String> { Err("当前系统不支持 Windows 应用声音调节".into()) }
+    pub fn set_default_device(_: &str) -> Result<Snapshot, String> { Err("当前系统不支持 Windows 音频设备切换".into()) }
 }
 
 #[cfg(test)]
@@ -279,7 +380,10 @@ mod tests {
     fn read_only_windows_sessions() {
         let snapshot = platform::with_com(platform::snapshot).expect("读取 Windows 会话");
         for session in &snapshot.sessions { assert!((0.0..=100.0).contains(&session.volume)); assert!(!session.id.is_empty()); }
-        println!("实际会话 {}，设备提示 {}；没有执行音量或静音写入", snapshot.sessions.len(), snapshot.warnings.len());
+        for dev in &snapshot.devices {
+            println!("播放设备：{} [default={}] ({})", dev.name, dev.is_default, dev.id);
+        }
+        println!("实际设备 {}，会话 {}，设备提示 {}；没有执行音量或静音写入", snapshot.devices.len(), snapshot.sessions.len(), snapshot.warnings.len());
     }
     fn profile() -> Profile { Profile { name: " 开会 ".into(), settings: vec![Setting { app_key: "meeting.exe".into(), device_id: "speakers".into(), volume: 65.0, muted: false }] } }
     #[test] fn profile_bounds_and_identity() {

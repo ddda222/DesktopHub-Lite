@@ -152,6 +152,7 @@ export interface SnippetDraft {
 export interface AudioDevice {
   id: string
   name: string
+  isDefault?: boolean
 }
 
 export interface AudioSession {

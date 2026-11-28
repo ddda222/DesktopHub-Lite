@@ -29,7 +29,9 @@ pub struct IslandAppearance {
     pub telemetry_style: String,
     pub telemetry_net: bool,
     pub telemetry_cpu: bool,
+    pub telemetry_gpu: bool,
     pub telemetry_memory: bool,
+    pub telemetry_peripherals: bool,
     pub show_app_names: bool,
 }
 impl Default for IslandAppearance {
@@ -48,7 +50,9 @@ impl Default for IslandAppearance {
             telemetry_style: "bar".into(),
             telemetry_net: true,
             telemetry_cpu: true,
+            telemetry_gpu: true,
             telemetry_memory: true,
+            telemetry_peripherals: true,
             show_app_names: true,
         }
     }
@@ -76,7 +80,7 @@ impl IslandAppearance {
     }
 
     pub fn has_any_telemetry_metric(&self) -> bool {
-        self.telemetry_net || self.telemetry_cpu || self.telemetry_memory
+        self.telemetry_net || self.telemetry_cpu || self.telemetry_gpu || self.telemetry_memory
     }
 
     pub fn normalized_on_load(mut self) -> Self {

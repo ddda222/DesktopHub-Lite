@@ -53,7 +53,11 @@ pub struct PortablePreferences {
     #[serde(default = "default_true")]
     pub telemetry_cpu: bool,
     #[serde(default = "default_true")]
+    pub telemetry_gpu: bool,
+    #[serde(default = "default_true")]
     pub telemetry_memory: bool,
+    #[serde(default = "default_true")]
+    pub telemetry_peripherals: bool,
     #[serde(default = "default_true")]
     pub show_app_names: bool,
 }
@@ -74,7 +78,9 @@ impl PortablePreferences {
             telemetry_style: ui.island_appearance.telemetry_style.clone(),
             telemetry_net: ui.island_appearance.telemetry_net,
             telemetry_cpu: ui.island_appearance.telemetry_cpu,
+            telemetry_gpu: ui.island_appearance.telemetry_gpu,
             telemetry_memory: ui.island_appearance.telemetry_memory,
+            telemetry_peripherals: ui.island_appearance.telemetry_peripherals,
             show_app_names: ui.island_appearance.show_app_names,
         }
     }
@@ -89,7 +95,9 @@ impl PortablePreferences {
         ui.island_appearance.telemetry_style = self.telemetry_style.clone();
         ui.island_appearance.telemetry_net = self.telemetry_net;
         ui.island_appearance.telemetry_cpu = self.telemetry_cpu;
+        ui.island_appearance.telemetry_gpu = self.telemetry_gpu;
         ui.island_appearance.telemetry_memory = self.telemetry_memory;
+        ui.island_appearance.telemetry_peripherals = self.telemetry_peripherals;
         ui.island_appearance.show_app_names = self.show_app_names;
         if ui.island_expanded { ui.panel = if self.island_page == "applications" { None } else { Some(self.island_page.clone()) }; }
     }
@@ -176,7 +184,7 @@ pub fn validate(backup: &ConfigurationBackup) -> Result<(), String> {
         || !crate::desktop_features::IslandAppearance::valid_motion_mode(&p.motion)
         || !crate::desktop_features::IslandAppearance::valid_telemetry_mode(&p.telemetry_mode)
         || !crate::desktop_features::IslandAppearance::valid_telemetry_style(&p.telemetry_style)
-        || (p.telemetry_mode != "off" && !p.telemetry_net && !p.telemetry_cpu && !p.telemetry_memory)
+        || (p.telemetry_mode != "off" && !p.telemetry_net && !p.telemetry_cpu && !p.telemetry_gpu && !p.telemetry_memory)
     {
         return Err("显示偏好包含无效主题、页面、分类、比例、延时或胶囊微读数设置".into());
     }
@@ -214,7 +222,7 @@ pub fn describe(before: &ConfigurationBackup, after: &ConfigurationBackup) -> Ch
     let categories=counts(&before.applications.categories,&after.applications.categories,|v| &v.id);
     let mut preferences=Vec::new();
     let a=serde_json::to_value(&before.preferences).unwrap_or_default();let b=serde_json::to_value(&after.preferences).unwrap_or_default();
-    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryStyle","微读数样式"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryMemory","微读数·内存")] {
+    for (key,label) in [("theme","显示主题"),("motion","动态效果"),("activeCategoryId","当前分类"),("islandAnchor","停靠位置"),("islandPage","灵动岛页面"),("islandHoverMs","展开延时"),("islandLeaveMs","收起延时"),("islandReducedMotion","减少动画"),("scale","显示大小"),("webgl","边缘光效"),("telemetryMode","胶囊微读数"),("telemetryStyle","微读数样式"),("telemetryNet","微读数·网速"),("telemetryCpu","微读数·处理器"),("telemetryGpu","微读数·显卡"),("telemetryMemory","微读数·内存"),("telemetryPeripherals","键鼠电量显示")] {
         if a[key]!=b[key] { preferences.push(PreferenceChange{label:label.into(),before:a[key].as_str().map(str::to_owned).unwrap_or_else(||a[key].to_string()),after:b[key].as_str().map(str::to_owned).unwrap_or_else(||b[key].to_string())}); }
     }
     let mut app_details=Vec::new();
@@ -326,12 +334,12 @@ mod tests {
     #[test] fn legacy_backups_without_telemetry_fields_default_cleanly_and_invalid_combinations_fail() {
         let mut value=serde_json::to_value(sample()).unwrap();
         let prefs=value["preferences"].as_object_mut().unwrap();
-        prefs.remove("motion");prefs.remove("telemetryMode");prefs.remove("telemetryStyle");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryMemory");
+        prefs.remove("motion");prefs.remove("telemetryMode");prefs.remove("telemetryStyle");prefs.remove("telemetryNet");prefs.remove("telemetryCpu");prefs.remove("telemetryGpu");prefs.remove("telemetryMemory");prefs.remove("telemetryPeripherals");
         let restored=parse(&serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(restored.preferences.motion,"glide");
         assert_eq!(restored.preferences.telemetry_mode,"smart");
         assert_eq!(restored.preferences.telemetry_style,"bar");
-        assert!(restored.preferences.telemetry_net && restored.preferences.telemetry_cpu && restored.preferences.telemetry_memory);
+        assert!(restored.preferences.telemetry_net && restored.preferences.telemetry_cpu && restored.preferences.telemetry_gpu && restored.preferences.telemetry_memory && restored.preferences.telemetry_peripherals);
 
         let mut bad_motion=sample();
         bad_motion.preferences.motion="warp".into();
@@ -341,10 +349,11 @@ mod tests {
         custom.preferences.telemetry_mode="always".into();
         custom.preferences.telemetry_net=true;
         custom.preferences.telemetry_cpu=false;
+        custom.preferences.telemetry_gpu=false;
         custom.preferences.telemetry_memory=false;
         let round=parse(&bytes(&custom)).unwrap();
         assert_eq!(round.preferences.telemetry_mode,"always");
-        assert!(round.preferences.telemetry_net && !round.preferences.telemetry_cpu && !round.preferences.telemetry_memory);
+        assert!(round.preferences.telemetry_net && !round.preferences.telemetry_cpu && !round.preferences.telemetry_gpu && !round.preferences.telemetry_memory);
 
         let mut empty_metrics=custom.clone();
         empty_metrics.preferences.telemetry_net=false;

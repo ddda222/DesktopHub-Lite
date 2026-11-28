@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from '@/components/Icon.vue'
+import { invokeHost, isDesktop } from '@/lib/desktop/desktop'
 import { gsap, vGsapPress } from '@/lib/gsapMotion'
 import { activeMotionPreset } from '@/lib/motionPresets'
 import { state } from '@/store'
@@ -42,6 +43,13 @@ onBeforeUnmount(() => clearTimeout(guard))
 function submit(decision: ApprovalAnswer) {
   if (accepting.value && !props.busy) emit('answer', props.card.id, decision)
 }
+async function openOrcaAndDismiss() {
+  if (!accepting.value || props.busy) return
+  if (isDesktop) {
+    try { await invokeHost('focus_orca_window') } catch { /* 切窗失败仍关闭提醒卡 */ }
+  }
+  emit('answer', props.card.id, 'delegate')
+}
 </script>
 
 <template>
@@ -62,8 +70,9 @@ function submit(decision: ApprovalAnswer) {
     <div v-else-if="card.kind === 'notice'" class="approval-body notice scroll-y" role="region" tabindex="0" aria-label="提问内容">{{ card.details }}</div>
     <pre v-else class="approval-body scroll-y" tabindex="0" aria-label="本次操作内容">{{ details }}</pre>
     <footer v-if="card.kind === 'notice'">
-      <span class="context">可在 {{ card.source }} 对话中回答</span>
+      <span class="context">{{ card.source === 'Orca' ? '可在 Orca 窗口中继续处理' : `可在 ${card.source} 对话中回答` }}</span>
       <button v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" :disabled="busy || !accepting" @click="submit('delegate')">知道了</button>
+      <button v-if="card.source === 'Orca'" v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" class="allow" :disabled="busy || !accepting" @click="openOrcaAndDismiss"><Icon name="external" :size="14" />切回 Orca</button>
     </footer>
     <footer v-else-if="card.kind === 'approval'">
       <button v-gsap-press="busy || !accepting || state.ui.islandReducedMotion ? undefined : activeMotionPreset.buttonTap" type="button" class="delegate" :disabled="busy || !accepting" @click="submit('delegate')">回原应用审批</button>

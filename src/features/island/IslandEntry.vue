@@ -48,7 +48,18 @@ import {
 import type { IconName } from '@/components/icon-data'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { useWindowDrag } from '@/lib/useWindowDrag'
-import { invokeHost, isDesktop, listenHost, resizeBar, type BarRegion } from '@/lib/desktop/desktop'
+import {
+  invokeHost,
+  isDesktop,
+  listenHost,
+  resizeBar,
+  type BarRegion,
+  type OrcaStatusSnapshot,
+  type PeripheralBattery,
+  type PeripheralBatterySnapshot
+} from '@/lib/desktop/desktop'
+import type { AudioDevice } from '@/lib/desktop/types'
+import { mockDevices } from '@/features/audio/mock'
 import {
   applyOcrError,
   applyOcrResult,
@@ -136,6 +147,14 @@ const quickOcrClip = ref<QuickImageOcrPayload | null>(null)
 const hoveringQuickAction = ref(false)
 const pinned = ref(false)
 const quickMenuOpen = ref(false)
+const quickAudioDevices = ref<AudioDevice[]>([])
+const switchingQuickDeviceId = ref('')
+const visibleQuickAudioDevices = computed(() => {
+  const hidden = state.ui.mixerVisibility.devices
+  // 隐藏设备不出现在快捷切换行，但当前系统默认设备始终保留。
+  return quickAudioDevices.value.filter(dev => dev.isDefault || !Object.hasOwn(hidden, dev.id))
+})
+const showQuickAudioRow = computed(() => visibleQuickAudioDevices.value.length >= 2)
 const previewVolume = ref(72)
 let volumeBusy = false
 const appSearch = ref('')
@@ -202,8 +221,9 @@ watch([mailNotices, viewingMail, expanded, approval], ([items, selected, open, p
   const ids = items.map(item => item.id)
   seenMail.value = selected && open && !prompt ? ids : seenMail.value.filter(id => ids.includes(id))
 })
-// 避让只决定收起形态；细线也能悬停展开。
-const tucked = computed(() => suppressed.value && !expanded.value)
+// 避让只决定收起形态；细线也能悬停展开，紧急提醒（低电量/显卡高温）期间可临时浮出胶囊。
+const urgentFeedback = ref(false)
+const tucked = computed(() => suppressed.value && !expanded.value && !urgentFeedback.value)
 const expandMs = computed(() => MOTION_TIMINGS[motionMode.value].expandMs)
 const collapseMs = computed(() => MOTION_TIMINGS[motionMode.value].collapseMs)
 const geometryMoving = ref(false)
@@ -216,7 +236,33 @@ const shape = computed(() => tucked.value ? 'line' : expanded.value ? 'expanded'
 const glassAvailable = ref(true)
 const clockText = ref(formatTime())
 const feedbackText = ref('')
+const feedbackTooltip = ref('')
 const telemetrySample = ref<TelemetrySnapshot | null>(null)
+const peripheralDevices = ref<PeripheralBattery[]>([])
+const orcaStatus = ref<OrcaStatusSnapshot>({
+  enabled: false,
+  running: false,
+  workingCount: 0,
+  blockedCount: 0,
+  waitingCount: 0,
+  phase: 'idle',
+  label: '',
+  tooltip: ''
+})
+const showPeripherals = computed(() => appearance.value.telemetryPeripherals !== false)
+const visiblePeripherals = computed(() =>
+  showPeripherals.value ? peripheralDevices.value.slice(0, 2) : []
+)
+function peripheralTransportLabel(transport: PeripheralBattery['transport']): string {
+  if (transport === 'logitech-hidpp') return 'Logitech 2.4G / HID++'
+  if (transport === 'vgn-24g') return '2.4G 接收器'
+  return '蓝牙'
+}
+function peripheralTooltip(dev: PeripheralBattery): string {
+  const chargeText = dev.charging ? ' · 充电/外接供电' : dev.percent <= 20 ? ' · 电量偏低' : ''
+  const staleText = dev.stale ? ' · 休眠前缓存' : ''
+  return `${dev.name} ${dev.percent}%（${peripheralTransportLabel(dev.transport)}${chargeText}${staleText}）`
+}
 const telemetryHold = ref(0)
 const telemetryActive = ref(false)
 const telemetryPrefs = computed(() => normalizeTelemetryPrefs(state.ui.islandAppearance))
@@ -258,7 +304,15 @@ const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: stri
   if (shelf.busy) return { text: shelf.activity || '文件处理中', icon: 'folder', kind: 'working' }
   const pending = Math.max(state.ui.translationPending, state.translation.status === 'loading' ? 1 : 0)
   if (pending) return { text: pending > 1 ? `翻译中 · ${pending}` : '翻译中', icon: 'translate', kind: 'working' }
-  if (feedbackText.value) return { text: feedbackText.value, icon: feedbackIsError.value ? 'info' : 'check', kind: 'feedback' }
+  if (feedbackText.value) {
+    return {
+      text: feedbackText.value,
+      ariaText: feedbackTooltip.value || feedbackText.value,
+      tooltip: feedbackTooltip.value || undefined,
+      icon: feedbackIsError.value ? 'info' : 'check',
+      kind: 'feedback'
+    }
+  }
   if (showQuickOcr.value) {
     return {
       text: '已截屏',
@@ -279,10 +333,45 @@ const capsuleStatus = computed<{ text: string; ariaText?: string; tooltip?: stri
   }
   return { text: clockText.value, icon: null, kind: 'idle' }
 })
+interface CapsuleBadgeItem {
+  id: string
+  icon: IconName
+  text: string
+  title: string
+  tone?: 'accent' | 'paused' | 'warn' | 'charging' | 'orca-working' | 'orca-waiting' | 'orca-blocked'
+  action?: 'focus-orca'
+}
+
 /** 收起态右侧副舱徽标：与时钟/微读数并存，不再互相挤掉。 */
-const capsuleBadges = computed<{ id: string; icon: IconName; text: string; title: string; tone?: 'accent' | 'paused' }[]>(() => {
+const capsuleBadges = computed<CapsuleBadgeItem[]>(() => {
   if (expanded.value || tucked.value || approval.value || receivingFiles.value || shelf.busy || feedbackText.value || showQuickOcr.value) return []
-  const list: { id: string; icon: IconName; text: string; title: string; tone?: 'accent' | 'paused' }[] = []
+  const list: CapsuleBadgeItem[] = []
+  if (
+    orcaStatus.value.enabled &&
+    orcaStatus.value.running &&
+    orcaStatus.value.phase !== 'idle' &&
+    orcaStatus.value.label
+  ) {
+    const phase = orcaStatus.value.phase
+    list.push({
+      id: 'orca-status',
+      icon: 'bot',
+      text: orcaStatus.value.label,
+      title: orcaStatus.value.tooltip || `${orcaStatus.value.label} · 点击切回 Orca`,
+      tone: phase === 'blocked' ? 'orca-blocked' : phase === 'waiting' ? 'orca-waiting' : 'orca-working',
+      action: 'focus-orca'
+    })
+  }
+  for (const dev of visiblePeripherals.value.slice(0, 2)) {
+    const tone = dev.charging ? 'charging' : dev.percent <= 20 ? 'paused' : dev.percent <= 35 ? 'warn' : undefined
+    list.push({
+      id: `periph-${dev.id}`,
+      icon: dev.kind === 'keyboard' ? 'keyboard' : 'mouse',
+      text: `${dev.percent}%${dev.charging ? '⚡' : ''}`,
+      title: peripheralTooltip(dev),
+      tone
+    })
+  }
   if (newMail.value.length && !quickMailCode.value) {
     list.push({ id: 'mail', icon: 'mail', text: String(newMail.value.length), title: mailSummary.value || '未读邮件', tone: 'accent' })
   }
@@ -340,9 +429,11 @@ const orbitActive = computed(() =>
   (capsuleStatus.value.kind === 'working' ||
     capsuleStatus.value.kind === 'quick-ocr' ||
     capsuleStatus.value.kind === 'approval' ||
+    urgentFeedback.value ||
     packHighlightTone.value !== null)
 )
 const orbitTone = computed<'accent' | 'success' | 'error' | 'warning'>(() => {
+  if (urgentFeedback.value) return feedbackIsError.value ? 'error' : 'warning'
   if (packHighlightTone.value) return packHighlightTone.value
   if (runTask.value.stage === 'running' && runOvertime.value) return 'warning'
   return 'accent'
@@ -455,37 +546,57 @@ const scale = computed(() => appearance.value.scale / 100)
 // 所有页面共用外壳宽度；新增分类也不能按页面单独改变尺寸。
 const expandedWidth = computed(() => Math.max(280, Math.min(504 * scale.value, availableWidth.value - 24)))
 const tuckedWidth = computed(() => variant.value !== 'standard' ? Math.min(134, 118 * scale.value) : 80 * scale.value)
+function estimateBadgeWidth(text: string): number {
+  let textPx = 0
+  for (const ch of text) textPx += ch.charCodeAt(0) > 127 ? 11 : 6.6
+  return Math.ceil(textPx + 28)
+}
+
 const visibleWidth = computed(() => {
   if (expanded.value) return expandedWidth.value - 24
-  if (suppressed.value) return tuckedWidth.value
+  if (tucked.value) return tuckedWidth.value
   const badgeExtra = showQuickOcr.value
     ? 128 * scale.value
     : showQuickCode.value
       ? 132 * scale.value
-      : capsuleBadges.value.reduce((acc, item) => acc + (item.text.length > 2 ? 48 : 34) * scale.value, 0)
+      : capsuleBadges.value.reduce((acc, item) => acc + estimateBadgeWidth(item.text) * scale.value, 0)
   // 快捷操作条 5 个按钮时的宽度下限。
   const menuFloor = quickMenuOpen.value ? 412 * scale.value : 0
   if (capsuleStatus.value.kind === 'telemetry' && telemetryReadout.value) {
     const count = telemetryReadout.value.metricCount
     const table: Record<IslandVariant, [number, number][]> = {
-      standard: [[140, 118], [188, 168], [240, 218]],
-      telemetry: [[158, 136], [204, 184], [256, 234]],
-      mecha: [[190, 168], [240, 220], [292, 270]],
-      pixel: [[204, 182], [258, 238], [312, 290]],
-      blueprint: [[196, 174], [248, 228], [300, 280]],
-      neon: [[200, 178], [252, 232], [304, 284]]
+      standard: [[140, 118], [188, 168], [240, 218], [296, 274]],
+      telemetry: [[158, 136], [204, 184], [256, 234], [312, 290]],
+      mecha: [[190, 168], [240, 220], [292, 270], [344, 322]],
+      pixel: [[204, 182], [258, 238], [312, 290], [362, 340]],
+      blueprint: [[196, 174], [248, 228], [300, 280], [350, 328]],
+      neon: [[200, 178], [252, 232], [304, 284], [354, 332]]
     }
-    const [base, floor] = table[variant.value][Math.min(2, Math.max(0, count - 1))]
-    const visualCount = Number(telemetryPrefs.value.telemetryCpu) + Number(telemetryPrefs.value.telemetryMemory)
-    const stylePerMetric = telemetryStyle.value === 'bar' ? 34 : telemetryStyle.value === 'ring' ? 18 : telemetryStyle.value === 'pulse' ? 20 : 0
+    const [base, floor] = table[variant.value][Math.min(3, Math.max(0, count - 1))]
+    const visualCount =
+      Number(telemetryPrefs.value.telemetryCpu) +
+      Number(telemetryPrefs.value.telemetryGpu) +
+      Number(telemetryPrefs.value.telemetryMemory)
+    const barUnit = count >= 4 ? 27 : 34
+    const stylePerMetric = telemetryStyle.value === 'bar' ? barUnit : telemetryStyle.value === 'ring' ? 18 : telemetryStyle.value === 'pulse' ? 20 : 0
     const styleExtra = visualCount * stylePerMetric * scale.value
-    return Math.min(availableWidth.value - 24, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra + styleExtra)))
+    const capMax = Math.min(availableWidth.value - 24, expandedWidth.value - 24)
+    return Math.min(capMax, Math.max(floor, menuFloor, Math.round(base * scale.value + badgeExtra + styleExtra)))
   }
   const idle = capsuleStatus.value.kind === 'idle'
   let baseWidth = (idle ? 128 : 168) * scale.value
   if (variant.value === 'telemetry') baseWidth = (idle ? 148 : 186) * scale.value
   else if (variant.value === 'mecha' || variant.value === 'pixel') baseWidth = (idle ? 176 : 208) * scale.value
   else if (variant.value === 'blueprint' || variant.value === 'neon') baseWidth = (idle ? 184 : 216) * scale.value
+  if (capsuleStatus.value.kind === 'feedback' && feedbackText.value) {
+    // 按反馈文案估算胶囊宽度，让「已打开 XXX」在灵动岛内完整展示且不超出定帧窗口。
+    let textPx = 0
+    for (const ch of feedbackText.value) textPx += ch.charCodeAt(0) > 127 ? 13 : 7.8
+    const variantExtra = variant.value === 'standard' ? 68 : variant.value === 'telemetry' ? 84 : 118
+    const needed = Math.round((textPx + variantExtra) * scale.value)
+    const feedbackCap = Math.min(availableWidth.value - 24, expandedWidth.value - 24, Math.round(388 * scale.value))
+    baseWidth = Math.max(baseWidth, Math.min(feedbackCap, needed))
+  }
   if (runTask.value.stage === 'running') {
     const runningFloor = (variant.value === 'standard' ? 276 : variant.value === 'telemetry' ? 294 : 332) * scale.value
     baseWidth = Math.max(baseWidth, runningFloor)
@@ -509,8 +620,9 @@ const visibleHeight = computed(() => {
   if (expanded.value) {
     return Math.min(rawExpandedHeight.value, maxExpandedHeight.value)
   }
-  if (suppressed.value) return lineHeights[variant.value] * scale.value
-  return compactHeights[variant.value] * scale.value + (quickMenuOpen.value ? 42 : 0) + (showPackStrip.value ? Math.round(32 * scale.value) : 0)
+  if (tucked.value) return lineHeights[variant.value] * scale.value
+  const quickMenuExtra = quickMenuOpen.value ? (showQuickAudioRow.value ? 76 : 42) : 0
+  return compactHeights[variant.value] * scale.value + quickMenuExtra + (showPackStrip.value ? Math.round(32 * scale.value) : 0)
 })
 const cornerRadius = computed(() => {
   if (variant.value === 'mecha' || variant.value === 'pixel') return 4
@@ -521,11 +633,12 @@ const cornerRadius = computed(() => {
   return Math.min(base, visibleHeight.value / 2, visibleWidth.value / 2)
 })
 const bounds = computed(() => ({
-  width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (suppressed.value ? 0 : 4)),
+  width: Math.max(140, expanded.value ? expandedWidth.value : visibleWidth.value + (tucked.value ? 0 : 4)),
   // 展开态与收起态共用 2px 顶部边距，底部保留 14px 余量以容纳弹性微过冲，开合零上下跳动。
-  height: Math.max(14, visibleHeight.value + (expanded.value ? 16 : suppressed.value ? 0 : 4))
+  height: Math.max(14, visibleHeight.value + (expanded.value ? 16 : tucked.value ? 0 : 4))
 }))
-const DESKTOP_MIN_STAGE_HEIGHT = 560
+// 覆盖剪贴板面板（420）+ 导航栏 + 微信提醒条与底部余量，日常开合与切页零 SetWindowPos 扩容。
+const DESKTOP_MIN_STAGE_HEIGHT = 620
 /** 计算桌面端稳态定帧窗口尺寸：固定为展开最大宽与高水位高度，日常开合与切页不改原生窗口尺寸，仅切换 HRGN。 */
 function computeDesktopStageSize(
   target: { width: number; height: number },
@@ -608,6 +721,8 @@ let feedbackTimer: ReturnType<typeof setTimeout> | undefined
 let quickOcrTimer: ReturnType<typeof setTimeout> | undefined
 let stopFeedback: (() => void) | undefined
 let stopTelemetry: (() => void) | undefined
+let stopPeripherals: (() => void) | undefined
+let stopOrcaStatus: (() => void) | undefined
 let stopWindowBlur: (() => void) | undefined
 let stopOcrResult: (() => void) | undefined
 let stopOcrError: (() => void) | undefined
@@ -639,6 +754,7 @@ let observer: ResizeObserver | undefined
 let contentObserver: ResizeObserver | undefined
 let frame = 0
 let measureFrame = 0
+let sending = false
 let sendingPromise: Promise<void> | null = null
 let disposed = false
 let queued: { width: number; height: number; regions: BarRegion[] } | undefined
@@ -653,16 +769,99 @@ function updateClock(): void {
   clockText.value = formatTime()
   clockTimer = setTimeout(updateClock, 60000 - Date.now() % 60000 + 20)
 }
-function showFeedback(kind: string, customLabel?: string): void {
-  if (tucked.value) return
+type HostFeedbackPayload = string | { kind?: string; label?: string; tooltip?: string; urgent?: boolean }
+
+function showFeedback(kind: string, customLabel?: string, customTooltip?: string, urgent = false): void {
+  const isUrgent = urgent || kind === 'battery-low' || kind === 'battery-critical' || kind === 'gpu-overheat'
+  if (tucked.value && !isUrgent) return
   if (!customLabel && !['copied', 'translated', 'translation-error'].includes(kind)) return
   clearTimeout(feedbackTimer)
-  feedbackIsError.value = kind === 'translation-error' || kind === 'task-error' || kind === 'task-cancelled'
+  urgentFeedback.value = isUrgent && !expanded.value
+  feedbackIsError.value =
+    kind === 'translation-error' ||
+    kind === 'task-error' ||
+    kind === 'task-cancelled' ||
+    kind === 'app-error' ||
+    kind === 'battery-low' ||
+    kind === 'battery-critical' ||
+    kind === 'gpu-overheat'
   feedbackText.value = customLabel ?? (kind === 'copied' ? '已复制' : kind === 'translated' ? '翻译完成' : '翻译失败')
+  feedbackTooltip.value = customTooltip ?? ''
+  const duration = isUrgent ? 4200 : (kind.startsWith('task-') || kind === 'app-error' ? 3400 : 2400)
   feedbackTimer = setTimeout(() => {
     feedbackText.value = ''
+    feedbackTooltip.value = ''
     feedbackIsError.value = false
-  }, kind.startsWith('task-') ? 3400 : 2400)
+    urgentFeedback.value = false
+  }, duration)
+}
+
+function handleHostFeedback(payload: HostFeedbackPayload): void {
+  if (typeof payload === 'string') {
+    showFeedback(payload)
+    return
+  }
+  if (!payload || typeof payload !== 'object') return
+  showFeedback(payload.kind || 'copied', payload.label, payload.tooltip, !!payload.urgent)
+}
+
+async function focusOrcaFromBadge(): Promise<void> {
+  if (!isDesktop) {
+    showFeedback('app-launched', '已切回 Orca', '浏览器样稿模拟切回 Orca 主窗口')
+    return
+  }
+  try {
+    await invokeHost('focus_orca_window')
+  } catch (error) {
+    showFeedback('app-error', '切回 Orca 失败', String(error))
+  }
+}
+
+/** 提取更紧凑易读的音频输出设备简称，供右键快捷条使用。 */
+function compactAudioDeviceName(name: string): string {
+  const match = /\(([^()]+)\)/.exec(name)
+  if (match && match[1]) {
+    const inner = match[1].trim()
+    if (inner.length >= 2) return inner.length > 14 ? `${inner.slice(0, 13)}…` : inner
+  }
+  return name.length > 14 ? `${name.slice(0, 13)}…` : name
+}
+
+async function refreshQuickAudioDevices(): Promise<void> {
+  if (!isDesktop) {
+    if (!quickAudioDevices.value.length) {
+      quickAudioDevices.value = mockDevices.map(item => ({ ...item }))
+    }
+    return
+  }
+  try {
+    const snapshot = await invokeHost<{ devices: AudioDevice[] }>('list_audio_sessions')
+    if (!disposed) quickAudioDevices.value = snapshot.devices ?? []
+  } catch {
+    if (!disposed) quickAudioDevices.value = []
+  }
+}
+
+async function switchQuickAudioDevice(device: AudioDevice): Promise<void> {
+  if (device.isDefault || switchingQuickDeviceId.value) return
+  switchingQuickDeviceId.value = device.id
+  try {
+    if (!isDesktop) {
+      quickAudioDevices.value = quickAudioDevices.value.map(item => ({
+        ...item,
+        isDefault: item.id === device.id
+      }))
+    } else {
+      const snapshot = await invokeHost<{ devices: AudioDevice[] }>('set_default_audio_device', { deviceId: device.id })
+      if (!disposed) quickAudioDevices.value = snapshot.devices ?? []
+    }
+    quickMenuOpen.value = false
+    showFeedback('copied', `已切至 ${compactAudioDeviceName(device.name)}`, `默认音频输出设备已切换为：${device.name}`)
+  } catch (error) {
+    showFeedback('app-error', '切换设备失败', String(error))
+  } finally {
+    switchingQuickDeviceId.value = ''
+  }
 }
 
 async function openPackConsoleFromCapsule(): Promise<void> {
@@ -735,6 +934,7 @@ function toggleQuickMenu(): void {
   if (expanded.value || tucked.value || approval.value) return
   cancelHover()
   quickMenuOpen.value = !quickMenuOpen.value
+  if (quickMenuOpen.value) void refreshQuickAudioDevices()
 }
 
 async function runQuickAction(action: 'pause' | 'pin-open' | 'audio' | 'settings' | 'ocr'): Promise<void> {
@@ -814,8 +1014,19 @@ function cancelExpandStaging(): void {
 function settleGeometry(): void {
   clearTimeout(geometryTimer)
   geometryTimer = undefined
+  const wasStaging = expandStaging
   cancelExpandStaging()
   geometryShrinking = false
+  // 若两阶段扩容被打断或定时器兜底触发，确保外壳尺寸与最新目标严丝合缝后再测量 HRGN。
+  if ((wasStaging || !shellTween) && panel.value) {
+    shellTween?.kill()
+    shellTween = null
+    gsap.set(panel.value, {
+      width: `${visibleWidth.value}px`,
+      height: `${visibleHeight.value}px`,
+      borderRadius: `${cornerRadius.value}px`
+    })
+  }
   viewportSize.value = isDesktop
     ? computeDesktopStageSize(bounds.value, viewportSize.value.height)
     : { ...bounds.value }
@@ -925,6 +1136,7 @@ watch(() => approval.value?.id, id => {
 
 function expand(value: boolean, focus = false): void {
   if (value) {
+    urgentFeedback.value = false
     if (!hostExpanded.value) mailSelected.value = newMail.value.length > 0
     closeCommitted = false
     reenterAfterClose = false
@@ -1381,9 +1593,13 @@ watch(suppressed, () => {
   clearQuickOcr()
   cancelHover()
   clearTimeout(leaveTimer)
-  clearTimeout(feedbackTimer)
   cancelHoverClose()
-  feedbackText.value = ''
+  if (!urgentFeedback.value) {
+    clearTimeout(feedbackTimer)
+    feedbackText.value = ''
+    feedbackTooltip.value = ''
+    feedbackIsError.value = false
+  }
   receivingFiles.value = false
   hovering.value = false
   pressed.value = false
@@ -1412,6 +1628,11 @@ async function openSeparateTranslation(): Promise<void> {
 async function launch(id: string): Promise<void> {
   const application = state.apps.find(item => item.id === id)
   if (!application) return
+  if (!isDesktop) {
+    showFeedback('app-launched', `已打开 ${application.name}`, `已提交启动请求：${application.name}（浏览器样稿）`)
+    expand(false)
+    return
+  }
   if (await launchApp(application)) expand(false)
 }
 
@@ -1545,6 +1766,9 @@ function stageDesktopExpandGeometry(width: number, height: number): void {
   }
   const gen = ++expandStageGen
   expandStaging = true
+  // 先终止旧外壳补间，避免旧动画 onComplete 在两阶段扩容期间提前触发 settleGeometry 打断展开。
+  shellTween?.kill()
+  shellTween = null
   queued = { width: w, height: h, regions: [locked] }
   void sendGeometry().then(() => {
     if (gen !== expandStageGen || disposed) return
@@ -1645,9 +1869,9 @@ function queueGeometry(): void {
 
 function sendGeometry(): Promise<void> {
   if (disposed) return Promise.resolve()
-  if (sendingPromise) return sendingPromise
+  if (sending && sendingPromise) return sendingPromise
   if (!queued) return Promise.resolve()
-  sendingPromise = (async () => {
+  const run = async (): Promise<void> => {
     try {
       while (queued && !disposed) {
         const next = queued
@@ -1662,10 +1886,16 @@ function sendGeometry(): Promise<void> {
         }
       }
     } finally {
+      sending = false
       sendingPromise = null
     }
-  })()
-  return sendingPromise
+  }
+  // 先置发送中标志再启动异步循环：若循环内所有项同步命中去重而未经过任何 await，
+  // finally 会同步将 sending 复位为 false，避免把已完成 Promise 写回 sendingPromise 造成永久锁死。
+  sending = true
+  const task = run()
+  if (sending) sendingPromise = task
+  return task
 }
 
 function measureContent(): void {
@@ -1909,7 +2139,7 @@ onMounted(() => {
   }
   updateClock()
   document.addEventListener('visibilitychange', updateClock)
-  void listenHost<string>('island-feedback', showFeedback).then(off => {
+  void listenHost<HostFeedbackPayload>('island-feedback', handleHostFeedback).then(off => {
     if (disposed) off()
     else stopFeedback = off
   }).catch(() => pushToast('胶囊操作提示暂不可用', 'error'))
@@ -1917,6 +2147,26 @@ onMounted(() => {
     if (disposed) off()
     else stopTelemetry = off
   }).catch(() => {})
+  if (isDesktop) {
+    void invokeHost<PeripheralBatterySnapshot>('peripheral_batteries').then(snap => {
+      if (!disposed) peripheralDevices.value = snap.devices
+    }).catch(() => {})
+    void listenHost<PeripheralBatterySnapshot>('island-peripherals', snap => {
+      if (!disposed) peripheralDevices.value = snap.devices
+    }).then(off => {
+      if (disposed) off()
+      else stopPeripherals = off
+    }).catch(() => {})
+    void invokeHost<OrcaStatusSnapshot>('orca_status').then(snap => {
+      if (!disposed) orcaStatus.value = snap
+    }).catch(() => {})
+    void listenHost<OrcaStatusSnapshot>('island-orca-status', snap => {
+      if (!disposed) orcaStatus.value = snap
+    }).then(off => {
+      if (disposed) off()
+      else stopOrcaStatus = off
+    }).catch(() => {})
+  }
   void listenHost<OcrResultEvent>('island-ocr-result', payload => {
     mailSelected.value = false
     applyOcrResult(payload)
@@ -1984,6 +2234,8 @@ onBeforeUnmount(() => {
   clearTimeout(quickOcrTimer)
   stopFeedback?.()
   stopTelemetry?.()
+  stopPeripherals?.()
+  stopOrcaStatus?.()
   stopOcrResult?.()
   stopOcrError?.()
   stopQuickImageOcr?.()
@@ -2071,7 +2323,15 @@ onBeforeUnmount(() => {
             </span>
             <!-- 右侧副舱微徽标：与时钟/微读数和平并存 -->
             <span v-if="capsuleBadges.length && !expanded" class="capsule-badges">
-              <span v-for="badge in capsuleBadges" :key="badge.id" class="capsule-badge" :class="badge.tone ? `tone-${badge.tone}` : ''" :title="badge.title">
+              <span
+                v-for="badge in capsuleBadges"
+                :key="badge.id"
+                class="capsule-badge"
+                :class="[badge.tone ? `tone-${badge.tone}` : '', { 'is-clickable': badge.action === 'focus-orca' }]"
+                :title="badge.title"
+                @pointerdown="badge.action === 'focus-orca' ? $event.stopPropagation() : undefined"
+                @click="badge.action === 'focus-orca' ? ($event.stopPropagation(), focusOrcaFromBadge()) : undefined"
+              >
                 <Icon :name="badge.icon" :size="11" />{{ badge.text }}
               </span>
             </span>
@@ -2187,13 +2447,38 @@ onBeforeUnmount(() => {
           role="toolbar"
           aria-label="胶囊快捷操作"
         >
-          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('pause')">
-            <Icon :name="state.ui.paused ? 'play' : 'pause'" :size="12" />{{ state.ui.paused ? '恢复剪贴板' : '暂停剪贴板' }}
-          </button>
-          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('ocr')"><Icon name="scan-text" :size="12" />截图识字</button>
-          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('pin-open')"><Icon name="pin" :size="12" />钉住展开</button>
-          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('audio')"><Icon name="volume" :size="12" />调音台</button>
-          <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('settings')"><Icon name="settings" :size="12" />设置</button>
+          <div class="quick-actions-row">
+            <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('pause')">
+              <Icon :name="state.ui.paused ? 'play' : 'pause'" :size="12" />{{ state.ui.paused ? '恢复剪贴板' : '暂停剪贴板' }}
+            </button>
+            <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('ocr')"><Icon name="scan-text" :size="12" />截图识字</button>
+            <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('pin-open')"><Icon name="pin" :size="12" />钉住展开</button>
+            <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('audio')"><Icon name="volume" :size="12" />调音台</button>
+            <button v-gsap-press="actionTapPose" type="button" @click="runQuickAction('settings')"><Icon name="settings" :size="12" />设置</button>
+          </div>
+          <div v-if="showQuickAudioRow" class="quick-audio-row" role="group" aria-label="快速切换音频输出设备">
+            <span class="quick-audio-label" title="一键切换默认音频输出设备">
+              <Icon name="speaker" :size="11" />
+              <span>输出</span>
+            </span>
+            <div class="quick-audio-chips">
+              <button
+                v-for="device in visibleQuickAudioDevices"
+                :key="device.id"
+                v-gsap-press="actionTapPose"
+                type="button"
+                class="quick-audio-chip"
+                :class="{ active: device.isDefault }"
+                :aria-pressed="!!device.isDefault"
+                :disabled="!!switchingQuickDeviceId"
+                :title="device.isDefault ? `当前默认输出：${device.name}` : `点击切换默认输出：${device.name}`"
+                @click="switchQuickAudioDevice(device)"
+              >
+                <span class="quick-audio-dot" aria-hidden="true" />
+                <span class="quick-audio-name">{{ compactAudioDeviceName(device.name) }}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </GsapPresence>
       <span class="capsule-announcement" role="status" aria-atomic="true">{{ !tucked && isNoticeStatus ? capsuleStatus.text : '' }}</span>
@@ -2430,6 +2715,13 @@ onBeforeUnmount(() => {
 }
 .capsule-badge.tone-accent { background: var(--accent-weak); color: var(--accent); border-color: var(--accent); }
 .capsule-badge.tone-paused { color: var(--danger); border-color: var(--danger-weak); background: var(--danger-weak); }
+.capsule-badge.tone-warn { color: #d97706; border-color: color-mix(in srgb, #f59e0b 45%, var(--line)); background: color-mix(in srgb, #f59e0b 14%, transparent); }
+.capsule-badge.tone-charging { color: #10b981; border-color: color-mix(in srgb, #10b981 42%, var(--line)); background: color-mix(in srgb, #10b981 12%, transparent); }
+.capsule-badge.tone-orca-working { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); background: var(--accent-weak); }
+.capsule-badge.tone-orca-waiting { color: #d97706; border-color: color-mix(in srgb, #f59e0b 52%, var(--line)); background: color-mix(in srgb, #f59e0b 16%, transparent); }
+.capsule-badge.tone-orca-blocked { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); background: var(--danger-weak); }
+.capsule-badge.is-clickable { cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease, filter 120ms ease; }
+.capsule-badge.is-clickable:hover { filter: brightness(1.12); border-color: currentColor; }
 .capsule-pct {
   display: inline-flex; align-items: center; height: 17px; padding: 0 5px; margin-left: 2px;
   border-radius: 999px; font-family: var(--font-mono); font-size: 10px; font-weight: 700;
@@ -2492,16 +2784,46 @@ onBeforeUnmount(() => {
 }
 .capsule-ocr-dismiss:hover { background: var(--hover); border-color: var(--line-strong); color: var(--text); }
 .capsule-quick-menu {
-  position: relative; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 4px;
+  position: relative; z-index: 3; display: flex; flex-direction: column; align-items: stretch; gap: 5px;
   padding: 4px 8px 7px; border-top: 1px solid var(--line);
   transform-origin: top center;
+}
+.quick-actions-row {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
 }
 .capsule-quick-menu button {
   display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px;
   border-radius: 8px; border: 1px solid transparent; background: var(--surface-2); color: var(--text-2);
   font-size: 11px; font-weight: 550; white-space: nowrap; cursor: pointer;
 }
-.capsule-quick-menu button:hover { background: var(--hover); color: var(--text); border-color: var(--line); }
+.capsule-quick-menu button:hover:not(:disabled) { background: var(--hover); color: var(--text); border-color: var(--line); }
+.quick-audio-row {
+  display: flex; align-items: center; gap: 6px; padding-top: 5px; border-top: 1px dashed var(--line);
+  min-width: 0;
+}
+.quick-audio-label {
+  flex: none; display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10.5px; font-weight: 600; color: var(--text-3); white-space: nowrap;
+}
+.quick-audio-chips {
+  display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.quick-audio-chips::-webkit-scrollbar { display: none; }
+.quick-audio-chip {
+  flex: none; height: 23px !important; padding: 0 7px !important; border-radius: 999px !important;
+  font-size: 10.5px !important;
+}
+.quick-audio-chip.active {
+  background: var(--accent-weak) !important; color: var(--accent) !important;
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line)) !important;
+  font-weight: 650 !important;
+}
+.quick-audio-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); opacity: .45; flex: none;
+}
+.quick-audio-chip.active .quick-audio-dot { background: var(--accent); opacity: 1; box-shadow: 0 0 6px var(--accent); }
+.quick-audio-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .island-hit-area:not(.desktop) .island.tucked .capsule {
   visibility: visible;
   opacity: 0;

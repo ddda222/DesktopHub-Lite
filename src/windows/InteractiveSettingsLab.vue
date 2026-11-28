@@ -109,6 +109,7 @@ const telemetrySnapshot = ref<TelemetrySnapshot>({
   downBps: 12_600_000,
   upBps: 640_000,
   cpuPercent: 44,
+  gpuPercent: 31,
   memoryPercent: 68
 })
 let telemetryTimer: number | null = null
@@ -123,6 +124,7 @@ function startTelemetry(): void {
       downBps: Math.round(Math.max(120_000, Math.min(48_000_000, (prev.downBps ?? 12_600_000) + (Math.random() - 0.46) * 5_600_000))),
       upBps: Math.round(Math.max(40_000, Math.min(6_000_000, (prev.upBps ?? 640_000) + (Math.random() - 0.5) * 380_000))),
       cpuPercent: Math.round(Math.max(12, Math.min(92, (prev.cpuPercent ?? 44) + (Math.random() - 0.48) * 14))),
+      gpuPercent: Math.round(Math.max(6, Math.min(94, (prev.gpuPercent ?? 31) + (Math.random() - 0.48) * 16))),
       memoryPercent: Math.round(Math.max(40, Math.min(90, (prev.memoryPercent ?? 68) + (Math.random() - 0.5) * 5)))
     }
   }, 1300)
@@ -270,7 +272,7 @@ function setTelemetryMode(mode: 'smart' | 'always' | 'off', event: MouseEvent): 
   )
 }
 
-function toggleMetric(key: 'telemetryNet' | 'telemetryCpu' | 'telemetryMemory', label: string, event: MouseEvent): void {
+function toggleMetric(key: 'telemetryNet' | 'telemetryCpu' | 'telemetryGpu' | 'telemetryMemory', label: string, event: MouseEvent): void {
   state.ui.islandAppearance[key] = !state.ui.islandAppearance[key]
   ripple(event, `${label}卫星液滴已${state.ui.islandAppearance[key] ? '浮现' : '收回'}`, 0.55)
 }
@@ -570,6 +572,7 @@ onBeforeUnmount(() => {
             <div v-if="state.ui.islandAppearance.telemetryMode !== 'off'" class="metric-row">
               <button type="button" class="deck-btn is-sm" :class="{ 'is-primary': state.ui.islandAppearance.telemetryNet }" @click="toggleMetric('telemetryNet', '网速', $event)">网速液滴</button>
               <button type="button" class="deck-btn is-sm" :class="{ 'is-primary': state.ui.islandAppearance.telemetryCpu }" @click="toggleMetric('telemetryCpu', '处理器', $event)">CPU 液滴</button>
+              <button type="button" class="deck-btn is-sm" :class="{ 'is-primary': state.ui.islandAppearance.telemetryGpu }" @click="toggleMetric('telemetryGpu', '显卡', $event)">GPU 液滴</button>
               <button type="button" class="deck-btn is-sm" :class="{ 'is-primary': state.ui.islandAppearance.telemetryMemory }" @click="toggleMetric('telemetryMemory', '内存', $event)">内存液滴</button>
             </div>
           </div>
