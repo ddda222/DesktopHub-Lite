@@ -79,7 +79,7 @@
   font-family: var(--font-mono);
 }
 :root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip,
-:root[data-theme='blueprint'] .audio-mixer .sound-profiles button,
+:root[data-theme='blueprint'] .audio-mixer .sound-profiles .profile-apply,
 :root[data-theme='blueprint'] .audio-mixer .mute,
 :root[data-theme='blueprint'] .audio-mixer .save-profile button,
 :root[data-theme='blueprint'] .file-shelf .shelf-tools button,
@@ -87,6 +87,28 @@
   border-radius: 1px;
   border: 1px dashed rgba(224, 242, 254, 0.55);
   font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .audio-mixer .sound-profiles .profile-apply {
+  border-radius: 1px 0 0 1px;
+  border-right: 0;
+}
+:root[data-theme='blueprint'] .audio-mixer .sound-profiles .profile-del {
+  border-radius: 0 1px 1px 0;
+  border: 1px dashed rgba(224, 242, 254, 0.55);
+  font-family: var(--font-mono);
+}
+:root[data-theme='blueprint'] .audio-mixer .sound-profiles .profile-del:hover:not(:disabled) {
+  border-style: solid;
+  border-color: var(--danger);
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+:root[data-theme='blueprint'] .audio-mixer .sound-profiles .profile-del.is-confirm {
+  border-style: solid;
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--danger-text);
+  font-weight: 700;
 }
 :root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip {
   background: rgba(14, 52, 96, 0.65);
@@ -97,7 +119,7 @@
   color: #ffffff;
 }
 :root[data-theme='blueprint'] .audio-mixer .output-devices .device-chip.active,
-:root[data-theme='blueprint'] .audio-mixer .sound-profiles button[aria-pressed='true'],
+:root[data-theme='blueprint'] .audio-mixer .sound-profiles .profile-apply[aria-pressed='true'],
 :root[data-theme='blueprint'] .audio-mixer .muted .mute,
 :root[data-theme='blueprint'] .audio-mixer .save-profile button,
 :root[data-theme='blueprint'] .translation-panel .primary {
@@ -146,7 +168,7 @@
   background: rgba(14, 52, 96, 0.65);
   font-family: var(--font-mono);
 }
-:root[data-theme='blueprint'] .translation-panel .ghost:hover,
+:root[data-theme='blueprint'] .translation-panel .ghost:hover:not(:disabled),
 :root[data-theme='blueprint'] .file-preview button:hover:not(:disabled) {
   border-style: solid;
   border-color: #fde047;
@@ -862,6 +884,38 @@
   border-color: #00f0ff;
   box-shadow: 0 0 10px rgba(0, 240, 255, 0.28);
 }
+:root[data-theme='neon'] .audio-mixer .sound-profiles .profile-apply {
+  border-radius: 7px 0 0 7px;
+  border-color: rgba(255, 43, 214, 0.34);
+  background: rgba(16, 8, 30, 0.78);
+}
+:root[data-theme='neon'] .audio-mixer .sound-profiles .profile-apply:hover:not([aria-pressed='true']):not(:disabled) {
+  border-color: #00f0ff;
+  color: #ffffff;
+  background: rgba(0, 240, 255, 0.12);
+}
+:root[data-theme='neon'] .audio-mixer .sound-profiles .profile-apply[aria-pressed='true'] {
+  background: linear-gradient(90deg, rgba(255, 43, 214, 0.32), rgba(0, 240, 255, 0.24));
+  color: #00f0ff;
+  border-color: #00f0ff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.28);
+}
+:root[data-theme='neon'] .audio-mixer .sound-profiles .profile-del {
+  border-radius: 0 7px 7px 0;
+  border-color: rgba(255, 43, 214, 0.34);
+  background: rgba(16, 8, 30, 0.78);
+}
+:root[data-theme='neon'] .audio-mixer .sound-profiles .profile-del:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+:root[data-theme='neon'] .audio-mixer .sound-profiles .profile-del.is-confirm {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--danger-text);
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.42);
+}
 :root[data-theme='neon'] .file-shelf .shelf-tools button,
 :root[data-theme='neon'] .file-shelf .shelf-list li,
 :root[data-theme='neon'] .file-preview .file-icon,
@@ -877,9 +931,21 @@
 }
 :root[data-theme='neon'] .file-shelf .shelf-list li:hover,
 :root[data-theme='neon'] .file-shelf .shelf-tools button:hover:not(:disabled),
-:root[data-theme='neon'] .translation-panel .ghost:hover {
+:root[data-theme='neon'] .translation-panel .ghost:hover:not(:disabled) {
   border-color: #00f0ff;
   background: rgba(0, 240, 255, 0.12);
+}
+:root[data-theme='neon'] .translation-panel .ghost.copy {
+  border-color: rgba(0, 240, 255, 0.62);
+  background: linear-gradient(90deg, rgba(255, 43, 214, 0.24), rgba(0, 240, 255, 0.18));
+  color: #e0f7ff;
+  font-weight: 600;
+}
+:root[data-theme='neon'] .translation-panel .ghost.copy:hover:not(:disabled) {
+  border-color: #00f0ff;
+  background: linear-gradient(90deg, rgba(255, 43, 214, 0.36), rgba(0, 240, 255, 0.28));
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.32);
 }
 :root[data-theme='neon'] .pop .pager-btn {
   border-radius: 7px;

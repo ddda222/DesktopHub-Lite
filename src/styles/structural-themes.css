@@ -59,7 +59,7 @@
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
 }
 :root[data-theme='mecha'] .audio-mixer .output-devices .device-chip,
-:root[data-theme='mecha'] .audio-mixer .sound-profiles button,
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-apply,
 :root[data-theme='mecha'] .audio-mixer .mute,
 :root[data-theme='mecha'] .audio-mixer .save-profile button,
 :root[data-theme='mecha'] .file-shelf .shelf-tools button,
@@ -67,9 +67,31 @@
   border-radius: 2px;
   clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
 }
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-apply {
+  border-radius: 2px 0 0 2px;
+  border-color: rgba(245, 158, 11, 0.28);
+  clip-path: polygon(5px 0, 100% 0, 100% 100%, 0 100%, 0 5px);
+}
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-del {
+  border-radius: 0 2px 2px 0;
+  border-color: rgba(245, 158, 11, 0.28);
+  clip-path: none;
+}
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-del:hover:not(:disabled) {
+  background: var(--danger-weak);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-del.is-confirm {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger-text);
+  font-weight: 700;
+}
 /* 琥珀重工所有带 clip-path 切角的交互控件统一用内描边呈现无障碍焦点环，防止 outline 被斜角裁掉 */
 :root[data-theme='mecha'] .audio-mixer .output-devices .device-chip:focus-visible,
-:root[data-theme='mecha'] .audio-mixer .sound-profiles button:focus-visible,
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-apply:focus-visible,
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-del:focus-visible,
 :root[data-theme='mecha'] .audio-mixer .mute:focus-visible,
 :root[data-theme='mecha'] .file-shelf .shelf-tools button:focus-visible,
 :root[data-theme='mecha'] .settings-ui .nav-item:focus-visible,
@@ -109,6 +131,17 @@
   border-radius: 3px;
   border-color: rgba(245, 158, 11, 0.28);
 }
+:root[data-theme='mecha'] .translation-panel .ghost.copy {
+  border-color: rgba(245, 158, 11, 0.56);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  font-weight: 600;
+}
+:root[data-theme='mecha'] .translation-panel .ghost.copy:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(245, 158, 11, 0.24);
+  color: #fef3c7;
+}
 :root[data-theme='mecha'] .audio-mixer .output-devices .device-chip {
   border-color: rgba(245, 158, 11, 0.28); background: var(--tile-surface); font-family: var(--font-mono);
 }
@@ -116,7 +149,7 @@
   border-color: rgba(245, 158, 11, 0.65); background: var(--hover); color: var(--text);
 }
 :root[data-theme='mecha'] .audio-mixer .output-devices .device-chip.active,
-:root[data-theme='mecha'] .audio-mixer .sound-profiles button[aria-pressed='true'],
+:root[data-theme='mecha'] .audio-mixer .sound-profiles .profile-apply[aria-pressed='true'],
 :root[data-theme='mecha'] .audio-mixer .muted .mute,
 :root[data-theme='mecha'] .audio-mixer .save-profile button {
   background: var(--accent); color: var(--accent-text); border-color: var(--accent);
@@ -464,7 +497,7 @@
   border-radius: 0; border: 2px solid #0f0d1a; background: #141915; color: #facc15;
 }
 :root[data-theme='pixel'] .audio-mixer .output-devices .device-chip,
-:root[data-theme='pixel'] .audio-mixer .sound-profiles button,
+:root[data-theme='pixel'] .audio-mixer .sound-profiles .profile-apply,
 :root[data-theme='pixel'] .audio-mixer .mute,
 :root[data-theme='pixel'] .audio-mixer .save-profile button,
 :root[data-theme='pixel'] .file-shelf .shelf-tools button,
@@ -472,11 +505,24 @@
   border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc;
   box-shadow: 0 3px 0 #0f0d1a; font-family: var(--font-mono);
 }
+:root[data-theme='pixel'] .audio-mixer .sound-profiles .profile-apply {
+  border-right: 0;
+}
+:root[data-theme='pixel'] .audio-mixer .sound-profiles .profile-del {
+  border-radius: 0; border: 2px solid #0f0d1a; background: #373152; color: #cbd5e1;
+  box-shadow: 0 3px 0 #0f0d1a; font-family: var(--font-mono);
+}
+:root[data-theme='pixel'] .audio-mixer .sound-profiles .profile-del:hover:not(:disabled) {
+  background: #7f1d1d; color: #fee2e2; border-color: #0f0d1a;
+}
+:root[data-theme='pixel'] .audio-mixer .sound-profiles .profile-del.is-confirm {
+  background: #ef4444; color: #ffffff; border-color: #0f0d1a; font-weight: 700;
+}
 :root[data-theme='pixel'] .audio-mixer .output-devices .device-chip:hover:not(.active):not(:disabled) {
   background: #5b5282; color: #ffffff;
 }
 :root[data-theme='pixel'] .audio-mixer .output-devices .device-chip.active,
-:root[data-theme='pixel'] .audio-mixer .sound-profiles button[aria-pressed='true'],
+:root[data-theme='pixel'] .audio-mixer .sound-profiles .profile-apply[aria-pressed='true'],
 :root[data-theme='pixel'] .audio-mixer .muted .mute,
 :root[data-theme='pixel'] .audio-mixer .save-profile button,
 :root[data-theme='pixel'] .translation-panel .primary {
@@ -513,14 +559,14 @@
   border-radius: 0; border: 2px solid #0f0d1a; background: #4a436b; color: #f8fafc;
   box-shadow: 0 2px 0 #0f0d1a; font-family: var(--font-mono);
 }
-:root[data-theme='pixel'] .translation-panel .ghost:hover,
+:root[data-theme='pixel'] .translation-panel .ghost:hover:not(:disabled),
 :root[data-theme='pixel'] .file-preview button:hover:not(:disabled) {
   background: #5b5282; color: #ffffff;
 }
 :root[data-theme='pixel'] .translation-panel .ghost.copy {
   background: #facc15; color: #0f0d1a; border-color: #0f0d1a;
 }
-:root[data-theme='pixel'] .translation-panel .ghost.copy:hover {
+:root[data-theme='pixel'] .translation-panel .ghost.copy:hover:not(:disabled) {
   background: var(--accent); color: #0f0d1a; border-color: #0f0d1a;
 }
 

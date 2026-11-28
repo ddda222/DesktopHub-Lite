@@ -228,7 +228,6 @@ fn set_island_expanded(app: AppHandle, expanded: bool, focus: Option<bool>) -> U
     } else {
         state.windows.clear_pop_shown();
         state.windows.clear_bar_expanded();
-        translation::cancel_for_window(&app, windows::BAR);
     }
     if focus.unwrap_or(false) { show_window(&app, windows::BAR); }
     broadcast_ui(&app);
@@ -249,15 +248,12 @@ fn set_island_anchor(app: AppHandle, anchor: String) -> Result<UiState, String> 
 fn select_island_page_sync(app: &AppHandle, page: String, focus: Option<bool>) -> Result<UiState, String> {
     if !state::valid_island_page(&page) { return Err("未知灵动岛页面".into()); }
     let state = app.state::<AppState>();
-    let previous = state.ui.snapshot();
     let next = update_ui_preferences(app, |ui| {
         ui.island_page = page.clone();
         ui.island_expanded = true;
         ui.panel = if page == state::PANEL_APPLICATIONS { None } else { Some(page.clone()) };
     })?;
-    if previous.island_page == PANEL_TRANSLATION && page != PANEL_TRANSLATION {
-        translation::cancel_for_window(app, windows::BAR);
-    }
+    // LG-05：切离翻译页或收起灵动岛时保留在途翻译请求，切回翻译页可直接查看已完成译文。
     state.windows.mark_bar_expanded();
     if focus.unwrap_or(true) { show_window(app, windows::BAR); }
     hide_window(app, windows::POP);
@@ -272,9 +268,6 @@ async fn select_island_page(app: AppHandle, page: String, focus: Option<bool>) -
     let state = app.state::<AppState>();
     let _order = state.ui_persist_gate.lock().await;
     if seq < PAGE_SEQ.load(Ordering::SeqCst) && !focus.unwrap_or(true) {
-        if page != PANEL_TRANSLATION && state.ui.snapshot().island_page == PANEL_TRANSLATION {
-            translation::cancel_for_window(&app, windows::BAR);
-        }
         return Ok(state.ui.snapshot());
     }
     let handle = app.clone();
@@ -724,31 +717,22 @@ fn audit_applications_sync(app: &AppHandle) -> Result<AppConfig, String> {
             .map(|a| (a.id.clone(), a.target.clone()))
             .collect()
     };
-    let mut exists_map = std::collections::HashMap::with_capacity(targets.len());
+    let mut probed = std::collections::HashMap::with_capacity(targets.len());
     for (id, target) in targets {
-        exists_map.insert(id, launcher::exists(&target));
+        let ok = launcher::exists(&target);
+        probed.insert(id, (target, ok));
     }
     let _gate = state.configuration_gate.lock().map_err(|_| "配置暂时不可用")?;
     let (snapshot, changed) = {
         let mut config = state.apps.lock().unwrap_or_else(|e| e.into_inner());
         let mut preview = config.apps.clone();
-        let diff = app_discovery::reconcile_broken_apps(&mut preview, |target| {
-            config
-                .apps
-                .iter()
-                .find(|a| a.target == target)
-                .and_then(|a| exists_map.get(&a.id).copied())
-                .unwrap_or(true)
-        });
+        // 回锁写回前严格核验 (app.id, app.target) 与探测快照一致，防止中途改路径被旧探测结果覆写。
+        let diff = app_discovery::reconcile_broken_apps_guarded(&mut preview, &probed);
         if diff == 0 {
             (config.clone(), 0)
         } else {
             let saved = state.store.update(applications::CONFIG_FILE, &mut *config, |next| {
-                for app_item in &mut next.apps {
-                    if let Some(&ok) = exists_map.get(&app_item.id) {
-                        app_item.broken = if ok { None } else { Some(true) };
-                    }
-                }
+                app_discovery::reconcile_broken_apps_guarded(&mut next.apps, &probed);
             })?;
             (saved, diff)
         }
@@ -1576,6 +1560,7 @@ pub fn run() {
             current_window_label,
             app_pack::pack_settings,
             app_pack::save_pack_settings,
+            app_pack::save_pack_reverse_port,
             app_pack::open_pack_dir,
             app_pack::install_pack_apk,
             adb::adb_status,

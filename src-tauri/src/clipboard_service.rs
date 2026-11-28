@@ -379,8 +379,17 @@ pub fn copy_clipboard_entry(app: AppHandle, state: State<'_, AppState>, id: Stri
     Ok(())
 }
 #[tauri::command]
-pub fn copy_translation_result(app: AppHandle, text: String) -> Result<(), String> {
-    copy_plain_text(&app, &text)
+pub fn copy_translation_result(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    text: String,
+) -> Result<(), String> {
+    write_text(&text)?;
+    // 仅当由灵动岛发起复制时触发胶囊/岛内反馈；独立翻译窗由自身底部轻提示条反馈，避免跨窗重复提示。
+    if window.label() == crate::windows::BAR {
+        copied(&app);
+    }
+    Ok(())
 }
 
 /// 供内部模块按 ID 读取已托管的剪贴板图片 PNG 原始字节。

@@ -6,7 +6,7 @@
 //! - 跨 .exe / .lnk / shell:AppsFolder 智能去重并过滤卸载器/帮助文档等噪声项；
 //! - 发现新应用仅保存在 `app-discovery.json` 并由设置中心静默展示角标与顶部待分类卡片，零打扰弹窗。
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -105,23 +105,35 @@ pub fn normalize_target_key(target: &str) -> String {
     target.trim().to_ascii_lowercase()
 }
 
-/// 归一化应用显示名（去空白、去常见平台/架构/版本后缀），用于跨 .exe / .lnk / shell:AppsFolder 去重。
+/// 归一化应用显示名（按词边界分词过滤常见架构/平台独立噪声词），用于跨 .exe / .lnk / shell:AppsFolder 去重。
+/// 不会误伤单词内部的片段（如 WhatsApp、Apple Music）。
 pub fn normalize_app_name(name: &str) -> String {
+    const NOISE_TOKENS: &[&str] = &["64bit", "32bit", "x64", "x86", "desktop", "app", "bit", "64", "32"];
     let lower = name.trim().to_ascii_lowercase();
-    let stripped = lower
-        .replace("(64-bit)", " ")
-        .replace("(32-bit)", " ")
-        .replace("(x64)", " ")
-        .replace("(x86)", " ")
-        .replace("64-bit", " ")
-        .replace("32-bit", " ")
-        .replace("desktop", " ")
-        .replace("app", " ");
-    let mut out = String::with_capacity(stripped.len());
-    for ch in stripped.chars() {
-        if ch.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&ch) {
-            out.push(ch);
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for ch in lower.chars() {
+        if ch.is_ascii_alphanumeric() {
+            current.push(ch);
+        } else if ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            tokens.push(ch.to_string());
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
         }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    let mut out = String::with_capacity(lower.len());
+    for tok in tokens {
+        if NOISE_TOKENS.contains(&tok.as_str()) {
+            continue;
+        }
+        out.push_str(&tok);
     }
     out
 }
@@ -196,7 +208,7 @@ pub fn matches_existing_app(existing: &[HubApp], name: &str, target: &str) -> bo
             return true;
         }
         if let Some(existing_stem) = target_stem_key(&app.target) {
-            if !name_key.is_empty() && (name_key == existing_stem || name_key.ends_with(&existing_stem)) && existing_stem.len() >= 4 {
+            if !name_key.is_empty() && name_key == existing_stem && existing_stem.len() >= 4 {
                 return true;
             }
             if let Some(ref cstem) = cand_stem {
@@ -276,6 +288,15 @@ pub fn reconcile_discovery(
     categories: &[Category],
     now_ms: u64,
 ) -> ReconcileOutcome {
+    // 守卫：当系统应用列表返回为空（如 PowerShell 瞬态失败）时，绝不置 initialized=true，也绝不清空既有 pending。
+    if system_apps.is_empty() {
+        return ReconcileOutcome {
+            initialized_now: false,
+            added_count: 0,
+            pruned_count: 0,
+        };
+    }
+
     let mut seen_set: HashSet<String> = state.seen_targets.iter().cloned().collect();
     let dismissed_set: HashSet<String> = state.dismissed_targets.iter().cloned().collect();
 
@@ -457,7 +478,8 @@ pub fn remove_pending_target(state: &mut DiscoveryState, target: &str) -> bool {
     state.pending.len() != before
 }
 
-/// 批量校验已收录应用的路径有效性，返回 `broken` 状态发生变化的条目数量。
+/// 批量校验已收录应用的路径有效性，返回 `broken` 状态发生变化的条目数量（供离线单测复用）。
+#[cfg(test)]
 pub fn reconcile_broken_apps<F>(apps: &mut [HubApp], mut exists_fn: F) -> usize
 where
     F: FnMut(&str) -> bool,
@@ -477,11 +499,37 @@ where
     changed
 }
 
+/// 带快照一致性核验的失效应用状态回写：仅当 `(app.id, app.target)` 与探测时的快照完全一致时才更新 `broken`，
+/// 防止用户在巡检中途修改了应用路径却被旧探测结果覆写。
+pub fn reconcile_broken_apps_guarded(
+    apps: &mut [HubApp],
+    probed: &HashMap<String, (String, bool)>,
+) -> usize {
+    let mut changed = 0usize;
+    for app in apps.iter_mut() {
+        let Some((probed_target, ok)) = probed.get(&app.id) else {
+            continue;
+        };
+        if app.target != *probed_target {
+            continue;
+        }
+        let next = if *ok { None } else { Some(true) };
+        if app.broken != next {
+            app.broken = next;
+            changed += 1;
+        }
+    }
+    changed
+}
+
 // === TAURI_COMMANDS ===
 
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::applications::{app_from_target, AppConfig, CONFIG_FILE};
 
@@ -489,6 +537,14 @@ use crate::applications::{app_from_target, AppConfig, CONFIG_FILE};
 pub struct DiscoveryManager {
     lock: Mutex<()>,
     last_check_ms: Mutex<u64>,
+    scanning: AtomicBool,
+}
+
+struct ScanGuard<'a>(&'a AtomicBool);
+impl Drop for ScanGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 fn now_ms() -> u64 {
@@ -542,59 +598,108 @@ fn broadcast_discovery(app: &AppHandle, snapshot: &DiscoverySnapshot) {
 
 fn perform_scan_sync(app: &AppHandle, force: bool) -> Result<DiscoverySnapshot, String> {
     let mgr = app.state::<DiscoveryManager>();
-    let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
     let now = now_ms();
+    let fingerprints = collect_folder_fingerprints();
 
-    let mut state = load_state(app);
-    let (existing_apps, categories) = {
-        let app_state = app.state::<crate::AppState>();
-        let cfg = app_state.apps.lock().unwrap_or_else(|e| e.into_inner());
-        (cfg.apps.clone(), cfg.categories.clone())
-    };
+    // 阶段 1：短暂加锁判断是否需要真正调用 PowerShell 扫描，避免锁内执行耗时子进程卡死设置页交互。
+    let should_scan = {
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = load_state(app);
+        let existing_apps = {
+            let app_state = app.state::<crate::AppState>();
+            let cloned = app_state.apps.lock().unwrap_or_else(|e| e.into_inner()).apps.clone();
+            cloned
+        };
 
-    // 同步清理 pending 中已被用户通过其他入口添加的应用
-    let before_sync = state.pending.len();
-    state
-        .pending
-        .retain(|item| !matches_existing_app(&existing_apps, &item.name, &item.target));
-    let mut dirty = state.pending.len() != before_sync;
+        let before_sync = state.pending.len();
+        state
+            .pending
+            .retain(|item| !matches_existing_app(&existing_apps, &item.name, &item.target));
+        let dirty = state.pending.len() != before_sync;
 
-    // 60 秒防抖保护（手动点击强制扫描跳过防抖）
-    if !force && state.initialized {
-        let mut last_check = mgr.last_check_ms.lock().unwrap_or_else(|e| e.into_inner());
-        if now.saturating_sub(*last_check) < 60_000 {
+        if !force && state.initialized {
+            let last_check = *mgr.last_check_ms.lock().unwrap_or_else(|e| e.into_inner());
+            if now.saturating_sub(last_check) < 60_000 {
+                if dirty {
+                    let _ = save_state(app, &state);
+                }
+                return Ok(state.snapshot());
+            }
+        }
+
+        let folders_changed = !state.initialized || state.folder_fingerprints != fingerprints;
+        if !force && !folders_changed {
+            *mgr.last_check_ms.lock().unwrap_or_else(|e| e.into_inner()) = now;
             if dirty {
                 let _ = save_state(app, &state);
             }
             return Ok(state.snapshot());
         }
-        *last_check = now;
-    } else {
-        *mgr.last_check_ms.lock().unwrap_or_else(|e| e.into_inner()) = now;
-    }
 
-    let fingerprints = collect_folder_fingerprints();
-    let folders_changed = !state.initialized || state.folder_fingerprints != fingerprints;
-    if !force && !folders_changed {
+        // 防并发重入：若已有扫描在进行中，不阻塞也不重复启动 PowerShell，直接返回当前最新快照。
+        if mgr
+            .scanning
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            if dirty {
+                let _ = save_state(app, &state);
+            }
+            return Ok(state.snapshot());
+        }
+
         if dirty {
             let _ = save_state(app, &state);
         }
-        return Ok(state.snapshot());
-    }
+        true
+    };
 
+    if !should_scan {
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        return Ok(load_state(app).snapshot());
+    }
+    let _scan_guard = ScanGuard(&mgr.scanning);
+
+    // 阶段 2：完全无锁调用耗时 0.8~3s 的系统应用列表读取，不阻塞列表查询/忽略/加入操作。
     let system_apps: Vec<(String, String)> = crate::system_apps::list()?
         .into_iter()
         .map(|item| (item.name, item.target))
         .collect();
 
-    let outcome = reconcile_discovery(&mut state, &system_apps, &existing_apps, &categories, now);
-    state.folder_fingerprints = fingerprints;
-    dirty = dirty || outcome.initialized_now || outcome.added_count > 0 || outcome.pruned_count > 0 || force || folders_changed;
-    if dirty {
-        save_state(app, &state)?;
-    }
-    let snap = state.snapshot();
-    if outcome.added_count > 0 || outcome.pruned_count > 0 || force {
+    // 阶段 3：重新短暂加锁并重读最新状态与用户配置，避免覆盖扫描途中用户的加入/忽略操作。
+    let (snap, should_broadcast) = {
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = load_state(app);
+        let (existing_apps, categories) = {
+            let app_state = app.state::<crate::AppState>();
+            let cfg = app_state.apps.lock().unwrap_or_else(|e| e.into_inner());
+            (cfg.apps.clone(), cfg.categories.clone())
+        };
+        let finish_ms = now_ms();
+        *mgr.last_check_ms.lock().unwrap_or_else(|e| e.into_inner()) = finish_ms;
+
+        if system_apps.is_empty() {
+            // 空列表直接安全退出，绝不写 initialized=true 或刷新 fingerprints
+            return Ok(state.snapshot());
+        }
+
+        let folders_changed = !state.initialized || state.folder_fingerprints != fingerprints;
+        let outcome = reconcile_discovery(&mut state, &system_apps, &existing_apps, &categories, finish_ms);
+        state.folder_fingerprints = fingerprints;
+        let dirty = outcome.initialized_now
+            || outcome.added_count > 0
+            || outcome.pruned_count > 0
+            || force
+            || folders_changed;
+        if dirty {
+            save_state(app, &state)?;
+        }
+        (
+            state.snapshot(),
+            outcome.added_count > 0 || outcome.pruned_count > 0 || force,
+        )
+    };
+    if should_broadcast {
         broadcast_discovery(app, &snap);
     }
     Ok(snap)
@@ -615,22 +720,27 @@ pub fn start(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn list_discovered_apps(app: AppHandle, mgr: State<'_, DiscoveryManager>) -> DiscoverySnapshot {
-    let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut state = load_state(&app);
-    let existing = {
-        let app_state = app.state::<crate::AppState>();
-        let cloned = app_state.apps.lock().unwrap_or_else(|e| e.into_inner()).apps.clone();
-        cloned
-    };
-    let before = state.pending.len();
-    state
-        .pending
-        .retain(|item| !matches_existing_app(&existing, &item.name, &item.target));
-    if state.pending.len() != before {
-        let _ = save_state(&app, &state);
-    }
-    state.snapshot()
+pub async fn list_discovered_apps(app: AppHandle) -> Result<DiscoverySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mgr = app.state::<DiscoveryManager>();
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = load_state(&app);
+        let existing = {
+            let app_state = app.state::<crate::AppState>();
+            let cloned = app_state.apps.lock().unwrap_or_else(|e| e.into_inner()).apps.clone();
+            cloned
+        };
+        let before = state.pending.len();
+        state
+            .pending
+            .retain(|item| !matches_existing_app(&existing, &item.name, &item.target));
+        if state.pending.len() != before {
+            let _ = save_state(&app, &state);
+        }
+        Ok(state.snapshot())
+    })
+    .await
+    .map_err(|_| "读取待分类应用列表失败".to_string())?
 }
 
 #[tauri::command]
@@ -649,114 +759,128 @@ pub struct AcceptDiscoveredResult {
 }
 
 #[tauri::command]
-pub fn accept_discovered_app(
+pub async fn accept_discovered_app(
     app: AppHandle,
-    mgr: State<'_, DiscoveryManager>,
     target: String,
     name: String,
     category_id: String,
 ) -> Result<AcceptDiscoveredResult, String> {
-    let trimmed_target = target.trim().to_string();
-    if trimmed_target.is_empty() {
-        return Err("应用目标为空".into());
-    }
-    let app_state = app.state::<crate::AppState>();
-    let _gate = app_state
-        .configuration_gate
-        .lock()
-        .map_err(|_| "配置暂时不可用")?;
-    let next_config = {
-        let mut config = app_state.apps.lock().unwrap_or_else(|e| e.into_inner());
-        let resolved_cat = if category_id == "all"
-            || config.categories.iter().any(|c| c.id == category_id)
-        {
-            category_id
-        } else {
-            "all".into()
-        };
-        if config.find_by_target(&trimmed_target).is_some() {
-            config.clone()
-        } else {
-            let entry = app_from_target(
-                &trimmed_target,
-                &resolved_cat,
-                (!name.trim().is_empty()).then_some(name.trim()),
-            );
-            app_state
-                .store
-                .update(CONFIG_FILE, &mut *config, |next| next.apps.push(entry))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let trimmed_target = target.trim().to_string();
+        if trimmed_target.is_empty() {
+            return Err("应用目标为空".into());
         }
-    };
-    crate::broadcast_apps(&app, &next_config);
-
-    let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut dstate = load_state(&app);
-    remove_pending_target(&mut dstate, &trimmed_target);
-    let _ = save_state(&app, &dstate);
-    let snap = dstate.snapshot();
-    broadcast_discovery(&app, &snap);
-
-    Ok(AcceptDiscoveredResult {
-        config: next_config,
-        discovery: snap,
-    })
-}
-
-#[tauri::command]
-pub fn dismiss_discovered_app(
-    app: AppHandle,
-    mgr: State<'_, DiscoveryManager>,
-    target: String,
-) -> Result<DiscoverySnapshot, String> {
-    let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut state = load_state(&app);
-    if dismiss_pending_target(&mut state, &target, now_ms()) {
-        save_state(&app, &state)?;
-    }
-    let snap = state.snapshot();
-    broadcast_discovery(&app, &snap);
-    Ok(snap)
-}
-
-#[tauri::command]
-pub fn dismiss_all_discovered_apps(
-    app: AppHandle,
-    mgr: State<'_, DiscoveryManager>,
-) -> Result<DiscoverySnapshot, String> {
-    let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut state = load_state(&app);
-    if dismiss_all_pending(&mut state, now_ms()) > 0 {
-        save_state(&app, &state)?;
-    }
-    let snap = state.snapshot();
-    broadcast_discovery(&app, &snap);
-    Ok(snap)
-}
-
-#[tauri::command]
-pub fn restore_dismissed_app(
-    app: AppHandle,
-    mgr: State<'_, DiscoveryManager>,
-    target: String,
-) -> Result<DiscoverySnapshot, String> {
-    let categories = {
         let app_state = app.state::<crate::AppState>();
-        let cloned = app_state
-            .apps
+        let _gate = app_state
+            .configuration_gate
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .categories
-            .clone();
-        cloned
-    };
-    let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
-    let mut state = load_state(&app);
-    if restore_dismissed_target(&mut state, &target, &categories, now_ms()) {
-        save_state(&app, &state)?;
-    }
-    let snap = state.snapshot();
-    broadcast_discovery(&app, &snap);
-    Ok(snap)
+            .map_err(|_| "配置暂时不可用")?;
+        let next_config = {
+            let mut config = app_state.apps.lock().unwrap_or_else(|e| e.into_inner());
+            let resolved_cat = if category_id == "all"
+                || config.categories.iter().any(|c| c.id == category_id)
+            {
+                category_id
+            } else {
+                "all".into()
+            };
+            if config.find_by_target(&trimmed_target).is_some() {
+                config.clone()
+            } else {
+                let entry = app_from_target(
+                    &trimmed_target,
+                    &resolved_cat,
+                    (!name.trim().is_empty()).then_some(name.trim()),
+                );
+                app_state
+                    .store
+                    .update(CONFIG_FILE, &mut *config, |next| next.apps.push(entry))?
+            }
+        };
+        crate::broadcast_apps(&app, &next_config);
+
+        let mgr = app.state::<DiscoveryManager>();
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut dstate = load_state(&app);
+        remove_pending_target(&mut dstate, &trimmed_target);
+        let _ = save_state(&app, &dstate);
+        let snap = dstate.snapshot();
+        broadcast_discovery(&app, &snap);
+
+        Ok(AcceptDiscoveredResult {
+            config: next_config,
+            discovery: snap,
+        })
+    })
+    .await
+    .map_err(|_| "加入应用分类任务中断".to_string())?
+}
+
+#[tauri::command]
+pub async fn dismiss_discovered_app(
+    app: AppHandle,
+    target: String,
+) -> Result<DiscoverySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mgr = app.state::<DiscoveryManager>();
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = load_state(&app);
+        if dismiss_pending_target(&mut state, &target, now_ms()) {
+            save_state(&app, &state)?;
+        }
+        let snap = state.snapshot();
+        broadcast_discovery(&app, &snap);
+        Ok(snap)
+    })
+    .await
+    .map_err(|_| "忽略新应用任务中断".to_string())?
+}
+
+#[tauri::command]
+pub async fn dismiss_all_discovered_apps(app: AppHandle) -> Result<DiscoverySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mgr = app.state::<DiscoveryManager>();
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = load_state(&app);
+        if dismiss_all_pending(&mut state, now_ms()) > 0 {
+            save_state(&app, &state)?;
+        }
+        let snap = state.snapshot();
+        broadcast_discovery(&app, &snap);
+        Ok(snap)
+    })
+    .await
+    .map_err(|_| "批量忽略任务中断".to_string())?
+}
+
+#[tauri::command]
+pub async fn restore_dismissed_app(
+    app: AppHandle,
+    target: String,
+) -> Result<DiscoverySnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let categories = {
+            let app_state = app.state::<crate::AppState>();
+            let cloned = app_state
+                .apps
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .categories
+                .clone();
+            cloned
+        };
+        let mgr = app.state::<DiscoveryManager>();
+        let _guard = mgr.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = load_state(&app);
+        if restore_dismissed_target(&mut state, &target, &categories, now_ms()) {
+            save_state(&app, &state)?;
+        }
+        let snap = state.snapshot();
+        broadcast_discovery(&app, &snap);
+        Ok(snap)
+    })
+    .await
+    .map_err(|_| "恢复已忽略应用任务中断".to_string())?
 }
 
 // === TESTS ===
@@ -854,8 +978,12 @@ mod tests {
     fn dismiss_and_restore_work_without_retriggering() {
         let mut state = DiscoveryState::default();
         let cats = sample_categories();
-        reconcile_discovery(&mut state, &[], &[], &cats, 1000);
-        let sys = vec![("Cursor".into(), r"shell:AppsFolder\Anysphere.Cursor".into())];
+        let baseline = vec![("Calculator".into(), r"shell:AppsFolder\Microsoft.WindowsCalculator!App".into())];
+        reconcile_discovery(&mut state, &baseline, &[], &cats, 1000);
+        let sys = vec![
+            ("Calculator".into(), r"shell:AppsFolder\Microsoft.WindowsCalculator!App".into()),
+            ("Cursor".into(), r"shell:AppsFolder\Anysphere.Cursor".into()),
+        ];
         reconcile_discovery(&mut state, &sys, &[], &cats, 2000);
         assert_eq!(state.pending.len(), 1);
 
@@ -875,6 +1003,52 @@ mod tests {
     }
 
     #[test]
+    fn empty_system_apps_never_initializes_or_wipes_pending() {
+        let mut state = DiscoveryState::default();
+        let cats = sample_categories();
+        // 首次遇到空列表：禁止置 initialized=true，防止下次把所有预装应用全炸进 pending
+        let first = reconcile_discovery(&mut state, &[], &[], &cats, 1000);
+        assert!(!first.initialized_now);
+        assert!(!state.initialized);
+        assert_eq!(state.last_scan_ms, 0);
+
+        // 正常初始化后新增一个待分类应用
+        let base = vec![("Calculator".into(), r"shell:AppsFolder\Microsoft.WindowsCalculator!App".into())];
+        reconcile_discovery(&mut state, &base, &[], &cats, 2000);
+        let with_new = vec![
+            ("Calculator".into(), r"shell:AppsFolder\Microsoft.WindowsCalculator!App".into()),
+            ("Cursor".into(), r"shell:AppsFolder\Anysphere.Cursor".into()),
+        ];
+        reconcile_discovery(&mut state, &with_new, &[], &cats, 3000);
+        assert_eq!(state.pending.len(), 1);
+
+        // 后续偶发返回空列表：绝不清空既有 pending
+        let empty_next = reconcile_discovery(&mut state, &[], &[], &cats, 4000);
+        assert_eq!(empty_next.pruned_count, 0);
+        assert_eq!(state.pending.len(), 1);
+    }
+
+    #[test]
+    fn normalize_app_name_and_dedup_respect_word_boundaries() {
+        // 词边界过滤噪声词，绝不破坏 WhatsApp / Apple Music 内部子串
+        assert_eq!(normalize_app_name("WhatsApp"), "whatsapp");
+        assert_eq!(normalize_app_name("Apple Music"), "applemusic");
+        assert_eq!(normalize_app_name("Microsoft Store App"), "microsoftstore");
+        assert_eq!(normalize_app_name("Visual Studio Code (64-bit)"), "visualstudiocode");
+
+        // 已有 Code.exe 时绝不通过 ends_with 误杀 Opencode / Xcode / Barcode
+        let existing = vec![
+            sample_hub_app("vscode", "Visual Studio Code", r"C:\Apps\VSCode\Code.exe"),
+        ];
+        assert!(!matches_existing_app(&existing, "Opencode", r"shell:AppsFolder\Opencode.Editor"));
+        assert!(!matches_existing_app(&existing, "Xcode", r"shell:AppsFolder\Apple.Xcode"));
+        assert!(!matches_existing_app(&existing, "Barcode Scanner", r"shell:AppsFolder\Tool.Barcode"));
+        // 同名/同主干仍准确去重
+        assert!(matches_existing_app(&existing, "Visual Studio Code", r"shell:AppsFolder\Microsoft.VisualStudioCode"));
+        assert!(matches_existing_app(&existing, "Code", r"shell:AppsFolder\Custom.Code"));
+    }
+
+    #[test]
     fn reconcile_broken_apps_marks_missing_and_clears_recovered() {
         let mut apps = vec![
             sample_hub_app("ok", "记事本", r"C:\Windows\System32\notepad.exe"),
@@ -889,5 +1063,22 @@ mod tests {
         assert_eq!(apps[0].broken, None);
         assert_eq!(apps[1].broken, Some(true));
         assert_eq!(apps[2].broken, None);
+    }
+
+    #[test]
+    fn reconcile_broken_apps_guarded_skips_changed_target_race() {
+        let mut apps = vec![
+            sample_hub_app("a1", "编辑器", r"C:\NewValid\editor.exe"),
+            sample_hub_app("a2", "已卸载工具", r"C:\OldGone\tool.exe"),
+        ];
+        let mut probed = HashMap::new();
+        // 巡检时 a1 还是旧失效路径，但中途用户已改为 C:\NewValid\editor.exe
+        probed.insert("a1".to_string(), (r"C:\OldGone\editor.exe".to_string(), false));
+        probed.insert("a2".to_string(), (r"C:\OldGone\tool.exe".to_string(), false));
+
+        let changed = reconcile_broken_apps_guarded(&mut apps, &probed);
+        assert_eq!(changed, 1);
+        assert_eq!(apps[0].broken, None, "中途已改路径的应用绝不能被旧探测结果标红");
+        assert_eq!(apps[1].broken, Some(true));
     }
 }

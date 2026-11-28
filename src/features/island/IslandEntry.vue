@@ -31,6 +31,7 @@ import {
 } from './dismissGesture'
 import {
   advanceMotionEnvelope,
+  selectShellTransition,
   shouldBypassShellMotion,
   type MotionEnvelope
 } from './motionEnvelope'
@@ -255,6 +256,8 @@ const tucked = computed(() => suppressed.value && !expanded.value && !urgentFeed
 const expandMs = computed(() => MOTION_TIMINGS[motionMode.value].expandMs)
 const collapseMs = computed(() => MOTION_TIMINGS[motionMode.value].collapseMs)
 const geometryMoving = ref(false)
+/** 标记当前是否正在执行「展开态 → 收起/细线态」过渡，供补间时长与 HRGN 包络共同判定，避免全屏避让或途中 suppressed 斩断收起动画。 */
+const closingFromExpanded = ref(false)
 const systemMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(systemMotion.matches)
 const motionReduced = computed(() => state.ui.islandReducedMotion || reducedMotion.value)
@@ -511,11 +514,18 @@ const keepTaskOpen = computed(() => ocrPanelOpen.value || (!viewingMail.value &&
 const appearance = computed(() => state.ui.islandAppearance)
 const motionMode = computed<MotionMode>(() => normalizeMotionMode(appearance.value.motion))
 const motionPreset = computed(() => getMotionPreset(motionMode.value))
-const shellTransition = computed(() => {
-  if ((isDesktop && tucked.value) || motionReduced.value) return INSTANT_TRANSITION
-  if (pageSwitching.value && expanded.value) return motionPreset.value.shellResize
-  return expanded.value ? motionPreset.value.shellExpand : motionPreset.value.shellCollapse
-})
+const shellTransition = computed(() => selectShellTransition({
+  isDesktop,
+  tucked: tucked.value,
+  reducedMotion: motionReduced.value,
+  expanded: expanded.value,
+  pageSwitching: pageSwitching.value,
+  closingFromExpanded: closingFromExpanded.value,
+  instant: INSTANT_TRANSITION,
+  expand: motionPreset.value.shellExpand,
+  collapse: motionPreset.value.shellCollapse,
+  resize: motionPreset.value.shellResize
+}))
 const pillTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION : motionPreset.value.pill))
 const paneTransition = computed(() => (motionReduced.value ? INSTANT_TRANSITION : motionPreset.value.paneTransition))
 const contentRevealTransition = computed(() => {
@@ -863,8 +873,6 @@ let expandStageFrameA = 0
 let expandStageFrameB = 0
 /** 标记当前几何动画处于收缩方向：桌面定帧窗口下直接复用展开态 HRGN，收缩启动零 Win32 调用。 */
 let geometryShrinking = false
-/** 标记当前是否正在执行「展开态 → 收起/细线态」过渡，避免全屏避让或途中 suppressed 斩断收起动画。 */
-let closingFromExpanded = false
 /** 运动期单调不缩包络：在 geometryMoving 期间只增不减，杜绝矮 HRGN 腰斩尚未收完的展开面板。 */
 let activeMotionEnvelope: MotionEnvelope | null = null
 /** 收缩期间推迟到 settleGeometry 再执行的收尾清理标记。 */
@@ -1272,7 +1280,7 @@ function settleGeometry(): void {
   const wasStaging = expandStaging
   cancelExpandStaging()
   geometryShrinking = false
-  closingFromExpanded = false
+  closingFromExpanded.value = false
   activeMotionEnvelope = null
   // 若两阶段扩容被打断或定时器兜底触发，确保外壳尺寸与最新目标严丝合缝后再测量 HRGN。
   if ((wasStaging || (!shellTween && !splitCardTween)) && panel.value) {
@@ -1282,13 +1290,16 @@ function settleGeometry(): void {
     splitCardTween = null
     applyShellImmediate()
   }
-  if (pendingDismissReset && !dismissSession) {
+  const hasStaleDismissOffset = Math.abs(dismissProxy.y) > 0.05 || Math.abs(dismissProxy.scaleY - 1) > 0.001
+  if ((pendingDismissReset || (expanded.value && hasStaleDismissOffset)) && !dismissSession) {
     pendingDismissReset = false
     resetDismissStateAfterMotion()
   }
-  if (pendingMailClose && !expanded.value) {
+  if (pendingMailClose) {
     pendingMailClose = false
-    mailSelected.value = false
+    if (!expanded.value) {
+      mailSelected.value = false
+    }
   }
   viewportSize.value = isDesktop
     ? computeDesktopStageSize(bounds.value, viewportSize.value.height, viewportSize.value.width)
@@ -1303,9 +1314,14 @@ function reserveGeometry(prevWidth?: number, prevHeight?: number, prevExpanded?:
   const target = bounds.value
   const wasExpanded = prevExpanded === true
   if (expanded.value) {
-    closingFromExpanded = false
+    closingFromExpanded.value = false
+    pendingMailClose = false
+    if (!dismissSession && (pendingDismissReset || Math.abs(dismissProxy.y) > 0.05 || Math.abs(dismissProxy.scaleY - 1) > 0.001)) {
+      pendingDismissReset = false
+      resetDismissStateAfterMotion()
+    }
   } else if (wasExpanded) {
-    closingFromExpanded = true
+    closingFromExpanded.value = true
   }
   const bypass = shouldBypassShellMotion({
     isDesktop,
@@ -1313,12 +1329,12 @@ function reserveGeometry(prevWidth?: number, prevHeight?: number, prevExpanded?:
     reducedMotion: state.ui.islandReducedMotion || reducedMotion.value,
     wasExpanded,
     expanded: expanded.value,
-    closingFromExpanded
+    closingFromExpanded: closingFromExpanded.value
   })
   if (bypass) {
     geometryMoving.value = false
     geometryShrinking = false
-    closingFromExpanded = false
+    closingFromExpanded.value = false
     activeMotionEnvelope = null
     viewportSize.value = isDesktop
       ? computeDesktopStageSize(target, viewportSize.value.height, viewportSize.value.width)
@@ -1412,7 +1428,7 @@ watch(islandShape, () => {
   capsuleTween?.kill()
   geometryMoving.value = false
   geometryShrinking = false
-  closingFromExpanded = false
+  closingFromExpanded.value = false
   activeMotionEnvelope = null
   pendingDismissReset = false
   pendingMailClose = false
@@ -1893,7 +1909,7 @@ watch(hostExpanded, value => {
   hoverExpanding = false
   leftAfterExpand = false
   closeAnyOpenThemedSelect(element.value)
-  if (geometryMoving.value || closingFromExpanded) {
+  if (geometryMoving.value || closingFromExpanded.value) {
     // 收缩补间进行中禁止用 clearDismissVisual() 覆写 transform，避免砸断 split 卡片退场；
     // 同样推迟卸载邮件页直到收起完成，杜绝首帧白屏抽空。
     pendingDismissReset = true
@@ -1965,7 +1981,7 @@ watch(() => state.ui.islandAnchor, () => {
   splitCardTween = null
   geometryMoving.value = false
   geometryShrinking = false
-  closingFromExpanded = false
+  closingFromExpanded.value = false
   activeMotionEnvelope = null
   pendingDismissReset = false
   pendingMailClose = false
@@ -1986,7 +2002,7 @@ watch(() => shelf.busy, busy => {
 })
 
 watch(suppressed, () => {
-  const closingInProgress = closingFromExpanded || (geometryMoving.value && !expanded.value)
+  const closingInProgress = closingFromExpanded.value || (geometryMoving.value && !expanded.value)
   if (closingInProgress) {
     // 收起动画途中收到后台全屏/最大化监测广播：不打断正在播放的补间，仅延后收尾复位。
     pendingDismissReset = true
@@ -2444,7 +2460,7 @@ function runShellResize(): void {
     reducedMotion: motionReduced.value,
     wasExpanded: false,
     expanded: expanded.value,
-    closingFromExpanded
+    closingFromExpanded: closingFromExpanded.value
   })
 
   if (isSplit.value) {
@@ -3425,7 +3441,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         </div>
-        <InlineToastBar v-if="expanded && !state.ui.settingsOpen && state.toasts.length" compact :items="state.toasts" />
+        <InlineToastBar v-if="expanded && !state.ui.settingsOpen" compact :items="state.toasts" />
         <button
           v-if="expanded && !approval"
           ref="dismissHandle"
@@ -4110,8 +4126,8 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .attention-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 12px; border-radius: 12px; background: var(--surface-2); font-size: 12px; }
 .attention-strip > span { flex: 1; }
 .attention-strip button { padding: 5px 8px; border-radius: 8px; background: var(--hover); }
-/* 采用对称安全出血带保护全部功能页的按钮发光、状态蓝点光晕、聚焦环与像素 3D 硬阴影，并移除短页不对称右侧空缝。 */
-.feature-pane { max-height: 430px; padding: 4px 6px 6px; margin: -4px -6px -6px; overflow-y: auto; overflow-x: hidden; }
+/* 采用对称安全出血带保护全部功能页的按钮发光、状态蓝点光晕、聚焦环与像素 3D 硬阴影，底部预留空间避免分页条与底部拉条热区重叠。 */
+.feature-pane { max-height: 430px; padding: 4px 6px 14px; margin: -4px -6px -2px; overflow-y: auto; overflow-x: hidden; }
 .feature-pane :deep(.pop), .feature-pane :deep(.panel) { width: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; background: transparent; overflow: visible; }
 .feature-pane :deep(.panel > .head) { display: none; }
 .feature-pane :deep(button:disabled) { cursor: not-allowed; }

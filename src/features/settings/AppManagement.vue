@@ -47,6 +47,8 @@ const filters = computed(() => [
   ...(brokenApps.value.length ? [{ id: '__broken__', name: '失效应用', count: brokenApps.value.length }] : [])
 ])
 const filterName = computed(() => filter.value === null ? '全部应用' : categoryName(filter.value))
+// 有效归属分类 ID：当处于「全部」或「失效应用」哨兵视图时统一回落到 'all'（未分类），绝不把 '__broken__' 传给后端或 Picker。
+const activeCategoryId = computed(() => (filter.value === null || filter.value === '__broken__' ? 'all' : filter.value))
 const categorySelectOptions = computed(() => [
   { value: 'all', label: '未分类' },
   ...categories.value.map(cat => ({ value: cat.id, label: cat.name }))
@@ -179,7 +181,7 @@ const draftPending = computed(() => busy.value || editId.value !== null || Boole
 watch(draftPending, value => emit('dirty-change', value), { immediate: true })
 
 watch(categories, (value, previous) => {
-  if (filter.value && filter.value !== 'all' && !value.some(cat => cat.id === filter.value)) filter.value = null
+  if (filter.value && filter.value !== 'all' && filter.value !== '__broken__' && !value.some(cat => cat.id === filter.value)) filter.value = null
   for (const cat of value) if (!(cat.id in categoryDrafts.value) || categoryDrafts.value[cat.id] === previous?.find(old => old.id === cat.id)?.name) categoryDrafts.value[cat.id] = cat.name
 }, { immediate: true })
 watch(visible, apps => {
@@ -239,12 +241,12 @@ function dropOnApp(app: HubApp): void {
   endDrag()
 }
 function dropOnCategory(id: string | null): void {
-  if (id !== null && dragged.value) void changeCategory(dragged.value, id)
+  if (id !== null && id !== '__broken__' && dragged.value) void changeCategory(dragged.value, id)
   endDrag()
 }
 async function pickApp(kind: 'file' | 'folder'): Promise<void> {
   if (busy.value) return
-  const destination = filter.value ?? 'all'
+  const destination = activeCategoryId.value
   busy.value = true
   try { const result = await addAppFromPicker(destination, kind); if (result.ok) { adding.value = false; notify(true, '应用已添加') } }
   finally { busy.value = false }
@@ -252,11 +254,11 @@ async function pickApp(kind: 'file' | 'folder'): Promise<void> {
 async function importApps(): Promise<void> {
   if (busy.value) return
   busy.value = true
-  try { await importShortcuts(filter.value ?? 'all') } finally { busy.value = false }
+  try { await importShortcuts(activeCategoryId.value) } finally { busy.value = false }
 }
 async function addLink(): Promise<void> {
   if (!/^https?:\/\//i.test(linkTarget.value.trim())) { failed.value = true; feedback.value = '网址需以 https:// 或 http:// 开头。'; return }
-  if (await action(async () => (await addAppByTarget(linkTarget.value, filter.value ?? 'all', linkName.value || undefined)).ok, '网址已添加')) {
+  if (await action(async () => (await addAppByTarget(linkTarget.value, activeCategoryId.value, linkName.value || undefined)).ok, '网址已添加')) {
     linkName.value = ''; linkTarget.value = ''; adding.value = false
   }
 }
@@ -403,7 +405,7 @@ async function removeApp(id: string): Promise<void> {
         class="disclosure-body"
         aria-label="添加应用"
       >
-        <p class="hint">添加到「{{ categoryName(filter ?? 'all') }}」<span v-if="!isDesktop"> · 文件选择与桌面导入在桌面版可用</span></p>
+        <p class="hint">添加到「{{ categoryName(activeCategoryId) }}」<span v-if="!isDesktop"> · 文件选择与桌面导入在桌面版可用</span></p>
         <div class="actions"><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('file')">选择文件</button><button class="btn" :disabled="busy || !isDesktop" @click="pickApp('folder')">选择文件夹</button><button class="btn" :disabled="busy || !isDesktop" @click="importApps">导入桌面快捷方式</button>
           <button ref="systemAppsTrigger" class="btn" :aria-expanded="showSystemApps" :aria-controls="showSystemApps ? 'system-app-picker' : undefined" :disabled="busy || !isDesktop" @click="showSystemApps = !showSystemApps">导入系统应用</button>
         </div>
@@ -417,7 +419,7 @@ async function removeApp(id: string): Promise<void> {
             v-if="showSystemApps"
             key="system-apps"
           >
-            <SystemAppPicker :category-id="filter ?? 'all'" @saving="busy = $event" @saved="systemAppsSaved" @close="closeSystemApps" />
+            <SystemAppPicker :category-id="activeCategoryId" @saving="busy = $event" @saved="systemAppsSaved" @close="closeSystemApps" />
           </div>
         </GsapPresence>
         <form class="link-form" @submit.prevent="addLink">
@@ -451,9 +453,9 @@ async function removeApp(id: string): Promise<void> {
       </section>
     </GsapPresence>
     <div class="category-filters" role="group" aria-label="应用分类筛选">
-      <button v-for="cat in filters" :key="cat.id ?? '__everything'" class="category-filter" :class="{ selected: filter === cat.id, 'drop-target': cat.id !== null && dropTarget === `category:${cat.id}` }"
+      <button v-for="cat in filters" :key="cat.id ?? '__everything'" class="category-filter" :class="{ selected: filter === cat.id, 'drop-target': cat.id !== null && cat.id !== '__broken__' && dropTarget === `category:${cat.id}` }"
         :aria-pressed="filter === cat.id" :title="cat.name" @click="selectFilter(cat.id)"
-        @dragover.prevent="cat.id !== null && dragged && (dropTarget = `category:${cat.id}`)" @dragleave="dropTarget = null" @drop.prevent="dropOnCategory(cat.id)">
+        @dragover.prevent="cat.id !== null && cat.id !== '__broken__' && dragged && (dropTarget = `category:${cat.id}`)" @dragleave="dropTarget = null" @drop.prevent="dropOnCategory(cat.id)">
         <span>{{ cat.name }}</span><span class="count">{{ cat.count }}</span>
       </button>
     </div>

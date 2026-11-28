@@ -23,22 +23,41 @@
   cursor: not-allowed;
 }
 
-:root[data-theme='midnight'] .audio-mixer .sound-profiles button {
-  border-radius: 5px;
+:root[data-theme='midnight'] .audio-mixer .sound-profiles .profile-apply {
+  border-radius: 5px 0 0 5px;
   border-color: rgba(109, 182, 255, 0.24);
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-:root[data-theme='midnight'] .audio-mixer .sound-profiles button:hover {
+:root[data-theme='midnight'] .audio-mixer .sound-profiles .profile-apply:hover:not([aria-pressed='true']):not(:disabled) {
   background: var(--hover);
   border-color: rgba(109, 182, 255, 0.5);
 }
 
-:root[data-theme='midnight'] .audio-mixer .sound-profiles button[aria-pressed='true'] {
+:root[data-theme='midnight'] .audio-mixer .sound-profiles .profile-apply[aria-pressed='true'] {
   background: var(--accent-weak);
   color: var(--accent);
   border-color: var(--accent);
   box-shadow: 0 0 8px rgba(109, 182, 255, 0.22);
+}
+
+:root[data-theme='midnight'] .audio-mixer .sound-profiles .profile-del {
+  border-radius: 0 5px 5px 0;
+  border-color: rgba(109, 182, 255, 0.24);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+:root[data-theme='midnight'] .audio-mixer .sound-profiles .profile-del:hover:not(:disabled) {
+  background: var(--danger-weak);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+:root[data-theme='midnight'] .audio-mixer .sound-profiles .profile-del.is-confirm {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--danger-text);
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.34);
 }
 
 :root[data-theme='midnight'] .audio-mixer .sound-icon {
@@ -351,7 +370,11 @@
 :root[data-theme='midnight'] .settings-ui .features .size-slider::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 2px;
-  background: rgba(109, 182, 255, 0.16);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--volume-progress, 0%),
+    rgba(109, 182, 255, 0.16) var(--volume-progress, 0%) 100%
+  );
   border: 1px solid rgba(109, 182, 255, 0.28);
 }
 
@@ -370,7 +393,11 @@
 :root[data-theme='midnight'] .settings-ui .features .size-slider::-moz-range-track {
   height: 6px;
   border-radius: 2px;
-  background: rgba(109, 182, 255, 0.16);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 var(--volume-progress, 0%),
+    rgba(109, 182, 255, 0.16) var(--volume-progress, 0%) 100%
+  );
   border: 1px solid rgba(109, 182, 255, 0.28);
 }
 

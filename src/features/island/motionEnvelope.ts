@@ -83,3 +83,35 @@ export function shouldBypassShellMotion(input: ShellMotionBypassInput): boolean 
   if (input.closingFromExpanded && !input.expanded) return false
   return true
 }
+
+export interface ShellTransitionSelectInput<T> {
+  isDesktop: boolean
+  tucked: boolean
+  reducedMotion: boolean
+  expanded: boolean
+  pageSwitching: boolean
+  closingFromExpanded: boolean
+  instant: T
+  expand: T
+  collapse: T
+  resize: T
+}
+
+/**
+ * 与 `shouldBypassShellMotion` 保持完全一致的外壳补间时长选择：
+ * 从展开态收起至细线态（或收起途中进入 tucked）时必须放行 `collapse` 补间，
+ * 绝不返回 `instant`（0ms）导致 floating 形态 1ms 瞬缩。
+ */
+export function selectShellTransition<T>(input: ShellTransitionSelectInput<T>): T {
+  const bypass = shouldBypassShellMotion({
+    isDesktop: input.isDesktop,
+    tucked: input.tucked,
+    reducedMotion: input.reducedMotion,
+    wasExpanded: false,
+    expanded: input.expanded,
+    closingFromExpanded: input.closingFromExpanded
+  })
+  if (bypass) return input.instant
+  if (input.pageSwitching && input.expanded) return input.resize
+  return input.expanded ? input.expand : input.collapse
+}

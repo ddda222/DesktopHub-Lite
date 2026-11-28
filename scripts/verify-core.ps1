@@ -30,7 +30,10 @@ if (Test-Path (Join-Path $project 'src-tauri\src\config_format.rs')) {
     $discovery = Get-Content (Join-Path $project 'src-tauri\src\app_discovery.rs') -Raw
     $discoveryCore = (Section $discovery '//! 新安装应用增量发现' '// === TAURI_COMMANDS ===') + "`n" + (Section $discovery '// === TESTS ===' '')
     $discoveryCore | Set-Content (Join-Path $target 'src\app_discovery.rs') -Encoding utf8
-    $source += "mod state; mod config_format; mod telemetry; mod data_location; mod ocr; mod app_discovery;`n"
+    $launcher = Get-Content (Join-Path $project 'src-tauri\src\launcher.rs') -Raw
+    $launcherCore = (Section $launcher '// === EXISTS_CORE_START ===' '// === EXISTS_CORE_END ===') + "`n" + (Section $launcher '// === TESTS ===' '')
+    $launcherCore | Set-Content (Join-Path $target 'src\launcher.rs') -Encoding utf8
+    $source += "mod state; mod config_format; mod telemetry; mod data_location; mod ocr; mod app_discovery; mod launcher;`n"
 }
 $source | Set-Content (Join-Path $target 'src\lib.rs') -Encoding utf8
 @'

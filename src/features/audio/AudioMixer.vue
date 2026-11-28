@@ -47,6 +47,7 @@ let writingSession = false
 let disposed = false, sequence = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
+let confirmDeleteTimer: ReturnType<typeof setTimeout> | undefined
 let stopAudioWatch: (() => void) | undefined
 function setNotice(text: string): void {
   notice.value = text
@@ -54,6 +55,19 @@ function setNotice(text: string): void {
   if (text) {
     noticeTimer = setTimeout(() => { notice.value = '' }, 4200)
   }
+}
+function clearConfirmDelete(): void {
+  clearTimeout(confirmDeleteTimer)
+  confirmDeleteTimer = undefined
+  confirmDeleteProfile.value = ''
+}
+function armConfirmDelete(name: string): void {
+  clearTimeout(confirmDeleteTimer)
+  confirmDeleteProfile.value = name
+  confirmDeleteTimer = setTimeout(() => {
+    if (confirmDeleteProfile.value === name) confirmDeleteProfile.value = ''
+    confirmDeleteTimer = undefined
+  }, 3000)
 }
 watch(visibleSessions, rows => {
   // 在另一个窗口隐藏正拖动的行时，滑块可能收不到 change，释放草稿以继续轮询。
@@ -129,7 +143,7 @@ async function update(session: Session, volume?: number, muted?: boolean): Promi
           if (change.volume !== undefined) row.volume = change.volume
           if (change.muted !== undefined) row.muted = change.muted
         }
-        if (!disposed) notice.value = isDesktop ? `${row?.name ?? '应用'}：已读取系统实际状态` : '已更新网页模拟，不改变系统音量。'
+        if (!disposed) setNotice(isDesktop ? `${row?.name ?? '应用'}：已读取系统实际状态` : '已更新网页模拟，不改变系统音量。')
       } catch (e) {
         if (!disposed) {
           error.value = String(e)
@@ -163,10 +177,10 @@ async function apply(index: number): Promise<void> {
 async function deleteProfile(name: string): Promise<void> {
   if (busy.value) return
   if (confirmDeleteProfile.value !== name) {
-    confirmDeleteProfile.value = name
+    armConfirmDelete(name)
     return
   }
-  confirmDeleteProfile.value = ''
+  clearConfirmDelete()
   busy.value = true; exclusive.value = true; error.value = ''
   try {
     if (isDesktop) {
@@ -210,7 +224,7 @@ onMounted(async () => {
   }
   if (!disposed) poll()
 })
-onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clearTimeout(timer); clearTimeout(noticeTimer); stopAudioWatch?.() })
+onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clearTimeout(timer); clearTimeout(noticeTimer); clearTimeout(confirmDeleteTimer); stopAudioWatch?.() })
 </script>
 
 <template>
@@ -247,7 +261,7 @@ onBeforeUnmount(() => { disposed = true; sequence++; queuedUpdates.clear(); clea
           class="profile-apply"
           :disabled="busy"
           :aria-pressed="activeProfile === profile.name"
-          @click="confirmDeleteProfile = ''; apply(i)"
+          @click="clearConfirmDelete(); apply(i)"
         >{{ profile.name }}</button>
         <button
           type="button"

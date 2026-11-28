@@ -40,7 +40,7 @@ await test('旧入口排序在保存成功前不修改当前列表',async()=> {
 await test('声音写入期间合并后续音量并最终写入最后值',async()=> {
   const text=fs.readFileSync(new URL('../src/features/audio/AudioMixer.vue',import.meta.url),'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
   const jobs=[deferred(),deferred()],calls=[],row={id:'a',name:'示例',volume:10};const refs={sessions:{value:[row]},busy:{value:false},exclusive:{value:false},drafts:{value:{a:80}},error:{value:''},notice:{value:''},warnings:{value:[]}}
-  const api=subject(['update'],{...refs,invokeHost:(_command,args)=>{calls.push(args);return jobs[calls.length-1].promise}},'let sequence=0, disposed=false, writingSession=false; const queuedUpdates=new Map(); const draftVersions={};',text)
+  const api=subject(['update'],{...refs,setNotice:text=>{refs.notice.value=text},invokeHost:(_command,args)=>{calls.push(args);return jobs[calls.length-1].promise}},'let sequence=0, disposed=false, writingSession=false; const queuedUpdates=new Map(); const draftVersions={};',text)
   const first=api.update(row,20);api.update(row,50);api.update(row,80);jobs[0].resolve({...row,volume:20});for(let n=0;n<5;n++)await Promise.resolve();assert.equal(calls.length,2);assert.equal(calls[1].volume,80);jobs[1].resolve({...row,volume:80});await first;assert.equal(row.volume,80);assert.equal(refs.busy.value,false)
 })
 const configurationSource=fs.readFileSync(new URL('../src/features/settings/ConfigBackup.vue',import.meta.url),'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
@@ -736,6 +736,59 @@ await test('展开→全屏细线态收起及途中 suppressed=true 不跳过动
       closingFromExpanded: true
     }),
     true
+  )
+
+  // P0-2：shellTransition 必须与 shouldBypassShellMotion 完全对齐，展开→细线态收起绝不返回 0ms INSTANT
+  const specs = { instant: { duration: 0 }, expand: { duration: 0.32 }, collapse: { duration: 0.24 }, resize: { duration: 0.2 } }
+  assert.equal(
+    envelopeApi.selectShellTransition({
+      isDesktop: true,
+      tucked: true,
+      reducedMotion: false,
+      expanded: false,
+      pageSwitching: false,
+      closingFromExpanded: true,
+      ...specs
+    }),
+    specs.collapse,
+    '从展开态收起到细线态时必须放行 collapse 补间，不得返回 0ms instant 瞬缩'
+  )
+  assert.equal(
+    envelopeApi.selectShellTransition({
+      isDesktop: true,
+      tucked: true,
+      reducedMotion: false,
+      expanded: false,
+      pageSwitching: false,
+      closingFromExpanded: false,
+      ...specs
+    }),
+    specs.instant,
+    '已收起态胶囊切细线态保持立即避让'
+  )
+  assert.equal(
+    envelopeApi.selectShellTransition({
+      isDesktop: true,
+      tucked: false,
+      reducedMotion: false,
+      expanded: true,
+      pageSwitching: true,
+      closingFromExpanded: false,
+      ...specs
+    }),
+    specs.resize
+  )
+  assert.equal(
+    envelopeApi.selectShellTransition({
+      isDesktop: true,
+      tucked: false,
+      reducedMotion: true,
+      expanded: false,
+      pageSwitching: false,
+      closingFromExpanded: true,
+      ...specs
+    }),
+    specs.instant
   )
 })
 

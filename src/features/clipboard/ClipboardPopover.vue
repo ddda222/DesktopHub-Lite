@@ -319,6 +319,15 @@ async function saveNote(clip: ClipItem, favorite = clip.favorite ?? false, quiet
   }
 }
 
+function handleNoteKeydown(event: KeyboardEvent, clip: ClipItem): void {
+  // 中文等输入法组字期间按回车仅确认候选词，绝不提前提交残缺备注。
+  if (event.isComposing || event.keyCode === 229) return
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    void saveNote(clip)
+  }
+}
+
 async function autoSaveNoteIfDirty(clip: ClipItem | null): Promise<void> {
   if (!clip || savingNote.value) return
   if (noteDraft.value.trim() === (clip.note ?? '').trim()) return
@@ -1299,7 +1308,7 @@ function openDetectedUrl(url: string): void {
             maxlength="200"
             aria-label="剪贴板备注"
             placeholder="添加备注，回车或返回自动保存（最多 200 字）"
-            @keydown.enter.prevent="saveNote(detailClip)"
+            @keydown="handleNoteKeydown($event, detailClip)"
             @blur="autoSaveNoteIfDirty(detailClip)"
           />
           <button

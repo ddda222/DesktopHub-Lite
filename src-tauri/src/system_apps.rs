@@ -42,6 +42,37 @@ pub(crate) fn is_target(target: &str) -> bool {
     target.get(..PREFIX.len()).is_some_and(|p| p.eq_ignore_ascii_case(PREFIX)) && target.len() > PREFIX.len()
 }
 
+/// 探测 `shell:AppsFolder\` 目标是否存在：仅在系统明确返回对象/路径不存在错误时判为 false，
+/// COM 初始化或其它瞬态异常一律保守返回 true，杜绝误标失效导致误删正常应用。
+pub(crate) fn probe_exists(target: &str) -> bool {
+    let Ok(_com) = crate::icons::ComGuard::new() else {
+        return true;
+    };
+    let mut pidl = std::ptr::null_mut();
+    match unsafe { SHParseDisplayName(&HSTRING::from(target), None, &mut pidl, 0, None) } {
+        Ok(()) => {
+            if !pidl.is_null() {
+                unsafe { CoTaskMemFree(Some(pidl.cast())) };
+            }
+            true
+        }
+        Err(error) => {
+            const HRESULT_FILE_NOT_FOUND: u32 = 0x8007_0002;
+            const HRESULT_PATH_NOT_FOUND: u32 = 0x8007_0003;
+            const HRESULT_INVALID_ARG: u32 = 0x8007_0057;
+            const HRESULT_NOT_FOUND: u32 = 0x8007_0490;
+            let code = error.code().0 as u32;
+            !matches!(
+                code,
+                HRESULT_FILE_NOT_FOUND
+                    | HRESULT_PATH_NOT_FOUND
+                    | HRESULT_INVALID_ARG
+                    | HRESULT_NOT_FOUND
+            )
+        }
+    }
+}
+
 // AppsFolder 既包含传统桌面程序也包含商店应用，使用 Shell 项保留系统登记的启动方式。
 pub(crate) struct Item {
     pidl: *mut ITEMIDLIST,

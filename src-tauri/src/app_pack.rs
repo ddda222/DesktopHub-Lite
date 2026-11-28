@@ -329,6 +329,19 @@ pub fn save_pack_settings(app: AppHandle, settings: PackConfig) -> Result<PackCo
     Ok(next)
 }
 
+/// 轻量持久化 ADB 反向转发端口：仅校验端口区间，不因尚未配置项目/HBuilderX 路径而阻断合法端口保存。
+#[tauri::command]
+pub fn save_pack_reverse_port(app: AppHandle, port: u16) -> Result<PackConfig, String> {
+    if port == 0 {
+        return Err("ADB 转发端口需在 1～65535 之间".into());
+    }
+    let mut config = load_config(&app);
+    config.reverse_port = port;
+    save_config(&app, &config)?;
+    emit_settings(&app, &config);
+    Ok(config)
+}
+
 /// 打开 APK 目录：优先定位到具体文件，没有文件就打开目录本身。
 #[tauri::command]
 pub fn open_pack_dir(app: AppHandle, apk_path: Option<String>) -> Result<(), String> {

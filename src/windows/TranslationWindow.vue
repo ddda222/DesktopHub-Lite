@@ -23,7 +23,7 @@ onBeforeUnmount(() => { disposed = true; listeners.forEach(stop => stop()) })
   <HubMotionConfig>
     <main class="translation-window scroll-y">
       <TranslationPanel standalone />
-      <InlineToastBar v-if="state.toasts.length" :items="state.toasts" />
+      <InlineToastBar fixed :items="state.toasts" />
     </main>
   </HubMotionConfig>
 </template>

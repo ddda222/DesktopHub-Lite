@@ -782,7 +782,7 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </div>
-      <InlineToastBar v-if="(props.standalone || isDesktop) && state.toasts.length" :items="state.toasts" />
+      <InlineToastBar v-if="props.standalone || isDesktop" :items="state.toasts" />
     </div>
   </div>
 </template>

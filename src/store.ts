@@ -1130,6 +1130,10 @@ export async function copyTranslation(): Promise<void> {
   }
   try {
     await invokeHost('copy_translation_result', { text: result.text })
+    // 独立翻译窗由自身底部轻提示条即时反馈，不依赖灵动岛跨窗广播。
+    if (windowLabel === 'translation') {
+      pushToast('译文已复制', 'success')
+    }
   } catch (error) {
     pushToast(error instanceof Error ? error.message : '复制失败', 'error')
   }

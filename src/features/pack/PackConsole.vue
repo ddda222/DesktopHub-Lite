@@ -241,11 +241,12 @@ onBeforeUnmount(() => {
 /* ---------- ADB ---------- */
 
 async function persistReversePort(port: number): Promise<void> {
-  if (!isDesktop || !settings.value || settings.value.reversePort === port) return
+  if (!isDesktop) return
+  if (settings.value?.reversePort === port) return
   if (!Number.isInteger(port) || port < 1 || port > 65535) return
   try {
-    const next: PackSettings = { ...settings.value, reversePort: port }
-    const saved = await invokeHost<PackSettings>('save_pack_settings', { settings: next })
+    // 走轻量端口持久化命令，避免因项目/HBuilderX 等其它路径尚未配置导致合法端口保存失败。
+    const saved = await invokeHost<PackSettings>('save_pack_reverse_port', { port })
     applyPackSettings(saved)
   } catch {
     // 端口持久化失败不阻断本次转发流程
@@ -254,7 +255,15 @@ async function persistReversePort(port: number): Promise<void> {
 
 async function onPortCommit(): Promise<void> {
   const port = Math.trunc(Number(reversePort.value))
-  if (!Number.isInteger(port) || port < 1 || port > 65535) return
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    const fallback = settings.value?.reversePort && settings.value.reversePort > 0
+      ? settings.value.reversePort
+      : DEFAULT_REVERSE_PORT
+    reversePort.value = fallback
+    pushToast('转发端口需在 1～65535 之间，已恢复原值', 'error')
+    return
+  }
+  reversePort.value = port
   await persistReversePort(port)
 }
 

@@ -16,15 +16,17 @@ import type { Toast } from '@/lib/desktop/types'
 withDefaults(defineProps<{
   items: readonly Toast[]
   compact?: boolean
+  fixed?: boolean
 }>(), {
-  compact: false
+  compact: false,
+  fixed: false
 })
 </script>
 
 <template>
   <div
     class="inline-toast-stack"
-    :class="{ 'is-compact': compact }"
+    :class="{ 'is-compact': compact, 'is-fixed': fixed }"
     role="status"
     aria-live="polite"
   >
@@ -70,6 +72,11 @@ withDefaults(defineProps<{
   align-items: center;
   gap: 6px;
   max-width: 100%;
+}
+
+.inline-toast-stack.is-fixed {
+  position: fixed;
+  bottom: 16px;
 }
 
 .inline-toast-stack.is-compact {
